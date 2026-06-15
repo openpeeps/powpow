@@ -335,17 +335,22 @@ proc acceptClients(server: TcpServer) =
   while true:
     var clientAddr: Sockaddr_storage
     var addrLen: SockLen = sizeof(clientAddr).SockLen
-    when defined(linux):
-      const SockFlags = O_NONBLOCK or O_CLOEXEC
-      let clientFd = posix.accept4(server.fd,
-                                   cast[ptr Sockaddr](addr clientAddr),
-                                   addr addrLen, SockFlags)
-    else:
-      let clientFd = posix.accept(server.fd,
-                                   cast[ptr Sockaddr](addr clientAddr),
-                                   addr addrLen)
-      if clientFd.int >= 0:
-        setNonBlocking(clientFd)
+    # when defined(linux):
+    #   const SockFlags = O_NONBLOCK or O_CLOEXEC
+    #   let clientFd = posix.accept4(server.fd,
+    #                                cast[ptr Sockaddr](addr clientAddr),
+    #                                addr addrLen, SockFlags)
+    # else:
+    #   let clientFd = posix.accept(server.fd,
+    #                                cast[ptr Sockaddr](addr clientAddr),
+    #                                addr addrLen)
+    #   if clientFd.int >= 0:
+    #     setNonBlocking(clientFd)
+    let clientFd = posix.accept(server.fd,
+                                 cast[ptr Sockaddr](addr clientAddr),
+                                 addr addrLen)
+    if clientFd.int >= 0:
+      setNonBlocking(SocketHandle(clientFd))
     if clientFd.int < 0:
       if errno == EAGAIN or errno == EWOULDBLOCK:
         return  # No more pending connections
@@ -392,6 +397,13 @@ proc acceptClients(server: TcpServer) =
         if conn.state == Closed:
           server.releaseConnection(conn)
     )
+    # Immediately check for data that may have arrived before the
+    # edge-triggered EPOLL_CTL_ADD — on some kernels, that data is
+    # never reported as an event.
+    conn.handleClientRead(server.onData, server.onClose)
+    if conn.state == Closed:
+      server.releaseConnection(conn)
+      continue
 
 proc listen*(server: TcpServer, address: string, port: int) =
   ## Bind and start listening for connections.
