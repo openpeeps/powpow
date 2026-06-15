@@ -1,3 +1,9 @@
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
 ## powpow/platform.nim — Compile-time platform backend selector.
 ##
 ## Automatically selects the best I/O multiplexing backend for the host OS:
@@ -8,7 +14,10 @@
 import ./types
 export types
 
-when defined(linux):
+when defined(windows):
+  import platform/iocp
+  export iocp
+elif defined(linux):
   import platform/epoll
   export epoll
 elif defined(macosx) or defined(bsd):

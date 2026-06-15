@@ -1,4 +1,10 @@
-## powpow/proto/http.nim — High-performance HTTP/1.1 request parser.
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
+## High-performance HTTP/1.1 request parser.
 ##
 ## Design goals:
 ##   - Incremental: feed bytes as they arrive from the socket

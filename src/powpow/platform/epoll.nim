@@ -1,7 +1,13 @@
-## powpow/platform/epoll.nim — epoll backend for Linux.
-##
-## Uses Nim's std/epoll for high-performance I/O event multiplexing
-## with support for edge-triggered mode.
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
+## This module implements the `Platform` interface using Linux's `epoll` API.
+## It provides efficient I/O event notification for file descriptors, supporting
+## both level-triggered and edge-triggered modes. The `Platform` type manages an epoll instance and
+## pre-allocated event buffers for high performance.
 
 import ../types
 import std/[epoll, posix]

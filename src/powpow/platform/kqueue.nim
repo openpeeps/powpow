@@ -1,3 +1,9 @@
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
 ## powpow/platform/kqueue.nim — kqueue backend for macOS / BSD.
 ##
 ## Uses Nim's std/kqueue for high-performance I/O event multiplexing.

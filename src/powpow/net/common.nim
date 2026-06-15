@@ -1,16 +1,159 @@
-## powpow/net/common.nim — Shared networking helpers.
-##
-## Non-blocking socket setup, address resolution, and shared types.
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
 
-import std/posix
-export posix
+## Common networking utilities for powpow. This module provides platform-agnostic
+## socket types, error handling, and helper functions for setting socket options
+## and resolving addresses. It abstracts away differences between Windows and POSIX
+## APIs, allowing powpow to use a consistent interface for network operations across platforms.
 
-# ── Signal safety ────────────────────────────────────────────────────────────
-# Ignore SIGPIPE globally — prevents CPU spin when send() hits a closed socket.
-# On macOS MSG_NOSIGNAL doesn't exist; on Linux it's a safety net.
+when defined(windows):
+  # ── Winsock2 imports ──────────────────────────────────────────────────────────
+  type
+    cint* = int32
+    SocketHandle* = cint
+    SockLen* = cint
+
+  proc socket*(af, typ, protocol: cint): SocketHandle {.
+    importc: "socket", stdcall, dynlib: "ws2_32.dll".}
+  proc bindSocket*(s: SocketHandle, name: pointer, namelen: SockLen): cint {.
+    importc: "bind", stdcall, dynlib: "ws2_32.dll".}
+  proc listen*(s: SocketHandle, backlog: cint): cint {.
+    importc: "listen", stdcall, dynlib: "ws2_32.dll".}
+  proc accept*(s: SocketHandle, addrP: pointer, addrlen: ptr SockLen): SocketHandle {.
+    importc: "accept", stdcall, dynlib: "ws2_32.dll".}
+  proc connect*(s: SocketHandle, name: pointer, namelen: SockLen): cint {.
+    importc: "connect", stdcall, dynlib: "ws2_32.dll".}
+  proc send*(s: SocketHandle, buf: pointer, len: cint, flags: cint): cint {.
+    importc: "send", stdcall, dynlib: "ws2_32.dll".}
+  proc recv*(s: SocketHandle, buf: pointer, len: cint, flags: cint): cint {.
+    importc: "recv", stdcall, dynlib: "ws2_32.dll".}
+  proc closesocket*(s: SocketHandle): cint {.
+    importc: "closesocket", stdcall, dynlib: "ws2_32.dll".}
+  proc shutdown*(s: SocketHandle, how: cint): cint {.
+    importc: "shutdown", stdcall, dynlib: "ws2_32.dll".}
+  proc setsockopt*(s: SocketHandle, level, optname: cint,
+                   optval: pointer, optlen: SockLen): cint {.
+    importc: "setsockopt", stdcall, dynlib: "ws2_32.dll".}
+  proc getsockopt*(s: SocketHandle, level, optname: cint,
+                   optval: pointer, optlen: ptr SockLen): cint {.
+    importc: "getsockopt", stdcall, dynlib: "ws2_32.dll".}
+  proc ioctlsocket*(s: SocketHandle, cmd: int32, argp: pointer): cint {.
+    importc: "ioctlsocket", stdcall, dynlib: "ws2_32.dll".}
+  proc sendto*(s: SocketHandle, buf: pointer, len: cint, flags: cint,
+               to: ptr Sockaddr, tolen: SockLen): cint {.
+    importc: "sendto", stdcall, dynlib: "ws2_32.dll".}
+  proc recvfrom*(s: SocketHandle, buf: pointer, len: cint, flags: cint,
+                 fromAddr: ptr Sockaddr, fromlen: ptr SockLen): cint {.
+    importc: "recvfrom", stdcall, dynlib: "ws2_32.dll".}
+  proc wsagetlasterror(): cint {.
+    importc: "WSAGetLastError", stdcall, dynlib: "ws2_32.dll".}
+  proc wsaStartup(wVersionRequested: int16, lpWSAData: pointer): cint {.
+    importc: "WSAStartup", stdcall, dynlib: "ws2_32.dll".}
+  proc wsaCleanup(): cint {.
+    importc: "WSACleanup", stdcall, dynlib: "ws2_32.dll".}
+  proc getaddrinfo*(node: cstring, service: cstring,
+                    hints: ptr AddrInfo,
+                    res: var ptr AddrInfo): cint {.
+    importc: "getaddrinfo", stdcall, dynlib: "ws2_32.dll".}
+  proc freeaddrinfo*(res: ptr AddrInfo) {.
+    importc: "freeaddrinfo", stdcall, dynlib: "ws2_32.dll".}
+  proc gai_strerror(errcode: cint): cstring {.
+    importc: "gai_strerrorA", stdcall, dynlib: "ws2_32.dll".}
+
+  const
+    SOCK_STREAM* = cint(1)
+    SOL_SOCKET* = cint(0xFFFF)
+    SO_REUSEADDR* = cint(0x0004)
+    SO_LINGER* = cint(0x0080)
+    SO_ERROR* = cint(0x1007)
+    IPPROTO_TCP* = cint(6)
+    TCP_NODELAY* = cint(0x0001)
+    AF_UNSPEC* = cint(0)
+    AF_INET* = cint(2)
+    AF_INET6* = cint(23)
+    AI_PASSIVE* = cint(0x0001)
+    SOMAXCONN* = cint(0x7FFFFFFF)
+    FIONBIO* = int32(0x8004667E)
+    WSAEWOULDBLOCK* = 10035
+    WSAEINPROGRESS* = 10036
+    WSAENETDOWN* = 10050
+    WSAECONNRESET* = 10054
+    WSAESHUTDOWN* = 10058
+
+  type
+    Sockaddr* {.importc: "struct sockaddr", header: "<winsock2.h>",
+                pure, final.} = object
+      sa_family: cushort
+      sa_data: array[14, byte]
+
+    Sockaddr_in* {.importc: "struct sockaddr_in", header: "<winsock2.h>",
+                   pure, final.} = object
+      sin_family: cushort
+      sin_port: cushort
+      sin_addr: array[4, byte]
+      sin_zero: array[8, byte]
+
+    Sockaddr_in6* {.importc: "struct sockaddr_in6", header: "<winsock2.h>",
+                    pure, final.} = object
+      sin6_family: cushort
+      sin6_port: cushort
+      sin6_flowinfo: int32
+      sin6_addr: array[16, byte]
+      sin6_scope_id: int32
+
+    Sockaddr_storage* {.importc: "struct sockaddr_storage",
+                        header: "<winsock2.h>", pure, final.} = object
+      ss_family: cushort
+      ss_padding: array[120, byte]
+
+    AddrInfo* {.importc: "struct addrinfo", header: "<winsock2.h>",
+                pure, final.} = object
+      ai_flags: cint
+      ai_family: cint
+      ai_socktype: cint
+      ai_protocol: cint
+      ai_addrlen: SockLen
+      ai_canonname: cstring
+      ai_addr: ptr Sockaddr
+      ai_next: ptr AddrInfo
+
+    TLinger* {.importc: "struct linger", header: "<winsock2.h>",
+               pure, final.} = object
+      l_onoff: cushort
+      l_linger: cushort
+
+    IOVec* = object
+      iov_base: pointer
+      iov_len: int
+
+  proc gai_strerrorW(errcode: cint): cstring {.
+    importc: "gai_strerrorW", stdcall, dynlib: "ws2_32.dll".}
+
+  proc gai_strerrorCompat(errcode: cint): cstring {.inline.} =
+    when defined(cpu64):
+      result = gai_strerrorW(errcode)
+    else:
+      result = gai_strerror(errcode)
+
+else:
+  # ── POSIX imports ────────────────────────────────────────────────────────────
+  import std/posix
+  export posix
+  proc gai_strerrorCompat(errcode: cint): cstring {.inline.} =
+    gai_strerror(errcode)
+
+# ── Platform-independent socket functions ───────────────────────────────────
+
 proc initNet*() =
-  ## Initialize networking. Call once at startup. Safe to call multiple times.
-  signal(SIGPIPE, SIG_IGN)
+  ## Initialize networking. Safe to call multiple times.
+  when defined(windows):
+    var data: array[512, byte]  # WSADATA
+    discard wsaStartup(0x0202, addr data[0])
+  else:
+    signal(SIGPIPE, SIG_IGN)
 
 # Auto-init on module load
 initNet()
@@ -20,15 +163,27 @@ initNet()
 type
   NetError* = object of CatchableError
 
+proc lastSocketError*(): cint {.inline.} =
+  ## Get the last socket error (platform-agnostic).
+  when defined(windows):
+    result = wsagetlasterror()
+  else:
+    result = errno
+
 # ── Socket options ───────────────────────────────────────────────────────────
 
 proc setNonBlocking*(fd: SocketHandle) =
   ## Put a socket into non-blocking mode.
-  let flags = fcntl(fd.cint, F_GETFL, 0)
-  if flags < 0:
-    raise newException(NetError, "fcntl F_GETFL failed")
-  if fcntl(fd.cint, F_SETFL, flags or O_NONBLOCK) < 0:
-    raise newException(NetError, "fcntl F_SETFL O_NONBLOCK failed")
+  when defined(windows):
+    var mode: int32 = 1
+    if ioctlsocket(fd, FIONBIO, addr mode) < 0:
+      raise newException(NetError, "ioctlsocket FIONBIO failed")
+  else:
+    let flags = fcntl(fd, F_GETFL, 0)
+    if flags < 0:
+      raise newException(NetError, "fcntl F_GETFL failed")
+    if fcntl(fd, F_SETFL, flags or O_NONBLOCK) < 0:
+      raise newException(NetError, "fcntl F_SETFL O_NONBLOCK failed")
 
 proc setReuseAddr*(fd: SocketHandle) =
   ## Enable SO_REUSEADDR on a socket.
@@ -38,11 +193,12 @@ proc setReuseAddr*(fd: SocketHandle) =
     raise newException(NetError, "setsockopt SO_REUSEADDR failed")
 
 proc setReusePort*(fd: SocketHandle) =
-  ## Enable SO_REUSEPORT on a socket (macOS/Linux).
-  var val: cint = 1
-  if setsockopt(fd, SOL_SOCKET, SO_REUSEPORT,
-                addr val, sizeof(val).SockLen) < 0:
-    raise newException(NetError, "setsockopt SO_REUSEPORT failed")
+  ## Enable SO_REUSEPORT on a socket (macOS/Linux). No-op on Windows.
+  when not defined(windows):
+    var val: cint = 1
+    if setsockopt(fd, SOL_SOCKET, SO_REUSEPORT,
+                  addr val, sizeof(val).SockLen) < 0:
+      raise newException(NetError, "setsockopt SO_REUSEPORT failed")
 
 proc setTcpNoDelay*(fd: SocketHandle) =
   ## Disable Nagle's algorithm for lower latency.
@@ -53,9 +209,7 @@ proc setTcpNoDelay*(fd: SocketHandle) =
 
 proc setTcpCork*(fd: SocketHandle, enable: bool) =
   ## Enable or disable TCP corking (TCP_CORK on Linux, TCP_NOPUSH on macOS/BSD).
-  ## When corked, the kernel buffers small writes until uncorked, then sends
-  ## them as a single segment — reducing packet count for header+body responses.
-  ## No-op on platforms without cork support.
+  ## No-op on Windows and other unsupported platforms.
   when defined(linux):
     const TCP_CORK = cint(3)
     var val: cint = if enable: 1 else: 0
@@ -70,32 +224,92 @@ proc setTcpCork*(fd: SocketHandle, enable: bool) =
 # ── Address resolution ───────────────────────────────────────────────────────
 
 proc resolveAddr*(address: string, port: int,
-                  sockType = SOCK_STREAM, protocol = 0): SockAddr_storage =
-  ## Resolve `address:port` into a `SockAddr_storage` ready for `bind`/`connect`.
+                  sockType = SOCK_STREAM, protocol = 0): Sockaddr_storage =
+  ## Resolve `address:port` into a `Sockaddr_storage` ready for `bind`/`connect`.
   ## Works for both IPv4 and IPv6.
   var hints: AddrInfo
   hints.ai_family   = AF_UNSPEC
-  hints.ai_socktype = sockType.cint
+  hints.ai_socktype = sockType
   hints.ai_flags    = AI_PASSIVE
 
   var res: ptr AddrInfo
   let err = getaddrinfo(address, cstring($port), addr hints, res)
   if err != 0:
     raise newException(NetError,
-      "getaddrinfo failed: " & $gai_strerror(err))
+      "getaddrinfo failed: " & $gai_strerrorCompat(err))
   defer: freeaddrinfo(res)
 
-  copyMem(addr result, res.ai_addr, res.ai_addrlen.int)
+  copyMem(addr result, res.ai_addr, res.ai_addrlen)
 
 proc getSockLen*(addrBuf: ptr Sockaddr_storage): SockLen =
   ## Return the correct socklen for the address family.
   let family = cast[ptr Sockaddr](addrBuf).sa_family
-  if family.cint == AF_INET:
+  if family == AF_INET.cushort:
     result = sizeof(Sockaddr_in).SockLen
-  elif family.cint == AF_INET6:
+  elif family == AF_INET6.cushort:
     result = sizeof(Sockaddr_in6).SockLen
   else:
     result = sizeof(Sockaddr_storage).SockLen
+
+# ── Platform error helpers ─────────────────────────────────────────────────
+
+proc sockWouldBlock*(): bool {.inline.} =
+  when defined(windows):
+    result = wsagetlasterror() == WSAEWOULDBLOCK
+  else:
+    result = errno == EAGAIN or errno == EWOULDBLOCK
+
+proc sockInterrupted*(): bool {.inline.} =
+  when defined(windows):
+    result = false
+  else:
+    result = errno == EINTR
+
+proc sockInProgress*(): bool {.inline.} =
+  when defined(windows):
+    result = wsagetlasterror() == WSAEINPROGRESS
+  else:
+    result = errno == EINPROGRESS
+
+# ── Platform-agnostic read/write helpers ────────────────────────────────────
+
+proc sockRecv*(fd: SocketHandle, buf: pointer, bufLen: int): int {.inline.} =
+  ## Read from a socket. Returns bytes read, 0 on EOF, negative on error.
+  result = recv(fd, buf, bufLen.cint, 0).int
+
+proc sockSend*(fd: SocketHandle, buf: pointer, len: int): int {.inline.} =
+  ## Write to a socket. Returns bytes written, negative on error.
+  result = send(fd, buf, len.cint, 0).int
+
+proc sockClose*(fd: SocketHandle) {.inline.} =
+  ## Close a socket.
+  when defined(windows):
+    discard closesocket(fd)
+  else:
+    discard posix.close(fd)
+
+proc sockShutdown*(fd: SocketHandle, how: cint) {.inline.} =
+  ## Shut down part of a full-duplex connection.
+  when defined(windows):
+    const SD_SEND = cint(1)
+    discard shutdown(fd, how)
+  else:
+    discard posix.shutdown(fd, how)
+
+proc sockWritev*(fd: SocketHandle, iov: ptr IOVec, iovcnt: int): int {.inline.} =
+  ## Scatter-gather write. On Windows, concatenates buffers and calls send.
+  when defined(windows):
+    var total = 0
+    for i in 0 ..< iovcnt:
+      let n = send(fd, iov[i].iov_base, iov[i].iov_len.cint, 0).int
+      if n < 0:
+        if total > 0: return total
+        return n
+      total += n
+      if n < iov[i].iov_len: break
+    result = total
+  else:
+    result = posix.writev(fd.cint, cast[ptr posix.IOVec](iov), iovcnt.cint).int
 
 # ── Buffer ───────────────────────────────────────────────────────────────────
 

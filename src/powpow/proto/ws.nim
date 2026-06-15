@@ -1,9 +1,15 @@
-## powpow/proto/ws — RFC 6455 WebSocket server.
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
+## RFC 6455 WebSocket server.
 ##
 ## Two modes of operation:
 ##
 ## 1. Standalone — dedicated WebSocket server on its own TCP port:
-##
+## ```nim
 ##    let loop = newLoop()
 ##    let wss = newWsServer(loop)
 ##    wss.onOpen do (ws: WsConnection):
@@ -12,11 +18,13 @@
 ##      ws.sendText("echo: " & cast[string](@data))
 ##    wss.listen("0.0.0.0", 9001)
 ##    loop.run()
-##
+## ```
+## 
 ## 2. Upgraded from HttpServer — route handler performs the handshake:
-##
+## ```nim
 ##    server.get("/ws") do (req: HttpRequest, res: Response):
 ##      websocketUpgrade(res, req, onOpen, onMessage, onClose)
+## ```
 
 import ../net/tcp
 import ../loop

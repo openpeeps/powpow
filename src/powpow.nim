@@ -1,3 +1,9 @@
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
 ## powpow — High-performance event notification library for Nim.
 ##
 ## This is the main entry point. Importing `powpow` gives you everything:

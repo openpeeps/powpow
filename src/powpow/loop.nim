@@ -1,7 +1,18 @@
-## powpow/loop.nim — The event loop.
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
+## This module defines the main event loop and timer system for powpow.
+## The Loop type manages registered file descriptor watchers, timers, deferred
+## callbacks, and idle handlers.
 ##
-## A single-threaded, non-blocking event loop that drives fd I/O,
-## one-shot and repeating timers, deferred callbacks, and idle handlers.
+## The loop is built on top of a platform-specific backend (e.g. epoll on Linux)
+## that provides efficient I/O event multiplexing. The loop also provides a
+## simple timer system with support for one-shot and repeating timers, as well as
+## deferred callbacks that run at the beginning of the next iteration, and idle
+## handlers that run when no other events are pending.
 
 import platform
 import types

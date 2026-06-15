@@ -1,5 +1,11 @@
-## powpow/proto/httpserver.nim — Non-blocking HTTP/1.1 server.
-##
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
+## A non-blocking HTTP/1.1 server built on top of powpow's TCP primitives.
+## 
 ## Combines the TCP transport layer with the incremental HTTP parser
 ## to provide a high-level routing server with minimal overhead.
 ##

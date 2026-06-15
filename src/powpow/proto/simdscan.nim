@@ -1,4 +1,10 @@
-## powpow/proto/simdscan.nim — SIMD-accelerated byte scanning for HTTP parsing.
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
+## SIMD-accelerated byte scanning for HTTP parsing.
 ##
 ## Uses SSE2 (x86) or scalar fallbacks for CRLF detection.
 ## The key trick: left-shifting the `\n` mask by 1 byte aligns it with `\r`,
