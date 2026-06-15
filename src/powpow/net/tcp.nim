@@ -335,22 +335,18 @@ proc acceptClients(server: TcpServer) =
   while true:
     var clientAddr: Sockaddr_storage
     var addrLen: SockLen = sizeof(clientAddr).SockLen
-    # when defined(linux):
-    #   const SockFlags = O_NONBLOCK or O_CLOEXEC
-    #   let clientFd = posix.accept4(server.fd,
-    #                                cast[ptr Sockaddr](addr clientAddr),
-    #                                addr addrLen, SockFlags)
-    # else:
-    #   let clientFd = posix.accept(server.fd,
-    #                                cast[ptr Sockaddr](addr clientAddr),
-    #                                addr addrLen)
-    #   if clientFd.int >= 0:
-    #     setNonBlocking(clientFd)
-    let clientFd = posix.accept(server.fd,
-                                 cast[ptr Sockaddr](addr clientAddr),
-                                 addr addrLen)
-    if clientFd.int >= 0:
-      setNonBlocking(SocketHandle(clientFd))
+    when defined(linux):
+      const SockFlags = O_NONBLOCK or O_CLOEXEC
+      let clientFd = posix.accept4(server.fd,
+                                   cast[ptr Sockaddr](addr clientAddr),
+                                   addr addrLen, SockFlags)
+    else:
+      let clientFd = posix.accept(server.fd,
+                                   cast[ptr Sockaddr](addr clientAddr),
+                                   addr addrLen)
+      if clientFd.int >= 0:
+        setNonBlocking(clientFd)
+
     if clientFd.int < 0:
       if errno == EAGAIN or errno == EWOULDBLOCK:
         return  # No more pending connections
