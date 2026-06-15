@@ -15,7 +15,15 @@
 ## 😍 Key Features
 - High-performance, event-driven networking library for Nim
 - Support for low-level UDP, TCP sockets
-- Support for HTTP/1.1 Server
+- Built-in HTTP/1.1 server implementation
+- Built-in WebSocket support with standalone and upgrade modes
+- SIMD-accelerated parsing and formatting of HTTP messages
+- Built on top of `epoll` (Linux), and `kqueue` (BSD, macOS), IOCP (Windows)
+- Support for edge-triggered and level-triggered event notification
+- Support for multiple event loops and multi-threaded applications
+
+> [!NOTE]
+> PowPow is experimental and under active development. The API may change without deprecation. If you are looking for a more stable and mature library, consider using [supranim](https://github.com/supranim/supranim) instead (based on LibEvent).
 
 ## Examples
 ...
