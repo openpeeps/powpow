@@ -17,14 +17,14 @@ when not defined(windows):
 # ── Types ────────────────────────────────────────────────────────────────────
 
 type
-  UdpMessage* {.acyclic.} = object
+  UdpMessage* = object
     data*:    seq[byte]
     sender*:  Sockaddr_storage
     senderLen*: SockLen
 
   OnUdpData* = proc(msg: UdpMessage) {.closure.}
 
-  UdpSocket* {.acyclic.} = ref object
+  UdpSocket* = ref object
     fd*:    SocketHandle
     loop*:  Loop
     onData: OnUdpData

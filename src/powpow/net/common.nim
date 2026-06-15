@@ -145,6 +145,8 @@ else:
   proc gai_strerrorCompat(errcode: cint): cstring {.inline.} =
     gai_strerror(errcode)
 
+  const UNIX_PATH_MAX* = 107
+
 # ── Platform-independent socket functions ───────────────────────────────────
 
 proc initNet*() =
@@ -202,10 +204,11 @@ proc setReusePort*(fd: SocketHandle) =
 
 proc setTcpNoDelay*(fd: SocketHandle) =
   ## Disable Nagle's algorithm for lower latency.
+  ## Silently ignores errors (e.g. on AF_UNIX sockets where TCP_NODELAY
+  ## is not applicable).
   var val: cint = 1
-  if setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
-                addr val, sizeof(val).SockLen) < 0:
-    raise newException(NetError, "setsockopt TCP_NODELAY failed")
+  discard setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
+                     addr val, sizeof(val).SockLen)
 
 proc setTcpCork*(fd: SocketHandle, enable: bool) =
   ## Enable or disable TCP corking (TCP_CORK on Linux, TCP_NOPUSH on macOS/BSD).
@@ -310,6 +313,121 @@ proc sockWritev*(fd: SocketHandle, iov: ptr IOVec, iovcnt: int): int {.inline.} 
     result = total
   else:
     result = posix.writev(fd.cint, cast[ptr posix.IOVec](iov), iovcnt.cint).int
+
+# ── Zero-copy file transmission ───────────────────────────────────────────────
+
+const
+  SendFileChunkSize* = 65536     # fallback chunk size for non-zero-copy paths
+  DefaultSendFileChunk* = 0      # 0 = let the platform decide
+
+const
+  O_RDONLY* = 0
+  SEEK_SET* = 0
+  SEEK_CUR* = 1
+  SEEK_END* = 2
+
+when defined(windows):
+  proc c_open(path: cstring; flags, mode: cint): cint {.
+    importc: "_open", header: "<fcntl.h>".}
+  proc c_lseek(fd: cint; offset: int64; whence: cint): int64 {.
+    importc: "_lseeki64", header: "<io.h>".}
+  proc c_read(fd: cint; buf: pointer; count: cint): cint {.
+    importc: "_read", header: "<io.h>".}
+  proc c_close(fd: cint): cint {.
+    importc: "_close", header: "<io.h>".}
+else:
+  proc c_open(path: cstring; flags, mode: cint): cint =
+    posix.open(path, flags, mode).cint
+  proc c_lseek(fd: cint; offset: int64; whence: cint): int64 =
+    posix.lseek(fd, offset, whence)
+  proc c_read(fd: cint; buf: pointer; count: cint): cint =
+    posix.read(fd, buf, count).cint
+  proc c_close(fd: cint): cint =
+    posix.close(fd).cint
+
+proc openFileRead*(path: string): int =
+  ## Open a file for reading. Returns fd or -1 on error.
+  result = c_open(path.cstring, O_RDONLY, 0)
+
+proc getFileSize*(fd: int): int64 =
+  ## Get file size from an open fd. Returns -1 on error.
+  let cur = c_lseek(fd.cint, 0, SEEK_CUR)
+  if cur < 0: return -1
+  let sz = c_lseek(fd.cint, 0, SEEK_END)
+  if sz >= 0:
+    discard c_lseek(fd.cint, cur, SEEK_SET)
+  sz
+
+proc closeFile*(fd: int) {.inline.} =
+  ## Close a file descriptor.
+  discard c_close(fd.cint)
+
+proc readFile*(fd: int; buf: ptr UncheckedArray[byte]; len: int): int64 =
+  ## Read up to len bytes from a file. Returns bytes read, 0 on EOF, -1 on error.
+  result = c_read(fd.cint, buf, len.cint).int64
+
+proc seekFile*(fd: int; offset: int64): int64 =
+  ## Seek to an absolute position in a file. Returns new position or -1 on error.
+  result = c_lseek(fd.cint, offset, SEEK_SET)
+
+proc sendFileChunk*(sockFd: SocketHandle; fileFd: int;
+                    fileOff: var int64; remaining: var int64): int64 =
+  ## Send file data to a socket using zero-copy when available.
+  ## Updates fileOff and remaining. Returns bytes sent,
+  ## 0 on EAGAIN (caller should retry when socket is writable),
+  ## -1 on hard error.
+  when defined(linux):
+    proc sf(out_fd, in_fd: cint; offset: ptr int64; count: csize_t): cint {.
+      importc: "sendfile", header: "<sys/sendfile.h>".}
+    var off = fileOff
+    let n = cast[int64](sf(sockFd.cint, fileFd.cint,
+                          addr off, remaining.csize_t))
+    if n < 0:
+      let e = errno
+      if e == EAGAIN or e == EWOULDBLOCK: return 0
+      return -1
+    fileOff = off
+    remaining -= n
+    result = n
+  elif defined(macosx) or defined(bsd):
+    proc sf(in_fd, out_fd: cint; offset: int64; len: var int64;
+             hdtr: pointer; flags: cint): cint {.
+      importc: "sendfile", header: "<sys/socket.h>".}
+    var sent = remaining
+    let ret = sf(fileFd.cint, sockFd.cint, fileOff, sent, nil, 0)
+    if ret < 0:
+      let e = errno
+      if e == EAGAIN or e == EWOULDBLOCK:
+        # macOS may have sent partial data even on EAGAIN
+        if sent > 0:
+          fileOff += sent
+          remaining -= sent
+          result = sent
+        else:
+          result = 0
+        return
+      return -1
+    fileOff += sent
+    remaining -= sent
+    result = sent
+  else:
+    # Windows fallback: read a chunk and send it
+    var buf = cast[ptr UncheckedArray[byte]](alloc(SendFileChunkSize))
+    let toRead = min(remaining, SendFileChunkSize)
+    let n = c_read(fileFd.cint, buf,
+                   if toRead > SendFileChunkSize: SendFileChunkSize.cint else: toRead.cint)
+    if n <= 0:
+      dealloc(buf)
+      return if n == 0: 0 else: -1
+    let sent = send(sockFd, buf, n, 0)
+    dealloc(buf)
+    if sent < 0:
+      let e = wsagetlasterror()
+      if e == WSAEWOULDBLOCK: return 0
+      return -1
+    fileOff += sent
+    remaining -= sent
+    result = sent
 
 # ── Buffer ───────────────────────────────────────────────────────────────────
 

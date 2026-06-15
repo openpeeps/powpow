@@ -1,5 +1,9 @@
-## examples/wsupgrade.nim — HTTP server with WebSocket upgrade demo.
-##
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
 ## Shows how to run HTTP and WebSocket on the same port using
 ## powpow's websocketUpgrade proc.
 ##

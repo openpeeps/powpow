@@ -47,7 +47,7 @@ type
   ConnState* = enum
     Connecting, Connected, Closing, Closed
 
-  Connection* {.acyclic.} = ref object
+  Connection* = ref object
     fd*:              SocketHandle
     loop*:            Loop
     state*:           ConnState
@@ -56,19 +56,23 @@ type
     writeBuf:         seq[byte]
     writePos:         int
     corked:           bool
-    closeAfterFlush: bool
+    closeAfterFlush:  bool
+    sendFileFd*:      int           # -1 when idle; fd for in-progress zero-copy send
+    sendFileOff*:     int64
+    sendFileRemain*:  int64
 
   OnAccept*  = proc(conn: Connection) {.closure.}
   OnData*    = proc(conn: Connection, data: openArray[byte]) {.closure.}
   OnClose*   = proc(conn: Connection) {.closure.}
 
-  TcpServer* {.acyclic.} = ref object
+  TcpServer* = ref object
     fd*:       SocketHandle
     loop*:     Loop
     onAccept:  OnAccept
     onData:    OnData
     onClose*:  OnClose
     connPool:  seq[Connection]
+    unixPath:  string
 
 proc shutWrVal(): cint {.inline.} =
   when defined(windows): 1 else: SHUT_WR
@@ -81,6 +85,9 @@ proc close*(conn: Connection) =
   if conn.corked:
     setTcpCork(conn.fd, false)
     conn.corked = false
+  if conn.sendFileFd >= 0:
+    closeFile(conn.sendFileFd)
+    conn.sendFileFd = -1
   setLinger0(conn.fd)
   conn.loop.unregister(conn.fd.int)
   sockClose(conn.fd)
@@ -252,10 +259,41 @@ proc closeAndRelease*(conn: Connection) =
     releaseBuf(conn.loop, conn.readBuf)
     conn.readBuf = nil
 
+proc continueSendFile*(conn: Connection): bool =
+  ## Resume an in-progress zero-copy file send when the socket becomes writable.
+  ## Drains as much data as possible per edge-triggered Write event.
+  ## Returns true when the send is complete (or error), false if more Write events needed.
+  if conn.sendFileFd < 0: return true
+  # Flush any buffered headers before sending file content
+  if conn.writeBuf.len > 0:
+    discard conn.flushWriteBuffer()
+    if conn.writeBuf.len > 0:
+      return false
+  # Drain sendfile until EAGAIN (edge-triggered: send all we can per event)
+  while conn.sendFileFd >= 0:
+    if conn.sendFileRemain <= 0:
+      closeFile(conn.sendFileFd)
+      conn.sendFileFd = -1
+      break
+    let n = sendFileChunk(conn.fd, conn.sendFileFd, conn.sendFileOff, conn.sendFileRemain)
+    if n < 0: closeFile(conn.sendFileFd); conn.sendFileFd = -1; return true
+    if n == 0: return false  # ← triggered by remaining==0, treated as EAGAIN
+    # conn.sendFileFd is NEVER cleared on success
+    
+  # All file data sent; flush any remaining headers
+  if conn.writeBuf.len > 0:
+    discard conn.flushWriteBuffer()
+    if conn.writeBuf.len > 0:
+      return false
+  if conn.closeAfterFlush:
+    conn.close()
+  return true
+
 proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
   if server.connPool.len > 0:
     result = server.connPool.pop()
     result.fd = fd
+    result.sendFileFd = -1
     result.loop = server.loop
     result.state = Connected
   else:
@@ -263,6 +301,7 @@ proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
       fd:        fd,
       loop:      server.loop,
       state:     Connected,
+      sendFileFd: -1,
       readBuf:   acquireBuf(server.loop),
       readBufLen: DefaultBufSize,
     )
@@ -272,6 +311,9 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
   conn.fd = SocketHandle(-1)
   conn.corked = false
   conn.closeAfterFlush = false
+  conn.sendFileFd = -1
+  conn.sendFileOff = 0
+  conn.sendFileRemain = 0
   conn.writeBuf.setLen(0)
   conn.writePos = 0
   if server.connPool.len < MaxConnPoolSize:
@@ -342,7 +384,12 @@ proc acceptClients(server: TcpServer) =
           server.releaseConnection(conn)
           return
         if Write in ev:
-          if conn.flushWriteBuffer():
+          if conn.sendFileFd >= 0:
+            if conn.continueSendFile():
+              if conn.state == Connected:
+                conn.loop.modify(fd, {Read})
+                conn.handleClientRead(server.onData, server.onClose)
+          elif conn.flushWriteBuffer():
             if conn.closeAfterFlush:
               conn.close()
               if server.onClose != nil: server.onClose(conn)
@@ -350,7 +397,7 @@ proc acceptClients(server: TcpServer) =
               return
             if conn.state == Connected:
               conn.loop.modify(fd, {Read})
-        if Read in ev or Hup in ev:
+        if (Read in ev or Hup in ev) and conn.sendFileFd < 0:
           conn.handleClientRead(server.onData, server.onClose)
         if Hup in ev and conn.state == Connected:
           conn.close()
@@ -388,6 +435,44 @@ proc listen*(server: TcpServer, address: string, port: int) =
   server.loop.register(fd.int, {Read}) do (listenFd: int, ev: set[EventType]):
     server.acceptClients()
 
+when not defined(windows):
+  proc listenUnix*(server: TcpServer, path: string; mode: int = 0o660) =
+    let fd = socket(AF_UNIX.cint, SOCK_STREAM, 0)
+    if fd.cint < 0:
+      raise newException(NetError, "socket(AF_UNIX) failed")
+
+    setNonBlocking(fd)
+
+    proc c_unlink(path: cstring): cint {.importc: "unlink", header: "<unistd.h>".}
+    discard c_unlink(path.cstring)
+
+    var sockAddr: Sockaddr_un
+    sockAddr.sun_family = AF_UNIX.uint8
+    let pathLen = path.len
+    if pathLen > UNIX_PATH_MAX:
+      sockClose(fd)
+      raise newException(NetError,
+        "Unix socket path \"" & path & "\" exceeds max length (" & $UNIX_PATH_MAX & ")")
+    copyMem(addr sockAddr.sun_path[0], path.cstring, pathLen + 1)
+
+    let sLen = (sizeof(sockAddr.sun_family) + pathLen + 1).SockLen
+    if bindSocket(fd, cast[ptr Sockaddr](addr sockAddr), sLen) < 0:
+      sockClose(fd)
+      raise newException(NetError, "bind(AF_UNIX) failed for " & path)
+
+    proc c_chmod(path: cstring, mode: cint): cint {.importc: "chmod", header: "<sys/stat.h>".}
+    discard c_chmod(path.cstring, mode.cint)
+
+    if listen(fd, SOMAXCONN) < 0:
+      sockClose(fd)
+      raise newException(NetError, "listen() failed on AF_UNIX socket")
+
+    server.fd = fd
+    server.unixPath = path
+
+    server.loop.register(fd.int, {Read}) do (listenFd: int, ev: set[EventType]):
+      server.acceptClients()
+
 proc close*(server: TcpServer) =
   for conn in server.connPool:
     if conn.readBuf != nil:
@@ -398,6 +483,11 @@ proc close*(server: TcpServer) =
     server.loop.unregister(server.fd.int)
     sockClose(server.fd)
     server.fd = SocketHandle(-1)
+  if server.unixPath.len > 0:
+    when not defined(windows):
+      proc c_unlink(path: cstring): cint {.importc: "unlink", header: "<unistd.h>".}
+      discard c_unlink(server.unixPath.cstring)
+    server.unixPath.setLen(0)
 
 proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
   let conn = acquireConnection(server, clientFd)
@@ -443,6 +533,7 @@ proc newTcpServer*(loop: Loop,
     onData:   onData,
     onClose:  onClose,
     connPool: @[],
+    unixPath: "",
   )
 
 # ── Client connect ───────────────────────────────────────────────────────────

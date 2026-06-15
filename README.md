@@ -17,8 +17,10 @@
 - Support for low-level UDP, TCP sockets
 - Built-in HTTP/1.1 server implementation
 - Built-in WebSocket support with standalone and upgrade modes
+- HTTP over Unix Domain Sockets (UDS) support for super fast local IPC
+- Zero-copy file transmission using `sendfile` (Linux) and `TransmitFile` (Windows)
 - SIMD-accelerated parsing and formatting of HTTP messages
-- Built on top of `epoll` (Linux), and `kqueue` (BSD, macOS), IOCP (Windows)
+- Built on top of `epoll` (Linux), and `kqueue` (BSD, macOS), `IOCP` (Windows)
 - Support for edge-triggered and level-triggered event notification
 - Support for multiple event loops and multi-threaded applications
 

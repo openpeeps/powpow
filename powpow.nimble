@@ -17,3 +17,4 @@ task test, "Run all tests":
 
 requires "nim >= 2.2.2"
 requires "nimsimd >= 0.1.0"
+requires "mimedb"

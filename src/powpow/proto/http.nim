@@ -41,7 +41,7 @@ type
     PhaseComplete     ## Request fully parsed
     PhaseError        ## Parse error occurred
 
-  HttpParser* {.acyclic.} = ref object
+  HttpParser* = ref object
     ## Incremental HTTP/1.1 request parser.
     buf:       seq[byte]       ## Accumulation buffer
     bufLen:    int              ## Current buffer length
@@ -74,7 +74,7 @@ type
     phase:      ParsePhase
     errorCode:  HttpCode
 
-  HttpRequest* {.acyclic.} = ref object
+  HttpRequest* = ref object
     ## A parsed HTTP request with lazy accessor methods.
     parser:      HttpParser
     httpMethod:  HttpMethod     ## Resolved during request line parse
