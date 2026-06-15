@@ -14,7 +14,7 @@ import ../net/tcp
 import ../loop
 import ../types
 import http
-import std/[httpcore, tables, strutils, times, posix]
+import std/[httpcore, tables, posix]
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,9 +48,13 @@ type
     routes:    Table[string, Handler]      ## "METHOD /path" → handler
     fallback:  Handler                      ## Catch-all handler (nil = 404)
     sessions:  Table[int, Session]          ## fd → parser session
+    parserPool: seq[HttpParser]             ## recycled parser objects
     keepAliveMs: int
 
-const DefaultKeepAliveMs* = 5_000 
+const
+  DefaultKeepAliveMs* = 5_000
+  ServerHeader = "Server: powpow/0.1.0\r\n"
+  MaxParserPoolSize = 2048
 
 # ── Response ─────────────────────────────────────────────────────────────────
 
@@ -80,54 +84,186 @@ proc close*(res: Response): Response {.discardable.} =
   res.closeConn = true
   return res
 
+proc statusText(code: HttpCode): string {.inline.} =
+  ## Return the HTTP reason phrase for a status code.
+  ## Returns a string literal (no heap allocation).
+  case code.int
+  of 100: "Continue"
+  of 101: "Switching Protocols"
+  of 200: "OK"
+  of 201: "Created"
+  of 202: "Accepted"
+  of 204: "No Content"
+  of 206: "Partial Content"
+  of 301: "Moved Permanently"
+  of 302: "Found"
+  of 304: "Not Modified"
+  of 307: "Temporary Redirect"
+  of 308: "Permanent Redirect"
+  of 400: "Bad Request"
+  of 401: "Unauthorized"
+  of 403: "Forbidden"
+  of 404: "Not Found"
+  of 405: "Method Not Allowed"
+  of 408: "Request Timeout"
+  of 409: "Conflict"
+  of 410: "Gone"
+  of 411: "Length Required"
+  of 413: "Payload Too Large"
+  of 414: "URI Too Long"
+  of 415: "Unsupported Media Type"
+  of 416: "Range Not Satisfiable"
+  of 429: "Too Many Requests"
+  of 500: "Internal Server Error"
+  of 501: "Not Implemented"
+  of 502: "Bad Gateway"
+  of 503: "Service Unavailable"
+  of 504: "Gateway Timeout"
+  of 505: "HTTP Version Not Supported"
+  else: "Unknown"
+
+proc writeUint(buf: ptr UncheckedArray[byte], n: int): int =
+  ## Write the decimal representation of a non-negative integer into `buf`.
+  ## Returns the number of bytes written. No heap allocation.
+  if n == 0:
+    buf[0] = byte('0')
+    return 1
+  var tmp = n
+  var digits: array[20, byte]
+  var ndigits = 0
+  while tmp > 0:
+    digits[ndigits] = byte(ord('0') + tmp mod 10)
+    inc ndigits
+    tmp = tmp div 10
+  for i in 0 ..< ndigits:
+    buf[i] = digits[ndigits - 1 - i]
+  return ndigits
+
 proc send*(res: Response, body: string = "") =
   ## Send the response with a string body.
+  ## Uses scatter-write (writev) to send headers + body with zero
+  ## intermediate string allocations.
   if res.sent: return
   res.sent = true
   let connHeader = if res.closeConn: "close" else: "keep-alive"
-  if body.len > 0:
-    var resp = "HTTP/1.1 " & $res.statusCode.int & " " & $res.statusCode & "\r\n"
-    resp.add("Content-Length: ")
-    resp.add($body.len)
-    resp.add("\r\nConnection: ")
-    resp.add(connHeader)
-    resp.add("\r\nServer: powpow/0.1.0\r\n")
+
+  # Write fixed header parts into a stack buffer (zero heap allocation)
+  var hdrBuf: array[256, byte]
+  var p = 0
+
+  # Status line: "HTTP/1.1 200 OK\r\n"
+  copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
+  hdrBuf[p] = byte(' '); p += 1
+  let stext = statusText(res.statusCode)
+  copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+  # Content-Length
+  copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), body.len)
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+  # Connection
+  copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
+  copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+  # Server
+  copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
+
+  # Build scatter-write iovec array
+  type Part = tuple[data: ptr UncheckedArray[byte], len: int]
+  const MaxParts = 150
+  let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
+
+  template scatterWrite(parts: var openArray[Part], count: var int) =
+    parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
     for (k, v) in res.headers:
-      resp.add(k); resp.add(": "); resp.add(v); resp.add("\r\n")
-    resp.add("\r\n")
-    resp.add(body)
-    discard res.conn.send(resp)
+      parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+    parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+    if body.len > 0:
+      parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
+
+  if numParts <= MaxParts:
+    var parts: array[MaxParts, Part]
+    var count = 0
+    scatterWrite(parts, count)
+    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
   else:
-    var resp = "HTTP/1.1 " & $res.statusCode.int & " " & $res.statusCode & "\r\n"
-    resp.add("Content-Length: 0\r\nConnection: ")
-    resp.add(connHeader)
-    resp.add("\r\nServer: powpow/0.1.0\r\n")
-    for (k, v) in res.headers:
-      resp.add(k); resp.add(": "); resp.add(v); resp.add("\r\n")
-    resp.add("\r\n")
-    discard res.conn.send(resp)
+    var parts = newSeq[Part](numParts)
+    var count = 0
+    scatterWrite(parts, count)
+    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+
   if res.closeConn:
-    res.conn.shutdown()
+    res.conn.closeAfterDrain()
 
 proc send*(res: Response, body: seq[byte]) =
   ## Send the response with a raw byte body.
+  ## Uses scatter-write (writev) to send headers + body with zero
+  ## intermediate string allocations.
   if res.sent: return
   res.sent = true
   let connHeader = if res.closeConn: "close" else: "keep-alive"
-  var resp = "HTTP/1.1 " & $res.statusCode.int & " " & $res.statusCode & "\r\n"
-  resp.add("Content-Length: ")
-  resp.add($body.len)
-  resp.add("\r\nConnection: ")
-  resp.add(connHeader)
-  resp.add("\r\nServer: powpow/0.1.0\r\n")
-  for (k, v) in res.headers:
-    resp.add(k); resp.add(": "); resp.add(v); resp.add("\r\n")
-  resp.add("\r\n")
-  discard res.conn.send(resp)
-  if body.len > 0:
-    discard res.conn.send(body)
+
+  # Write fixed header parts into a stack buffer (zero heap allocation)
+  var hdrBuf: array[256, byte]
+  var p = 0
+
+  # Status line: "HTTP/1.1 200 OK\r\n"
+  copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
+  hdrBuf[p] = byte(' '); p += 1
+  let stext = statusText(res.statusCode)
+  copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+  # Content-Length
+  copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), body.len)
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+  # Connection
+  copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
+  copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+  # Server
+  copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
+
+  # Build scatter-write iovec array
+  type Part = tuple[data: ptr UncheckedArray[byte], len: int]
+  const MaxParts = 150
+  let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
+
+  template scatterWrite(parts: var openArray[Part], count: var int) =
+    parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
+    for (k, v) in res.headers:
+      parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+    parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+    if body.len > 0:
+      parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
+
+  if numParts <= MaxParts:
+    var parts: array[MaxParts, Part]
+    var count = 0
+    scatterWrite(parts, count)
+    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+  else:
+    var parts = newSeq[Part](numParts)
+    var count = 0
+    scatterWrite(parts, count)
+    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+
   if res.closeConn:
-    res.conn.shutdown()
+    res.conn.closeAfterDrain()
 
 proc sendError*(res: Response, code: HttpCode, msg: string = "") =
   ## Send an error response and close the connection.
@@ -161,8 +297,21 @@ proc newHttpServer*(loop: Loop): HttpServer =
     routes:    initTable[string, Handler](64),
     fallback:  nil,
     sessions:  initTable[int, Session](64),
+    parserPool: @[],
     keepAliveMs: DefaultKeepAliveMs
   )
+
+proc acquireParser(server: HttpServer): HttpParser =
+  if server.parserPool.len > 0:
+    result = server.parserPool.pop()
+    result.reset()
+  else:
+    result = newHttpParser()
+
+proc releaseParser(server: HttpServer, parser: HttpParser) =
+  if server.parserPool.len < MaxParserPoolSize:
+    parser.reset()
+    server.parserPool.add(parser)
 
 proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
   ## Set the keep-alive idle timeout in milliseconds. 0 disables it.
@@ -171,7 +320,9 @@ proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
 proc removeSession*(server: HttpServer, fd: int) =
   ## Clean up a connection's session. Public so protocol upgrade
   ## handlers (e.g. WebSocket) can take over a connection.
-  server.sessions.del(fd)
+  if fd in server.sessions:
+    releaseParser(server, server.sessions[fd].parser)
+    server.sessions.del(fd)
 
 # ── Request dispatch ─────────────────────────────────────────────────────────
 
@@ -199,26 +350,28 @@ proc dispatchRequest(server: HttpServer, conn: Connection,
 proc handleConnectionData(server: HttpServer, conn: Connection,
                           data: openArray[byte]) =
   ## Feed incoming bytes into the per-connection parser.
+  ## Supports HTTP/1.1 pipelining: if multiple complete requests arrive
+  ## in the same TCP read, all of them are processed in order.
   let fd = conn.fd.int
   if fd notin server.sessions:
-    server.sessions[fd] = Session(parser: newHttpParser())
+    server.sessions[fd] = Session(parser: acquireParser(server))
 
-  let phase = server.sessions[fd].parser.feed(data)
+  server.sessions[fd].parser.feed(data)
 
-  if server.sessions[fd].parser.isComplete():
+  while server.sessions[fd].parser.isComplete():
     let req = server.sessions[fd].parser.getRequest()
     server.dispatchRequest(conn, req)
-    # The session may have been removed by a protocol upgrade handler
-    # (e.g. websocketUpgrade). Re-check before touching the parser.
-    if fd in server.sessions:
-      server.sessions[fd].parser.reset()
-  elif server.sessions[fd].parser.isError():
+    if fd notin server.sessions:
+      return  # removed by upgrade (e.g. websocketUpgrade)
+    server.sessions[fd].parser.resetForNext()
+    discard server.sessions[fd].parser.feed(@[])
+
+  if server.sessions[fd].parser.isError():
     let errCode = server.sessions[fd].parser.error()
     let res = newResponse(conn)
     res.sendError(errCode, "Bad Request")
     if fd in server.sessions:
       server.sessions[fd].parser.reset()
-    # Don't close — let the client decide
 
 # ── Route registration ───────────────────────────────────────────────────────
 
@@ -266,7 +419,7 @@ proc listen*(server: HttpServer, address: string, port: int) =
   server.tcpServer = newTcpServer(server.loop,
     onAccept = proc(conn: Connection) =
       # Pre-create session
-      server.sessions[conn.fd.int] = Session(parser: newHttpParser())
+      server.sessions[conn.fd.int] = Session(parser: acquireParser(server))
     ,
     onData = proc(conn: Connection, data: openArray[byte]) =
       server.handleConnectionData(conn, data)
@@ -282,6 +435,7 @@ proc close*(server: HttpServer) =
   if server.tcpServer != nil:
     server.tcpServer.close()
   server.sessions.clear()
+  server.parserPool.setLen(0)
 
 proc ensureTcpServer*(server: HttpServer) =
   ## Lazily create the underlying TcpServer (for multi-thread use where
@@ -289,14 +443,13 @@ proc ensureTcpServer*(server: HttpServer) =
   if server.tcpServer != nil: return
   server.tcpServer = newTcpServer(server.loop,
     onAccept = proc(conn: Connection) =
-      server.sessions[conn.fd.int] = Session(parser: newHttpParser())
+      server.sessions[conn.fd.int] = Session(parser: acquireParser(server))
     ,
     onData = proc(conn: Connection, data: openArray[byte]) =
       server.handleConnectionData(conn, data)
     ,
     onClose = proc(conn: Connection) =
       server.removeSession(conn.fd.int)
-    ,
   )
 
 proc addConnection*(server: HttpServer, fd: SocketHandle) =

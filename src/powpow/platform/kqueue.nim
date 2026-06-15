@@ -14,6 +14,7 @@ type
     ## A processed I/O event from the kqueue backend.
     fd*:     int
     events*: set[EventType]
+    udata*:  pointer          ## Opaque user data from registration
 
   Platform* = ref object
     ## kqueue-based I/O multiplexer with pre-allocated event buffers.
@@ -43,9 +44,10 @@ proc close*(p: Platform) =
 # ── Registration ─────────────────────────────────────────────────────────────
 
 proc add*(p: Platform, fd: int, events: set[EventType],
-          edgeTriggered = false) =
+          edgeTriggered = false, udata: pointer = nil) =
   ## Register interest in `events` on `fd`.
   ## `edgeTriggered` uses EV_CLEAR for edge-triggered notification.
+  ## `udata` is opaque user data returned in `PlatformEvent.udata` on poll.
   var n = 0
   var changes: array[2, KEvent]
   let flags: cushort =
@@ -58,7 +60,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
     changes[n].flags  = flags
     changes[n].fflags = 0
     changes[n].data   = 0
-    changes[n].udata  = nil
+    changes[n].udata  = udata
     inc n
   if Write in events:
     changes[n].ident  = fd.csize_t
@@ -66,7 +68,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
     changes[n].flags  = flags
     changes[n].fflags = 0
     changes[n].data   = 0
-    changes[n].udata  = nil
+    changes[n].udata  = udata
     inc n
 
   if n > 0:
@@ -98,10 +100,42 @@ proc remove*(p: Platform, fd: int) =
   discard kevent(p.kqFd, addr wr, 1, nil, 0, nil)
 
 proc modify*(p: Platform, fd: int, events: set[EventType],
-             edgeTriggered = false) =
+             edgeTriggered = false, udata: pointer = nil) =
   ## Change the event interests for an already-registered `fd`.
-  p.remove(fd)
-  p.add(fd, events, edgeTriggered)
+  ## Uses a single kevent() call: EV_ADD for desired filters,
+  ## EV_DELETE for removed ones. Preserves edge-triggered state
+  ## for filters that remain active.
+  var n = 0
+  var changes: array[2, KEvent]
+  let flags: cushort =
+    if edgeTriggered: EV_ADD or EV_CLEAR
+    else:             EV_ADD
+
+  # READ filter: EV_ADD if desired, EV_DELETE otherwise
+  changes[n].ident  = fd.csize_t
+  changes[n].filter = EVFILT_READ
+  changes[n].fflags = 0
+  changes[n].data   = 0
+  changes[n].udata  = udata
+  if Read in events:
+    changes[n].flags = flags
+  else:
+    changes[n].flags = EV_DELETE
+  inc n
+
+  # WRITE filter: EV_ADD if desired, EV_DELETE otherwise
+  changes[n].ident  = fd.csize_t
+  changes[n].filter = EVFILT_WRITE
+  changes[n].fflags = 0
+  changes[n].data   = 0
+  changes[n].udata  = udata
+  if Write in events:
+    changes[n].flags = flags
+  else:
+    changes[n].flags = EV_DELETE
+  inc n
+
+  discard kevent(p.kqFd, addr changes[0], n.cint, nil, 0, nil)
 
 # ── Polling ──────────────────────────────────────────────────────────────────
 
@@ -140,6 +174,7 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
     let kev = p.kEvents[i]
     p.events[i].fd     = kev.ident.int
     p.events[i].events = {}
+    p.events[i].udata  = kev.udata
 
     if (kev.flags and EV_ERROR) != 0:
       p.events[i].events.incl Error

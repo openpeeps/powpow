@@ -51,6 +51,22 @@ proc setTcpNoDelay*(fd: SocketHandle) =
                 addr val, sizeof(val).SockLen) < 0:
     raise newException(NetError, "setsockopt TCP_NODELAY failed")
 
+proc setTcpCork*(fd: SocketHandle, enable: bool) =
+  ## Enable or disable TCP corking (TCP_CORK on Linux, TCP_NOPUSH on macOS/BSD).
+  ## When corked, the kernel buffers small writes until uncorked, then sends
+  ## them as a single segment — reducing packet count for header+body responses.
+  ## No-op on platforms without cork support.
+  when defined(linux):
+    const TCP_CORK = cint(3)
+    var val: cint = if enable: 1 else: 0
+    discard setsockopt(fd, IPPROTO_TCP, TCP_CORK,
+                       addr val, sizeof(val).SockLen)
+  elif defined(macosx) or defined(bsd):
+    const TCP_NOPUSH = cint(4)
+    var val: cint = if enable: 1 else: 0
+    discard setsockopt(fd, IPPROTO_TCP, TCP_NOPUSH,
+                       addr val, sizeof(val).SockLen)
+
 # ── Address resolution ───────────────────────────────────────────────────────
 
 proc resolveAddr*(address: string, port: int,
@@ -63,7 +79,7 @@ proc resolveAddr*(address: string, port: int,
   hints.ai_flags    = AI_PASSIVE
 
   var res: ptr AddrInfo
-  let err = getaddrinfo(address, $port, addr hints, res)
+  let err = getaddrinfo(address, cstring($port), addr hints, res)
   if err != 0:
     raise newException(NetError,
       "getaddrinfo failed: " & $gai_strerror(err))

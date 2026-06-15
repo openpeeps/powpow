@@ -8,6 +8,20 @@ import ../types
 import common
 import std/posix
 
+const MaxBufPoolSize = 1024
+
+proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] =
+  if loop.bufPool.len > 0:
+    loop.bufPool.pop()
+  else:
+    cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
+
+proc releaseBuf(loop: Loop, buf: ptr UncheckedArray[byte]) =
+  if loop.bufPool.len < MaxBufPoolSize:
+    loop.bufPool.add(buf)
+  else:
+    deallocShared(buf)
+
 # ── Types ────────────────────────────────────────────────────────────────────
 
 type
@@ -17,13 +31,15 @@ type
 
   Connection* {.acyclic.} = ref object
     ## A non-blocking TCP connection.
-    fd*:        SocketHandle
-    loop*:      Loop
-    state*:     ConnState
-    readBuf:    ptr UncheckedArray[byte]
-    readBufLen: int
-    writeBuf:   seq[byte]
-    writePos:   int
+    fd*:              SocketHandle
+    loop*:            Loop
+    state*:           ConnState
+    readBuf:          ptr UncheckedArray[byte]
+    readBufLen:       int
+    writeBuf:         seq[byte]
+    writePos:         int
+    corked:           bool
+    closeAfterFlush: bool
 
   OnAccept*  = proc(conn: Connection) {.closure.}
     ## Called when a new client connects.
@@ -48,10 +64,13 @@ proc close*(conn: Connection) =
   ## Close a TCP connection.
   if conn.state == Closed: return
   conn.state = Closed
+  if conn.corked:
+    setTcpCork(conn.fd, false)
+    conn.corked = false
   conn.loop.unregister(conn.fd.int)
   discard posix.close(conn.fd.cint)
   if conn.readBuf != nil:
-    deallocShared(conn.readBuf)
+    releaseBuf(conn.loop, conn.readBuf)
     conn.readBuf = nil
   conn.writeBuf = @[]
   conn.writePos = 0
@@ -74,6 +93,9 @@ proc flushWriteBuffer(conn: Connection): bool =
   # Buffer fully flushed - clear it
   conn.writeBuf = @[]
   conn.writePos = 0
+  if conn.corked:
+    setTcpCork(conn.fd, false)
+    conn.corked = false
   return true
 
 proc send*(conn: Connection, data: openArray[byte]): int =
@@ -96,6 +118,9 @@ proc send*(conn: Connection, data: openArray[byte]): int =
       conn.writeBuf = newSeq[byte](data.len)
       copyMem(addr conn.writeBuf[0], unsafeAddr data[0], data.len)
       conn.writePos = 0
+      if not conn.corked:
+        setTcpCork(conn.fd, true)
+        conn.corked = true
       # Register for write events
       conn.loop.modify(conn.fd.int, {Read, Write})
       return data.len  # All data buffered
@@ -108,6 +133,9 @@ proc send*(conn: Connection, data: openArray[byte]): int =
     conn.writeBuf = newSeq[byte](remaining)
     copyMem(addr conn.writeBuf[0], unsafeAddr data[n], remaining)
     conn.writePos = 0
+    if not conn.corked:
+      setTcpCork(conn.fd, true)
+      conn.corked = true
     # Register for write events
     conn.loop.modify(conn.fd.int, {Read, Write})
 
@@ -117,15 +145,113 @@ proc send*(conn: Connection, data: string): int =
   ## Convenience overload for sending strings.
   conn.send(data.toOpenArrayByte(0, data.high))
 
+proc sendv*(conn: Connection, parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int =
+  ## Send multiple buffers using writev (scatter-gather IO).
+  ## Returns total bytes written. Buffers data if kernel buffer is full (EAGAIN).
+  if conn.state != Connected: return 0
+
+  # Calculate total length
+  var totalLen = 0
+  for part in parts:
+    totalLen += part.len
+
+  if totalLen == 0: return 0
+
+  # If we already have buffered data, append to buffer
+  if conn.writeBuf.len > 0:
+    for part in parts:
+      let oldLen = conn.writeBuf.len
+      conn.writeBuf.setLen(oldLen + part.len)
+      copyMem(addr conn.writeBuf[oldLen], part.data, part.len)
+    return totalLen  # All data buffered
+
+  # Build iovec array (stack-allocated for common case, heap fallback for large)
+  const MaxStackIovs = 128
+  var stackIovs: array[MaxStackIovs, IOVec]
+  var heapIovs: seq[IOVec]
+  var iovBuf: ptr IOVec
+  var iovLen: int
+
+  if parts.len <= MaxStackIovs:
+    iovBuf = addr stackIovs[0]
+    iovLen = parts.len
+    for i in 0 ..< parts.len:
+      stackIovs[i] = IOVec(iov_base: parts[i].data, iov_len: parts[i].len.csize_t)
+  else:
+    heapIovs = newSeq[IOVec](parts.len)
+    iovBuf = addr heapIovs[0]
+    iovLen = parts.len
+    for i in 0 ..< parts.len:
+      heapIovs[i] = IOVec(iov_base: parts[i].data, iov_len: parts[i].len.csize_t)
+
+  # Try writev first
+  let n = posix.writev(conn.fd.cint, iovBuf, iovLen.cint)
+  if n < 0:
+    if errno == EAGAIN or errno == EWOULDBLOCK:
+      # Buffer all data
+      conn.writeBuf = newSeq[byte](totalLen)
+      var pos = 0
+      for part in parts:
+        copyMem(addr conn.writeBuf[pos], part.data, part.len)
+        pos += part.len
+      conn.writePos = 0
+      if not conn.corked:
+        setTcpCork(conn.fd, true)
+        conn.corked = true
+      conn.loop.modify(conn.fd.int, {Read, Write})
+      return totalLen  # All data buffered
+    conn.close()
+    return -1
+
+  if n < totalLen:
+    # Partial write - buffer remaining
+    var remaining = totalLen - n
+    conn.writeBuf = newSeq[byte](remaining)
+    var pos = 0
+    var skipped = 0
+    for part in parts:
+      if skipped + part.len <= n:
+        # This part was fully sent
+        skipped += part.len
+      else:
+        # This part was partially sent or not sent
+        let offset = n - skipped
+        let toCopy = part.len - offset
+        copyMem(addr conn.writeBuf[pos], cast[ptr UncheckedArray[byte]](cast[uint](part.data) + offset.uint), toCopy)
+        pos += toCopy
+        skipped = n  # Mark all as skipped for remaining parts
+    conn.writePos = 0
+    if not conn.corked:
+      setTcpCork(conn.fd, true)
+      conn.corked = true
+    conn.loop.modify(conn.fd.int, {Read, Write})
+
+  return totalLen  # All data either sent or buffered
+
 proc shutdown*(conn: Connection) =
   ## Gracefully shut down the write side of the connection.
   ## Flushes any buffered data before shutting down.
-  if conn.state == Connected:
-    # Flush any buffered data first
-    if conn.writeBuf.len > 0:
-      discard conn.flushWriteBuffer()
-    conn.state = Closing
-    discard posix.shutdown(conn.fd, SHUT_WR)
+  if conn.state != Connected: return
+  if conn.writeBuf.len > 0:
+    discard conn.flushWriteBuffer()
+  elif conn.corked:
+    setTcpCork(conn.fd, false)
+    conn.corked = false
+  if conn.state != Connected: return
+  conn.state = Closing
+  discard posix.shutdown(conn.fd, SHUT_WR)
+
+proc closeAfterDrain*(conn: Connection) =
+  ## Close the connection after the write buffer drains.
+  ## If the buffer is empty, closes immediately — saving a shutdown()
+  ## syscall compared to the graceful shutdown path.
+  ## If the buffer has pending data, sets closeAfterFlush so the
+  ## Write event handler closes after draining.
+  if conn.state == Closed: return
+  if conn.writeBuf.len == 0:
+    conn.close()
+  else:
+    conn.closeAfterFlush = true
 
 # ── TcpServer ────────────────────────────────────────────────────────────────
 
@@ -174,13 +300,14 @@ proc acceptClients(server: TcpServer) =
 
     # accept() doesn't have SOCK_NONBLOCK flag, set it manually
     setNonBlocking(clientFd)
+    setTcpNoDelay(SocketHandle(clientFd))
 
     # Build the Connection object
     let conn = Connection(
       fd:        SocketHandle(clientFd),
       loop:      server.loop,
       state:     Connected,
-      readBuf:   cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize)),
+      readBuf:   acquireBuf(server.loop),
       readBufLen: DefaultBufSize,
     )
 
@@ -194,19 +321,23 @@ proc acceptClients(server: TcpServer) =
     # sockets don't re-fire Read on every loop tick.
     conn.loop.register(clientFd.int, {Read}, edgeTriggered = true, callback =
       proc(fd: int, ev: set[EventType]) =
-        if Error in ev or Hup in ev:
+        if Error in ev:
           conn.close()
           if server.onClose != nil: server.onClose(conn)
           return
         if Write in ev:
-          # Flush buffered data
           if conn.flushWriteBuffer():
-            # Buffer empty - unregister write events
-            conn.loop.modify(fd, {Read})
+            if conn.closeAfterFlush:
+              conn.close()
+              if server.onClose != nil: server.onClose(conn)
+              return
+            if conn.state == Connected:
+              conn.loop.modify(fd, {Read})
         if Read in ev or Hup in ev:
-          # Edge-triggered: drain until EAGAIN.
-          # Hup means peer closed write side — we can still read remaining data.
           conn.handleClientRead(server.onData, server.onClose)
+        if Hup in ev and conn.state == Connected:
+          conn.close()
+          if server.onClose != nil: server.onClose(conn)
     )
 
 proc listen*(server: TcpServer, address: string, port: int) =
@@ -247,13 +378,13 @@ proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
   ## Take a pre-accepted client fd and wire it into this server's event loop.
   ## Used by multi-threaded acceptors that accept on one thread and
   ## distribute connections to worker threads.
-  setNonBlocking(clientFd)
+  ## The fd must already be non-blocking with TCP_NODELAY set.
 
   let conn = Connection(
     fd:        clientFd,
     loop:      server.loop,
     state:     Connected,
-    readBuf:   cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize)),
+    readBuf:   acquireBuf(server.loop),
     readBufLen: DefaultBufSize,
   )
 
@@ -269,13 +400,18 @@ proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
         if server.onClose != nil: server.onClose(conn)
         return
       if Write in ev:
-        # Flush buffered data
         if conn.flushWriteBuffer():
-          # Buffer empty - unregister write events
-          conn.loop.modify(fd, {Read})
+          if conn.closeAfterFlush:
+            conn.close()
+            if server.onClose != nil: server.onClose(conn)
+            return
+          if conn.state == Connected:
+            conn.loop.modify(fd, {Read})
       if Read in ev or Hup in ev:
-        # Hup means peer closed write side — we can still read remaining data.
         conn.handleClientRead(server.onData, server.onClose)
+      if Hup in ev and conn.state == Connected:
+        conn.close()
+        if server.onClose != nil: server.onClose(conn)
   )
 
 proc newTcpServer*(loop: Loop,
@@ -312,35 +448,39 @@ proc connect*(loop: Loop, address: string, port: int,
     fd:        SocketHandle(fd),
     loop:      loop,
     state:     Connecting,
-    readBuf:   cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize)),
+    readBuf:   acquireBuf(loop),
     readBufLen: DefaultBufSize,
   )
 
   let sLen = getSockLen(addr addrBuf)
   let ret = posix.connect(fd, cast[ptr Sockaddr](addr addrBuf), sLen)
   if ret < 0 and errno != EINPROGRESS:
-    discard posix.close(fd)
-    deallocShared(conn.readBuf)
-    conn.writeBuf = @[]
+    conn.close()
     raise newException(NetError, "connect() failed")
 
   if ret == 0:
     # Connected immediately
     conn.state = Connected
-    onConnect(conn)
-    if conn.state == Closed: return
     conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
-      if Error in ev or Hup in ev:
+      if Error in ev:
         conn.close()
         if onClose != nil: onClose(conn)
         return
       if Write in ev:
-        # Flush buffered data
         if conn.flushWriteBuffer():
-          # Buffer empty - unregister write events
-          conn.loop.modify(rfd, {Read})
-      if Read in ev:
+          if conn.closeAfterFlush:
+            conn.close()
+            if onClose != nil: onClose(conn)
+            return
+          if conn.state == Connected:
+            conn.loop.modify(rfd, {Read})
+      if Read in ev or Hup in ev:
         conn.handleClientRead(onData, onClose)
+      if Hup in ev and conn.state == Connected:
+        conn.close()
+        if onClose != nil: onClose(conn)
+    onConnect(conn)
+    if conn.state == Closed: return
   else:
     # Connection in progress — wait for writability (connect completion)
     conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
@@ -350,25 +490,28 @@ proc connect*(loop: Loop, address: string, port: int,
       var errLen: SockLen = sizeof(err).SockLen
       discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
       if err != 0:
-        conn.state = Closed
-        discard posix.close(fd)
-        deallocShared(conn.readBuf)
-        conn.writeBuf = @[]
+        conn.close()
         return
 
       conn.state = Connected
       setTcpNoDelay(SocketHandle(wfd))
-      onConnect(conn)
-      if conn.state == Closed: return
       conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
-        if Error in ev or Hup in ev:
+        if Error in ev:
           conn.close()
           if onClose != nil: onClose(conn)
           return
         if Write in ev:
-          # Flush buffered data
           if conn.flushWriteBuffer():
-            # Buffer empty - unregister write events
-            conn.loop.modify(rfd, {Read})
-        if Read in ev:
+            if conn.closeAfterFlush:
+              conn.close()
+              if onClose != nil: onClose(conn)
+              return
+            if conn.state == Connected:
+              conn.loop.modify(rfd, {Read})
+        if Read in ev or Hup in ev:
           conn.handleClientRead(onData, onClose)
+        if Hup in ev and conn.state == Connected:
+          conn.close()
+          if onClose != nil: onClose(conn)
+      onConnect(conn)
+      if conn.state == Closed: return

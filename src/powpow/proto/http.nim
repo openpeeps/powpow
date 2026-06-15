@@ -146,6 +146,39 @@ proc reset*(p: HttpParser) =
   p.phase         = PhaseRequestLine
   p.errorCode     = Http200
 
+proc resetForNext*(p: HttpParser) =
+  ## Reset the parser for the next pipelined request, preserving any
+  ## unconsumed bytes in the buffer (e.g. bytes belonging to a subsequent
+  ## request that arrived in the same TCP read).
+  let consumed = if p.transferChunked: p.headerEnd + p.chunkBodyLen
+                 elif p.contentLength > 0: p.headerEnd + p.contentLength
+                 else: p.headerEnd
+  let leftover = p.bufLen - consumed
+
+  if leftover > 0 and consumed >= 0:
+    copyMem(addr p.buf[0], addr p.buf[consumed], leftover)
+
+  p.bufLen        = max(leftover, 0)
+  p.headerEnd     = -1
+  p.methodLen     = 0
+  p.pathStart     = -1
+  p.pathEnd       = -1
+  p.queryStart    = -1
+  p.queryEnd      = -1
+  p.httpMajor     = 1
+  p.httpMinor     = 1
+  p.headerCount   = 0
+  p.contentLength = -1
+  p.transferChunked = false
+  p.chunkStart    = 0
+  p.chunkSize     = -1
+  p.chunkParsed   = 0
+  p.bodyStart     = 0
+  p.bodyLen       = 0
+  p.chunkBodyLen  = 0
+  p.phase         = PhaseRequestLine
+  p.errorCode     = Http200
+
 proc phase*(p: HttpParser): ParsePhase {.inline.} = p.phase
 
 # ── Internal: parse request line ─────────────────────────────────────────────

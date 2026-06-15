@@ -36,11 +36,13 @@ type
     ## A processed I/O event from the poll backend.
     fd*:     int
     events*: set[EventType]
+    udata*:  pointer          ## Opaque user data from registration
 
   Platform* = ref object
     ## poll(2)-based I/O multiplexer.
     pollFds:   seq[Pollfd]
     fdToIdx:   Table[int, int]       ## fd → index in pollFds
+    udataMap:  Table[int, pointer]   ## fd → udata for modify() reuse
     events*:   seq[PlatformEvent]    ## converted events
     count*:    int                   ## number of events from last poll
 
@@ -51,6 +53,7 @@ proc init*(T: typedesc[Platform]): T =
   result = T()
   result.pollFds = newSeq[Pollfd]()
   result.fdToIdx = initTable[int, int](64)
+  result.udataMap = initTable[int, pointer](64)
   result.events  = newSeq[PlatformEvent](POLL_MAX_EVENTS)
   result.count   = 0
 
@@ -62,7 +65,7 @@ proc close*(p: Platform) =
 # ── Registration ─────────────────────────────────────────────────────────────
 
 proc add*(p: Platform, fd: int, events: set[EventType],
-          edgeTriggered = false) =
+          edgeTriggered = false, udata: pointer = nil) =
   ## Register interest in `events` on `fd`.
   ## Note: `edgeTriggered` is ignored — poll(2) is always level-triggered.
   var pfd: Pollfd
@@ -75,6 +78,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   let idx = p.pollFds.len
   p.pollFds.add(pfd)
   p.fdToIdx[fd] = idx
+  p.udataMap[fd] = udata
 
 proc remove*(p: Platform, fd: int) =
   ## Remove all event registrations for `fd`.
@@ -89,15 +93,17 @@ proc remove*(p: Platform, fd: int) =
 
   p.pollFds.setLen(p.pollFds.len - 1)
   p.fdToIdx.del(fd)
+  p.udataMap.del(fd)
 
 proc modify*(p: Platform, fd: int, events: set[EventType],
-             edgeTriggered = false) =
+             edgeTriggered = false, udata: pointer = nil) =
   ## Change the event interests for an already-registered `fd`.
   if fd notin p.fdToIdx: return
   let idx = p.fdToIdx[fd]
   p.pollFds[idx].events = 0
   if Read in events:  p.pollFds[idx].events = p.pollFds[idx].events or POLLIN
   if Write in events: p.pollFds[idx].events = p.pollFds[idx].events or POLLOUT
+  p.udataMap[fd] = udata
 
 # ── Polling ──────────────────────────────────────────────────────────────────
 
@@ -126,7 +132,8 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
 
     p.events[p.count] = PlatformEvent(
       fd:     p.pollFds[i].fd.int,
-      events: evts
+      events: evts,
+      udata:  p.udataMap.getOrDefault(p.pollFds[i].fd.int, nil),
     )
     inc p.count
 

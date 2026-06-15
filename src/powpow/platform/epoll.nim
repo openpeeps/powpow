@@ -15,6 +15,7 @@ type
     ## A processed I/O event from the epoll backend.
     fd*:     int
     events*: set[EventType]
+    udata*:  pointer          ## Opaque user data from registration
 
   Platform* = ref object
     ## epoll-based I/O multiplexer with pre-allocated event buffers.
@@ -44,15 +45,16 @@ proc close*(p: Platform) =
 # ── Registration ─────────────────────────────────────────────────────────────
 
 proc add*(p: Platform, fd: int, events: set[EventType],
-          edgeTriggered = false) =
+          edgeTriggered = false, udata: pointer = nil) =
   ## Register interest in `events` on `fd`.
   ## `edgeTriggered` uses EPOLLET for edge-triggered notification.
+  ## `udata` is opaque user data returned in `PlatformEvent.udata` on poll.
   var ev: EpollEvent
   ev.events = 0
   if Read in events:  ev.events = ev.events or EPOLLIN
   if Write in events: ev.events = ev.events or EPOLLOUT
   if edgeTriggered:   ev.events = ev.events or EPOLLET
-  ev.data.fd = fd.cint
+  cast[ptr pointer](addr ev.data)[] = udata
 
   if epoll_ctl(p.epFd, EPOLL_CTL_ADD, fd.cint, addr ev) < 0:
     raise newException(OSError,
@@ -64,14 +66,14 @@ proc remove*(p: Platform, fd: int) =
   discard epoll_ctl(p.epFd, EPOLL_CTL_DEL, fd.cint, addr ev)
 
 proc modify*(p: Platform, fd: int, events: set[EventType],
-             edgeTriggered = false) =
+             edgeTriggered = false, udata: pointer = nil) =
   ## Change the event interests for an already-registered `fd`.
   var ev: EpollEvent
   ev.events = 0
   if Read in events:  ev.events = ev.events or EPOLLIN
   if Write in events: ev.events = ev.events or EPOLLOUT
   if edgeTriggered:   ev.events = ev.events or EPOLLET
-  ev.data.fd = fd.cint
+  cast[ptr pointer](addr ev.data)[] = udata
 
   if epoll_ctl(p.epFd, EPOLL_CTL_MOD, fd.cint, addr ev) < 0:
     raise newException(OSError,
@@ -106,6 +108,7 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
     let epev = p.epEvents[i]
     p.events[i].fd     = epev.data.fd.int
     p.events[i].events = {}
+    p.events[i].udata  = cast[ptr pointer](addr epev.data)[]
 
     if (epev.events and EPOLLIN) != 0:   p.events[i].events.incl Read
     if (epev.events and EPOLLOUT) != 0:  p.events[i].events.incl Write

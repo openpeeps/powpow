@@ -259,3 +259,71 @@ test "test_chunked_empty":
   let req = parser.getRequest()
   doAssert req.getMethod() == HttpGet
   doAssert req.getBody().len == 0
+
+# ── Test 15: Pipelining — resetForNext preserves leftover bytes ──────────────
+
+test "test_pipelining_resetForNext":
+  let parser = newHttpParser()
+  let pipelined = "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n" &
+                  "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n"
+  parser.feed(pipelined)
+  doAssert parser.isComplete()
+
+  let req1 = parser.getRequest()
+  doAssert req1.getPath() == "/first"
+
+  parser.resetForNext()
+  doAssert parser.phase == PhaseRequestLine
+  discard parser.feed(@[])
+  doAssert parser.isComplete()
+
+  let req2 = parser.getRequest()
+  doAssert req2.getPath() == "/second"
+
+  parser.resetForNext()
+  discard parser.feed(@[])
+  doAssert parser.phase == PhaseRequestLine
+  doAssert not parser.isComplete()
+
+# ── Test 16: Pipelining — POST with Content-Length ───────────────────────────
+
+test "test_pipelining_post":
+  let parser = newHttpParser()
+  let body1 = "hello"
+  let body2 = "world!!"
+  let pipelined = "POST /a HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\n" & body1 &
+                  "POST /b HTTP/1.1\r\nHost: localhost\r\nContent-Length: 7\r\n\r\n" & body2
+  parser.feed(pipelined)
+  doAssert parser.isComplete()
+
+  let req1 = parser.getRequest()
+  doAssert req1.getPath() == "/a"
+  doAssert req1.getBodyString() == "hello"
+
+  parser.resetForNext()
+  discard parser.feed(@[])
+  doAssert parser.isComplete()
+
+  let req2 = parser.getRequest()
+  doAssert req2.getPath() == "/b"
+  doAssert req2.getBodyString() == "world!!"
+
+# ── Test 17: Pipelining — partial next request stays in buffer ───────────────
+
+test "test_pipelining_partial":
+  let parser = newHttpParser()
+  parser.feed("GET /first HTTP/1.1\r\nHost: localhost\r\n\r\nGET /se")
+  doAssert parser.isComplete()
+
+  let req1 = parser.getRequest()
+  doAssert req1.getPath() == "/first"
+
+  parser.resetForNext()
+  discard parser.feed(@[])
+  doAssert not parser.isComplete(), "partial next request should not be complete"
+
+  parser.feed("cond HTTP/1.1\r\nHost: localhost\r\n\r\n")
+  doAssert parser.isComplete()
+
+  let req2 = parser.getRequest()
+  doAssert req2.getPath() == "/second"
