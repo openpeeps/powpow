@@ -54,7 +54,9 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   if Read in events:  ev.events = ev.events or EPOLLIN
   if Write in events: ev.events = ev.events or EPOLLOUT
   if edgeTriggered:   ev.events = ev.events or EPOLLET
-  cast[ptr pointer](addr ev.data)[] = udata
+  # cast[ptr pointer](addr ev.data)[] = udata
+  let packed = (cast[uint64](udata) shl 32) or cast[uint64](cast[uint32](fd))
+  cast[ptr uint64](addr ev.data)[] = packed
 
   if epoll_ctl(p.epFd, EPOLL_CTL_ADD, fd.cint, addr ev) < 0:
     raise newException(OSError,
@@ -106,9 +108,9 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
   p.count = n.int
   for i in 0 ..< n.int:
     let epev = p.epEvents[i]
-    p.events[i].fd     = epev.data.fd.int
-    p.events[i].events = {}
-    p.events[i].udata  = cast[ptr pointer](addr epev.data)[]
+    let packed = cast[ptr uint64](addr epev.data)[]
+    p.events[i].fd    = int(packed and 0xFFFF_FFFF'u64)
+    p.events[i].udata = cast[pointer](packed shr 32)
 
     if (epev.events and EPOLLIN) != 0:   p.events[i].events.incl Read
     if (epev.events and EPOLLOUT) != 0:  p.events[i].events.incl Write
