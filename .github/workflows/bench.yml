@@ -1,0 +1,64 @@
+name: benchmark
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Benchmark duration in seconds'
+        default: '10'
+        required: false
+      connections:
+        description: 'Concurrent connections'
+        default: '100'
+        required: false
+      threads:
+        description: 'Wrk threads'
+        default: '4'
+        required: false
+      path:
+        description: 'URL path'
+        default: '/hello'
+        required: false
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        nim-version:
+          - stable
+    steps:
+      - uses: actions/checkout@v3
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: ${{ matrix.nim-version }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: nimble install -Y
+      - run: sudo apt-get update && sudo apt-get install -y wrk
+      - run: nim c -d:release examples/httpserver.nim
+      - run: nim c -d:release --threads:on examples/httpserver_threads.nim
+      - name: Single-threaded (keep-alive)
+        run: |
+          ./examples/httpserver & PID=$!; sleep 1
+          wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
+              -d${{ inputs.duration }} http://localhost:9000${{ inputs.path }}
+          kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+      - name: Single-threaded (Connection: close)
+        run: |
+          ./examples/httpserver & PID=$!; sleep 1
+          wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
+              -d${{ inputs.duration }} -H 'Connection: close' \
+              http://localhost:9000${{ inputs.path }}
+          kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+      - name: Multi-threaded (keep-alive)
+        run: |
+          ./examples/httpserver_threads & PID=$!; sleep 2
+          wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
+              -d${{ inputs.duration }} http://localhost:9000${{ inputs.path }}
+          kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+      - name: Multi-threaded (Connection: close)
+        run: |
+          ./examples/httpserver_threads & PID=$!; sleep 2
+          wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
+              -d${{ inputs.duration }} -H 'Connection: close' \
+              http://localhost:9000${{ inputs.path }}
+          kill $PID 2>/dev/null; wait $PID 2>/dev/null || true

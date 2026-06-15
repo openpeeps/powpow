@@ -38,6 +38,7 @@ type
     events*:        set[EventType]
     callback*:      FdCallback
     edgeTriggered*: bool
+    gen:            int              ## generation counter (stale event guard)
 
 # ── Loop ─────────────────────────────────────────────────────────────────────
 
@@ -45,8 +46,7 @@ type
   Loop* = ref object
     ## The event loop.
     platform*: Platform          ## platform backend
-    fdWatchers:  Table[int, FdWatcher]   ## fd → watcher
-    fdGeneration: Table[int, int]        ## fd → generation counter (stale event guard)
+    fdWatchers:  Table[int, FdWatcher]   ## fd → watcher (incl. generation guard)
     nextGen:     int                     ## next generation counter value
     timers:      HeapQueue[TimerEntry]
     nextTimerId: int
@@ -65,7 +65,6 @@ proc newLoop*(): Loop =
   Loop(
     platform:    Platform.init(),
     fdWatchers:  initTable[int, FdWatcher](64),
-    fdGeneration: initTable[int, int](64),
     nextGen:     1,
     timers:      initHeapQueue[TimerEntry](),
     nextTimerId: 0,
@@ -85,7 +84,6 @@ proc close*(loop: Loop) =
   for fd in loop.fdWatchers.keys:
     discard posix.close(fd.cint)
   loop.fdWatchers.clear()
-  loop.fdGeneration.clear()
   for buf in loop.bufPool:
     deallocShared(buf)
   loop.bufPool.setLen(0)
@@ -98,9 +96,8 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
   ## Register an fd for the given `events` with a `callback`.
   let gen = loop.nextGen
   inc loop.nextGen
-  loop.fdGeneration[fd] = gen
   let watcher = FdWatcher(fd: fd, events: events, callback: callback,
-                          edgeTriggered: edgeTriggered)
+                          edgeTriggered: edgeTriggered, gen: gen)
   loop.fdWatchers[fd] = watcher
   loop.platform.add(fd, events, edgeTriggered, cast[pointer](gen))
 
@@ -109,7 +106,6 @@ proc unregister*(loop: Loop, fd: int) =
   if fd in loop.fdWatchers:
     loop.platform.remove(fd)
     loop.fdWatchers.del(fd)
-    loop.fdGeneration.del(fd)
 
 proc modify*(loop: Loop, fd: int, events: set[EventType]) =
   ## Change the events an fd watcher is interested in.
@@ -117,7 +113,7 @@ proc modify*(loop: Loop, fd: int, events: set[EventType]) =
   if fd in loop.fdWatchers:
     loop.fdWatchers[fd].events = events
     let et = loop.fdWatchers[fd].edgeTriggered
-    let gen = loop.fdGeneration.getOrDefault(fd, 0)
+    let gen = loop.fdWatchers[fd].gen
     loop.platform.modify(fd, events, et, cast[pointer](gen))
 
 # ── deferred calls ──────────────────────────────────────────────────────────
@@ -244,13 +240,12 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   # 4 — dispatch I/O events
   for i in 0 ..< nEvents:
     let pev = loop.platform.events[i]
-    if pev.fd in loop.fdWatchers:
-      # Stale event guard: if the fd was unregistered and re-registered
-      # within the same poll batch, the generation will have changed.
-      let gen = loop.fdGeneration.getOrDefault(pev.fd, 0)
-      if cast[int](pev.udata) != gen: continue
-      let w = loop.fdWatchers[pev.fd]
-      w.callback(pev.fd, pev.events)
+    let w = loop.fdWatchers.getOrDefault(pev.fd)
+    if w.callback != nil:
+      # Stale event guard: generation counter changed if fd was
+      # unregistered and re-registered within the same poll batch.
+      if cast[int](pev.udata) == w.gen:
+        w.callback(pev.fd, pev.events)
   if loop.stopFlag: return
 
   # 5 — post-poll timers (some may have expired during the poll)

@@ -25,21 +25,20 @@ let server = newMultiThreadHttpServer()
 server.get("/") do (req: HttpRequest, res: Response):
   res.status(Http200)
      .header("Content-Type", "text/html; charset=utf-8")
-     .send("")
-#      .send("""<!DOCTYPE html>
-# <html>
-# <head><title>powpow</title></head>
-# <body>
-#   <h1>⚡ powpow HTTP server</h1>
-#   <p>A high-performance, non-blocking HTTP/1.1 server in Nim.</p>
-#   <ul>
-#     <li><a href="/hello">GET /hello</a></li>
-#     <li><a href="/time">GET /time</a></li>
-#     <li><a href="/api/echo">POST /api/echo</a> — echo body back</li>
-#     <li><a href="/api/items/42">DELETE /api/items/42</a></li>
-#   </ul>
-# </body>
-# </html>""")
+     .send("""<!DOCTYPE html>
+<html>
+<head><title>powpow</title></head>
+<body>
+  <h1>⚡ powpow HTTP server</h1>
+  <p>A high-performance, non-blocking HTTP/1.1 server in Nim.</p>
+  <ul>
+    <li><a href="/hello">GET /hello</a></li>
+    <li><a href="/time">GET /time</a></li>
+    <li><a href="/api/echo">POST /api/echo</a> — echo body back</li>
+    <li><a href="/api/items/42">DELETE /api/items/42</a></li>
+  </ul>
+</body>
+</html>""")
 
 server.get("/hello") do (req: HttpRequest, res: Response):
   let name = req.getQuery()

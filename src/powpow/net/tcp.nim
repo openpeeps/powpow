@@ -8,7 +8,9 @@ import ../types
 import common
 import std/posix
 
-const MaxBufPoolSize = 1024
+const
+  MaxBufPoolSize = 1024
+  MaxConnPoolSize = 1024
 
 proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] =
   if loop.bufPool.len > 0:
@@ -21,6 +23,14 @@ proc releaseBuf(loop: Loop, buf: ptr UncheckedArray[byte]) =
     loop.bufPool.add(buf)
   else:
     deallocShared(buf)
+
+proc setLinger0(fd: SocketHandle) =
+  # Enable SO_LINGER with l_linger=0 so close() sends RST instead of FIN,
+  # eliminating TIME_WAIT on the server socket.
+  var lin: TLinger
+  lin.l_onoff = 1
+  lin.l_linger = 0
+  discard setsockopt(fd, SOL_SOCKET, SO_LINGER, addr lin, sizeof(lin).SockLen)
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +67,7 @@ type
     onAccept:  OnAccept
     onData:    OnData
     onClose*:   OnClose
+    connPool:  seq[Connection]
 
 # ── Connection ───────────────────────────────────────────────────────────────
 
@@ -67,12 +78,10 @@ proc close*(conn: Connection) =
   if conn.corked:
     setTcpCork(conn.fd, false)
     conn.corked = false
+  setLinger0(conn.fd)
   conn.loop.unregister(conn.fd.int)
   discard posix.close(conn.fd.cint)
-  if conn.readBuf != nil:
-    releaseBuf(conn.loop, conn.readBuf)
-    conn.readBuf = nil
-  conn.writeBuf = @[]
+  conn.writeBuf.setLen(0)
   conn.writePos = 0
 
 proc flushWriteBuffer(conn: Connection): bool =
@@ -91,7 +100,7 @@ proc flushWriteBuffer(conn: Connection): bool =
     conn.writePos += n
 
   # Buffer fully flushed - clear it
-  conn.writeBuf = @[]
+  conn.writeBuf.setLen(0)
   conn.writePos = 0
   if conn.corked:
     setTcpCork(conn.fd, false)
@@ -253,6 +262,46 @@ proc closeAfterDrain*(conn: Connection) =
   else:
     conn.closeAfterFlush = true
 
+proc closeAndRelease*(conn: Connection) =
+  ## Close a connection and release all resources for good.
+  ## Unlike plain close(), this frees the readBuf back to the pool.
+  ## Used for client-side connections (connect) that don't have a TcpServer pool.
+  conn.close()
+  if conn.readBuf != nil:
+    releaseBuf(conn.loop, conn.readBuf)
+    conn.readBuf = nil
+
+proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
+  ## Obtain a Connection from the pool or create a new one.
+  if server.connPool.len > 0:
+    result = server.connPool.pop()
+    result.fd = fd
+    result.loop = server.loop
+    result.state = Connected
+  else:
+    result = Connection(
+      fd:        fd,
+      loop:      server.loop,
+      state:     Connected,
+      readBuf:   acquireBuf(server.loop),
+      readBufLen: DefaultBufSize,
+    )
+
+proc releaseConnection(server: TcpServer, conn: Connection) =
+  ## Reset a Connection and return it to the pool for reuse.
+  conn.state = Closed
+  conn.fd = SocketHandle(-1)
+  conn.corked = false
+  conn.closeAfterFlush = false
+  conn.writeBuf.setLen(0)
+  conn.writePos = 0
+  if server.connPool.len < MaxConnPoolSize:
+    server.connPool.add(conn)
+  else:
+    if conn.readBuf != nil:
+      releaseBuf(conn.loop, conn.readBuf)
+      conn.readBuf = nil
+
 # ── TcpServer ────────────────────────────────────────────────────────────────
 
 proc handleClientRead(conn: Connection, onData: OnData, onClose: OnClose) =
@@ -286,9 +335,17 @@ proc acceptClients(server: TcpServer) =
   while true:
     var clientAddr: Sockaddr_storage
     var addrLen: SockLen = sizeof(clientAddr).SockLen
-    let clientFd = posix.accept(server.fd,
-                                 cast[ptr Sockaddr](addr clientAddr),
-                                 addr addrLen)
+    when defined(linux):
+      const SockFlags = O_NONBLOCK or O_CLOEXEC
+      let clientFd = posix.accept4(server.fd,
+                                   cast[ptr Sockaddr](addr clientAddr),
+                                   addr addrLen, SockFlags)
+    else:
+      let clientFd = posix.accept(server.fd,
+                                   cast[ptr Sockaddr](addr clientAddr),
+                                   addr addrLen)
+      if clientFd.int >= 0:
+        setNonBlocking(clientFd)
     if clientFd.int < 0:
       if errno == EAGAIN or errno == EWOULDBLOCK:
         return  # No more pending connections
@@ -298,18 +355,10 @@ proc acceptClients(server: TcpServer) =
       server.loop.modify(server.fd.int, {Read})
       return
 
-    # accept() doesn't have SOCK_NONBLOCK flag, set it manually
-    setNonBlocking(clientFd)
     setTcpNoDelay(SocketHandle(clientFd))
 
-    # Build the Connection object
-    let conn = Connection(
-      fd:        SocketHandle(clientFd),
-      loop:      server.loop,
-      state:     Connected,
-      readBuf:   acquireBuf(server.loop),
-      readBufLen: DefaultBufSize,
-    )
+    # Build the Connection object (reuse from pool if available)
+    let conn = acquireConnection(server, SocketHandle(clientFd))
 
     # Notify user
     if server.onAccept != nil:
@@ -324,12 +373,14 @@ proc acceptClients(server: TcpServer) =
         if Error in ev:
           conn.close()
           if server.onClose != nil: server.onClose(conn)
+          server.releaseConnection(conn)
           return
         if Write in ev:
           if conn.flushWriteBuffer():
             if conn.closeAfterFlush:
               conn.close()
               if server.onClose != nil: server.onClose(conn)
+              server.releaseConnection(conn)
               return
             if conn.state == Connected:
               conn.loop.modify(fd, {Read})
@@ -338,6 +389,8 @@ proc acceptClients(server: TcpServer) =
         if Hup in ev and conn.state == Connected:
           conn.close()
           if server.onClose != nil: server.onClose(conn)
+        if conn.state == Closed:
+          server.releaseConnection(conn)
     )
 
 proc listen*(server: TcpServer, address: string, port: int) =
@@ -368,7 +421,12 @@ proc listen*(server: TcpServer, address: string, port: int) =
     server.acceptClients()
 
 proc close*(server: TcpServer) =
-  ## Close the server socket.
+  ## Close the server socket and release pooled connections.
+  for conn in server.connPool:
+    if conn.readBuf != nil:
+      releaseBuf(conn.loop, conn.readBuf)
+      conn.readBuf = nil
+  server.connPool.setLen(0)
   if server.fd.int >= 0:
     server.loop.unregister(server.fd.int)
     discard posix.close(server.fd.cint)
@@ -380,13 +438,7 @@ proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
   ## distribute connections to worker threads.
   ## The fd must already be non-blocking with TCP_NODELAY set.
 
-  let conn = Connection(
-    fd:        clientFd,
-    loop:      server.loop,
-    state:     Connected,
-    readBuf:   acquireBuf(server.loop),
-    readBufLen: DefaultBufSize,
-  )
+  let conn = acquireConnection(server, clientFd)
 
   if server.onAccept != nil:
     server.onAccept(conn)
@@ -398,12 +450,14 @@ proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
       if Error in ev:
         conn.close()
         if server.onClose != nil: server.onClose(conn)
+        server.releaseConnection(conn)
         return
       if Write in ev:
         if conn.flushWriteBuffer():
           if conn.closeAfterFlush:
             conn.close()
             if server.onClose != nil: server.onClose(conn)
+            server.releaseConnection(conn)
             return
           if conn.state == Connected:
             conn.loop.modify(fd, {Read})
@@ -412,6 +466,8 @@ proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
       if Hup in ev and conn.state == Connected:
         conn.close()
         if server.onClose != nil: server.onClose(conn)
+      if conn.state == Closed:
+        server.releaseConnection(conn)
   )
 
 proc newTcpServer*(loop: Loop,
@@ -425,6 +481,7 @@ proc newTcpServer*(loop: Loop,
     onAccept: onAccept,
     onData:   onData,
     onClose:  onClose,
+    connPool: @[],
   )
 
 # ── Client connect ───────────────────────────────────────────────────────────
@@ -455,7 +512,7 @@ proc connect*(loop: Loop, address: string, port: int,
   let sLen = getSockLen(addr addrBuf)
   let ret = posix.connect(fd, cast[ptr Sockaddr](addr addrBuf), sLen)
   if ret < 0 and errno != EINPROGRESS:
-    conn.close()
+    conn.closeAndRelease()
     raise newException(NetError, "connect() failed")
 
   if ret == 0:
@@ -463,13 +520,13 @@ proc connect*(loop: Loop, address: string, port: int,
     conn.state = Connected
     conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
       if Error in ev:
-        conn.close()
+        conn.closeAndRelease()
         if onClose != nil: onClose(conn)
         return
       if Write in ev:
         if conn.flushWriteBuffer():
           if conn.closeAfterFlush:
-            conn.close()
+            conn.closeAndRelease()
             if onClose != nil: onClose(conn)
             return
           if conn.state == Connected:
@@ -477,7 +534,7 @@ proc connect*(loop: Loop, address: string, port: int,
       if Read in ev or Hup in ev:
         conn.handleClientRead(onData, onClose)
       if Hup in ev and conn.state == Connected:
-        conn.close()
+        conn.closeAndRelease()
         if onClose != nil: onClose(conn)
     onConnect(conn)
     if conn.state == Closed: return
@@ -490,20 +547,20 @@ proc connect*(loop: Loop, address: string, port: int,
       var errLen: SockLen = sizeof(err).SockLen
       discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
       if err != 0:
-        conn.close()
+        conn.closeAndRelease()
         return
 
       conn.state = Connected
       setTcpNoDelay(SocketHandle(wfd))
       conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
         if Error in ev:
-          conn.close()
+          conn.closeAndRelease()
           if onClose != nil: onClose(conn)
           return
         if Write in ev:
           if conn.flushWriteBuffer():
             if conn.closeAfterFlush:
-              conn.close()
+              conn.closeAndRelease()
               if onClose != nil: onClose(conn)
               return
             if conn.state == Connected:
@@ -511,7 +568,7 @@ proc connect*(loop: Loop, address: string, port: int,
         if Read in ev or Hup in ev:
           conn.handleClientRead(onData, onClose)
         if Hup in ev and conn.state == Connected:
-          conn.close()
+          conn.closeAndRelease()
           if onClose != nil: onClose(conn)
       onConnect(conn)
       if conn.state == Closed: return

@@ -45,16 +45,18 @@ type
     ## A non-blocking HTTP/1.1 server.
     tcpServer: TcpServer
     loop:      Loop
-    routes:    Table[string, Handler]      ## "METHOD /path" → handler
+    routes:    Table[HttpMethod, Table[string, Handler]]  ## method → path → handler
     fallback:  Handler                      ## Catch-all handler (nil = 404)
     sessions:  Table[int, Session]          ## fd → parser session
     parserPool: seq[HttpParser]             ## recycled parser objects
+    resPool:   seq[Response]                ## recycled response objects
     keepAliveMs: int
 
 const
   DefaultKeepAliveMs* = 5_000
   ServerHeader = "Server: powpow/0.1.0\r\n"
   MaxParserPoolSize = 2048
+  MaxResPoolSize = 4048
 
 # ── Response ─────────────────────────────────────────────────────────────────
 
@@ -282,10 +284,25 @@ proc markSent*(res: Response) {.inline.} =
   ## Used by upgrade handlers that send the response manually.
   res.sent = true
 
-# ── Route key helper ─────────────────────────────────────────────────────────
+# ── Response pooling ──────────────────────────────────────────────────────────
 
-proc routeKey(m: HttpMethod, path: string): string {.inline.} =
-  $m & " " & path
+proc acquireResponse(server: HttpServer, conn: Connection): Response =
+  if server.resPool.len > 0:
+    result = server.resPool.pop()
+    result.conn = conn
+    result.headers.setLen(0)
+    result.bodyBytes.setLen(0)
+    result.sent = false
+    result.statusCode = Http200
+    result.closeConn = false
+  else:
+    result = Response(
+      conn: conn, sent: false, statusCode: Http200,
+      headers: @[], bodyBytes: @[], closeConn: false)
+
+proc releaseResponse(server: HttpServer, res: Response) =
+  if server.resPool.len < MaxResPoolSize:
+    server.resPool.add(res)
 
 # ── HttpServer lifecycle ─────────────────────────────────────────────────────
 
@@ -294,10 +311,11 @@ proc newHttpServer*(loop: Loop): HttpServer =
   HttpServer(
     tcpServer: nil,
     loop:      loop,
-    routes:    initTable[string, Handler](64),
+    routes:    initTable[HttpMethod, Table[string, Handler]](8),
     fallback:  nil,
     sessions:  initTable[int, Session](64),
     parserPool: @[],
+    resPool:   @[],
     keepAliveMs: DefaultKeepAliveMs
   )
 
@@ -329,22 +347,26 @@ proc removeSession*(server: HttpServer, fd: int) =
 proc dispatchRequest(server: HttpServer, conn: Connection,
                      req: HttpRequest) =
   ## Find a matching route and invoke the handler.
-  let key = routeKey(req.getMethod(), req.getPath())
-  let res = newResponse(conn)
+  let meth = req.getMethod()
+  let path = req.getPath()
+  let res = acquireResponse(server, conn)
 
-  # Respect client's "Connection: close" header
-  let reqHeaders = req.getHeaders()
-  if reqHeaders.hasKey("Connection"):
-    let connVal = reqHeaders["Connection"]
-    if connVal.len > 0 and connVal == "close":
-      res.closeConn = true
+  # Respect client's "Connection: close" header (fast-scanned during parse)
+  if req.getConnectionClose():
+    res.closeConn = true
 
-  if key in server.routes:
-    server.routes[key](req, res)
-  elif server.fallback != nil:
-    server.fallback(req, res)
-  else:
-    res.sendError(Http404, "Not Found")
+  var matched = false
+  if meth in server.routes:
+    let handler = server.routes[meth].getOrDefault(path)
+    if handler != nil:
+      handler(req, res)
+      matched = true
+  if not matched:
+    if server.fallback != nil:
+      server.fallback(req, res)
+    else:
+      res.sendError(Http404, "Not Found")
+  releaseResponse(server, res)
 
 
 proc handleConnectionData(server: HttpServer, conn: Connection,
@@ -368,7 +390,7 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
 
   if server.sessions[fd].parser.isError():
     let errCode = server.sessions[fd].parser.error()
-    let res = newResponse(conn)
+    let res = acquireResponse(server, conn)
     res.sendError(errCode, "Bad Request")
     if fd in server.sessions:
       server.sessions[fd].parser.reset()
@@ -378,7 +400,9 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
 proc route*(server: HttpServer, meth: HttpMethod, path: string,
             handler: Handler) =
   ## Register a route handler.
-  server.routes[routeKey(meth, path)] = handler
+  if meth notin server.routes:
+    server.routes[meth] = initTable[string, Handler]()
+  server.routes[meth][path] = handler
 
 proc get*(server: HttpServer, path: string, handler: Handler) =
   ## Register a GET route handler.

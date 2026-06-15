@@ -55,6 +55,7 @@ type
     headerCount: int            ## Number of headers parsed
     contentLength: int          ## From Content-Length header (-1 if absent)
     transferChunked: bool       ## Transfer-Encoding: chunked
+    connectionClose*: bool      ## Connection: close seen
 
     # Chunked transfer encoding state
     chunkStart: int             ## Start of current chunk data
@@ -145,6 +146,8 @@ proc reset*(p: HttpParser) =
   p.chunkBodyLen  = 0
   p.phase         = PhaseRequestLine
   p.errorCode     = Http200
+  if p.buf.len > 8192:  # shrink oversized buffers back to 4KB
+    p.buf = newSeq[byte](4096)
 
 proc resetForNext*(p: HttpParser) =
   ## Reset the parser for the next pipelined request, preserving any
@@ -170,6 +173,7 @@ proc resetForNext*(p: HttpParser) =
   p.headerCount   = 0
   p.contentLength = -1
   p.transferChunked = false
+  p.connectionClose = false
   p.chunkStart    = 0
   p.chunkSize     = -1
   p.chunkParsed   = 0
@@ -331,6 +335,34 @@ proc scanHeaders(p: HttpParser): bool =
                   inc valStart
                 if i - valStart >= 7:
                   p.transferChunked = true
+
+        # Quick check for Connection: close
+        if lineLen >= 12:
+          let c = char(buf[lineStart])
+          if c == 'C' or c == 'c':
+            var isCon = true
+            const conKey = "connection:"
+            if lineLen >= conKey.len:
+              for j in 0 ..< conKey.len:
+                let ch = char(buf[lineStart + j])
+                if ch != conKey[j] and ch != (char(ord(conKey[j]) xor 32)):
+                  isCon = false
+                  break
+              if isCon:
+                var valStart = lineStart + conKey.len
+                while valStart < i and char(buf[valStart]) == ' ':
+                  inc valStart
+                let valLen = i - valStart
+                const closeKey = "close"
+                if valLen >= closeKey.len:
+                  var isClose = true
+                  for j in 0 ..< closeKey.len:
+                    let ch = char(buf[valStart + j])
+                    if ch != closeKey[j] and ch != (char(ord(closeKey[j]) xor 32)):
+                      isClose = false
+                      break
+                  if isClose:
+                    p.connectionClose = true
 
         inc i  # skip \r
       inc i  # skip \n
@@ -675,6 +707,10 @@ proc getHeaders*(req: HttpRequest): HttpHeaders =
 proc getContentLength*(req: HttpRequest): int {.inline.} =
   ## Get the Content-Length value, or -1 if not present.
   req.parser.contentLength
+
+proc getConnectionClose*(req: HttpRequest): bool {.inline.} =
+  ## Returns true if the client sent "Connection: close".
+  req.parser.connectionClose
 
 proc getBody*(req: HttpRequest): seq[byte] =
   ## Get the request body. Returns empty seq if no body.
