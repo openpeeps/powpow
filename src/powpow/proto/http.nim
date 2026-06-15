@@ -10,6 +10,7 @@
 
 import ../net/tcp
 import ../loop
+import ./simdscan
 import std/[httpcore, strutils, tables]
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -55,6 +56,14 @@ type
     contentLength: int          ## From Content-Length header (-1 if absent)
     transferChunked: bool       ## Transfer-Encoding: chunked
 
+    # Chunked transfer encoding state
+    chunkStart: int             ## Start of current chunk data
+    chunkSize: int              ## Size of current chunk
+    chunkParsed: int            ## Bytes parsed in current chunk
+    bodyStart: int              ## Start of body data
+    bodyLen: int                ## Total body length (for Content-Length)
+    chunkBodyLen: int           ## Total decoded chunked body length
+
     phase:      ParsePhase
     errorCode:  HttpCode
 
@@ -92,29 +101,6 @@ proc parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.}
   of 'T': HttpTrace
   else:   HttpGet  # fallback for unknown methods
 
-# ── Byte scanning helpers ────────────────────────────────────────────────────
-
-proc findCRLF(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
-  ## Find \r\n starting from `start`. Returns index of \r, or -1 if not found.
-  let limit = min(maxLen - 1, start + MaxRequestLine)
-  var i = start
-  while i < limit:
-    if char(buf[i]) == '\r' and char(buf[i + 1]) == '\n':
-      return i
-    inc i
-  return -1
-
-proc findDoubleCRLF(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
-  ## Find \r\n\r\n starting from `start`. Returns index past the final \n, or -1.
-  let limit = maxLen - 3
-  var i = start
-  while i <= limit:
-    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n' and
-       char(buf[i+2]) == '\r' and char(buf[i+3]) == '\n':
-      return i + 4  # past the \r\n\r\n
-    inc i
-  return -1
-
 # ── Parser lifecycle ─────────────────────────────────────────────────────────
 
 proc newHttpParser*(initialBufSize = 4096): HttpParser =
@@ -126,6 +112,12 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     pathStart:     -1,
     queryStart:    -1,
     contentLength: -1,
+    chunkStart:    0,
+    chunkSize:     -1,
+    chunkParsed:   0,
+    bodyStart:     0,
+    bodyLen:       0,
+    chunkBodyLen:  0,
     phase:         PhaseRequestLine,
     errorCode:     Http200,
   )
@@ -145,6 +137,12 @@ proc reset*(p: HttpParser) =
   p.headerCount   = 0
   p.contentLength = -1
   p.transferChunked = false
+  p.chunkStart    = 0
+  p.chunkSize     = -1
+  p.chunkParsed   = 0
+  p.bodyStart     = 0
+  p.bodyLen       = 0
+  p.chunkBodyLen  = 0
   p.phase         = PhaseRequestLine
   p.errorCode     = Http200
 
@@ -325,6 +323,176 @@ proc ensureCapacity(p: HttpParser, needed: int) =
       copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
     p.buf = newBuf
 
+proc parseChunkSize(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
+  ## Parse hexadecimal chunk size. Returns -1 on error, -2 if incomplete.
+  ## Handles chunk extensions (e.g., "5;ext=value").
+  var i = start
+  var size = 0
+  var foundDigit = false
+
+  while i < maxLen:
+    let c = char(buf[i])
+    if c >= '0' and c <= '9':
+      size = size * 16 + (ord(c) - ord('0'))
+      foundDigit = true
+    elif c >= 'a' and c <= 'f':
+      size = size * 16 + (ord(c) - ord('a') + 10)
+      foundDigit = true
+    elif c >= 'A' and c <= 'F':
+      size = size * 16 + (ord(c) - ord('A') + 10)
+      foundDigit = true
+    elif c == ';' or c == ' ':
+      # Chunk extension - skip until CRLF
+      # We need to find the CRLF to consider this valid
+      while i < maxLen:
+        if char(buf[i]) == '\r':
+          if i + 1 < maxLen and char(buf[i + 1]) == '\n':
+            if foundDigit:
+              return size
+            return -1  # Empty chunk size
+          return -2  # Incomplete
+        inc i
+      return -2  # Incomplete - didn't find CRLF
+    elif c == '\r':
+      if i + 1 < maxLen and char(buf[i + 1]) == '\n':
+        if foundDigit:
+          return size
+        return -1  # Empty chunk size
+      return -2  # Incomplete
+    else:
+      return -1  # Invalid character
+    inc i
+
+  if not foundDigit:
+    return -1
+  return -2  # Incomplete - need more data
+
+proc parseChunkedBody(p: HttpParser): bool =
+  ## Parse chunked transfer encoding. Returns true when complete.
+  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+  var pos = p.bodyStart
+
+  while pos < p.bufLen:
+    # Check if this is the last chunk (size 0)
+    if p.chunkSize == 0:
+      # After the last chunk, we expect optional trailers followed by CRLF
+      # For simplicity, just look for CRLF to indicate end of chunked body
+      # (trailers are rare in practice and can be handled later if needed)
+      if pos < p.bufLen and char(buf[pos]) == '\r':
+        if pos + 1 < p.bufLen and char(buf[pos + 1]) == '\n':
+          p.phase = PhaseComplete
+          return true
+        else:
+          # Incomplete - need more data
+          p.bodyStart = pos
+          return false
+      elif pos < p.bufLen and char(buf[pos]) == '\n':
+        # Handle LF-only line ending
+        p.phase = PhaseComplete
+        return true
+      else:
+        # Incomplete - need more data
+        p.bodyStart = pos
+        return false
+
+    # Need at least chunk size + CRLF
+    if p.chunkSize < 0:
+      # Parse chunk size
+      let sizeEnd = findCRLF(buf, pos, p.bufLen)
+      if sizeEnd < 0:
+        # Incomplete - need more data
+        if p.bufLen - pos > 16:  # Max chunk size line length
+          p.phase = PhaseError
+          p.errorCode = Http400
+          return false
+        p.bodyStart = pos
+        return false
+
+      # Parse chunk size - pass sizeEnd + 2 to include the CRLF
+      let chunkSize = parseChunkSize(buf, pos, sizeEnd + 2)
+      if chunkSize == -1:
+        p.phase = PhaseError
+        p.errorCode = Http400
+        return false
+      if chunkSize == -2:
+        p.bodyStart = pos
+        return false
+
+      p.chunkSize = chunkSize
+      p.chunkParsed = 0
+      pos = sizeEnd + 2  # Skip CRLF
+
+      # If this is the last chunk, continue to the next iteration to handle it
+      if p.chunkSize == 0:
+        continue
+
+    # Read chunk data - make sure we're still within buffer
+    if pos >= p.bufLen:
+      p.bodyStart = pos
+      return false  # Need more data
+
+    let remaining = p.chunkSize - p.chunkParsed
+    let available = p.bufLen - pos
+
+    if available >= remaining:
+      # Have enough data for this chunk
+      # Copy chunk data to body buffer
+      let oldBodyLen = p.chunkBodyLen
+      p.chunkBodyLen += remaining
+
+      # Ensure body buffer capacity
+      if p.buf.len < p.headerEnd + p.chunkBodyLen:
+        let newCap = max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen)
+        var newBuf = newSeq[byte](newCap)
+        if p.bufLen > 0:
+          copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
+        p.buf = newBuf
+
+      # Copy chunk data to body area
+      if remaining > 0:
+        copyMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], remaining)
+
+      pos += remaining
+      p.chunkParsed = p.chunkSize
+
+      # Expect CRLF after chunk data - need at least 2 more bytes
+      if pos + 1 < p.bufLen and char(buf[pos]) == '\r' and char(buf[pos + 1]) == '\n':
+        pos += 2
+        p.chunkSize = -1  # Ready for next chunk
+        p.chunkParsed = 0
+      elif pos >= p.bufLen or (pos + 1 >= p.bufLen):
+        # Incomplete - need more data for CRLF
+        p.bodyStart = pos
+        return false
+      else:
+        p.phase = PhaseError
+        p.errorCode = Http400
+        return false
+    else:
+      # Partial chunk - copy what we have
+      if available > 0:
+        let oldBodyLen = p.chunkBodyLen
+        p.chunkBodyLen += available
+
+        # Ensure body buffer capacity
+        if p.buf.len < p.headerEnd + p.chunkBodyLen:
+          let newCap = max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen)
+          var newBuf = newSeq[byte](newCap)
+          if p.bufLen > 0:
+            copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
+          p.buf = newBuf
+
+        # Copy partial chunk data
+        copyMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], available)
+
+        p.chunkParsed += available
+      pos = p.bufLen
+      p.bodyStart = pos
+      return false  # Need more data
+
+  p.bodyStart = pos
+  return false  # Need more data
+
 proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
   ## Feed raw bytes from the network into the parser.
   ## Returns the current parse phase after processing.
@@ -349,10 +517,18 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
       return p.phase
 
   if p.phase == PhaseBody:
-    let expected = if p.contentLength >= 0: p.headerEnd + p.contentLength
-                   else: p.headerEnd  # chunked — TODO: proper chunked decoding
-    if p.bufLen >= expected:
-      p.phase = PhaseComplete
+    if p.transferChunked:
+      # Chunked transfer encoding
+      if p.bodyStart == 0:
+        p.bodyStart = p.headerEnd
+      if p.parseChunkedBody():
+        p.phase = PhaseComplete
+    else:
+      # Content-Length based
+      let expected = p.headerEnd + p.contentLength
+      if p.bufLen >= expected:
+        p.bodyLen = p.contentLength
+        p.phase = PhaseComplete
 
   return p.phase
 
@@ -471,7 +647,13 @@ proc getBody*(req: HttpRequest): seq[byte] =
   ## Get the request body. Returns empty seq if no body.
   if not req.bodyReady:
     let p = req.parser
-    if p.contentLength > 0 and p.bufLen >= p.headerEnd + p.contentLength:
+    if p.transferChunked and p.chunkBodyLen > 0:
+      # Chunked body - already decoded into buffer
+      req.bodyVal = newSeq[byte](p.chunkBodyLen)
+      copyMem(addr req.bodyVal[0],
+              addr p.buf[p.headerEnd], p.chunkBodyLen)
+    elif p.contentLength > 0 and p.bufLen >= p.headerEnd + p.contentLength:
+      # Content-Length body
       req.bodyVal = newSeq[byte](p.contentLength)
       copyMem(addr req.bodyVal[0],
               addr p.buf[p.headerEnd], p.contentLength)
@@ -497,7 +679,8 @@ proc getRemainingData*(p: HttpParser): seq[byte] =
   ## Return any unconsumed bytes after the HTTP headers (and body, if present).
   ## Useful after an HTTP/1.1 upgrade (e.g. WebSocket) where extra bytes
   ## from the initial TCP read may contain the first protocol frames.
-  let consumed = if p.contentLength > 0: p.headerEnd + p.contentLength
+  let consumed = if p.transferChunked: p.headerEnd + p.chunkBodyLen
+                 elif p.contentLength > 0: p.headerEnd + p.contentLength
                  else: p.headerEnd
   let leftover = p.bufLen - consumed
   if leftover > 0:

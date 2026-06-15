@@ -132,3 +132,68 @@ test "test_udp":
     "UDP data mismatch: " & cast[string](recvData)
   loop.close()
 
+# ── Test 4: TCP write buffering ─────────────────────────────────────────────
+
+test "test_tcp_write_buffering":
+  var clientConnected = false
+  var clientReceived: seq[byte] = @[]
+  var serverDone = false
+  var totalReceived: seq[byte] = @[]
+
+  let loop = newLoop()
+
+  # Create a large payload that will likely trigger EAGAIN
+  var largePayload: string
+  for i in 0..10000:
+    largePayload.add("Hello powpow! This is a test message for write buffering. ")
+
+  # Create server that echoes back received data
+  let server = newTcpServer(loop,
+    onAccept = proc(conn: Connection) =
+      discard  # accepted
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      totalReceived.add(@data)
+      # Echo back
+      discard conn.send(data)
+    ,
+  )
+  server.listen("127.0.0.1", 19879)
+
+  # After a short delay, connect a client
+  discard loop.addTimer(50) do (id: int):
+    loop.connect("127.0.0.1", 19879,
+      onConnect = proc(conn: Connection) =
+        clientConnected = true
+        # Send large data - should trigger buffering
+        let sent = conn.send(largePayload)
+        doAssert sent == largePayload.len, "send should return total length (buffered)"
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        clientReceived.add(@data)
+        # Check if we received all data back
+        if clientReceived.len >= largePayload.len:
+          conn.close()
+          server.close()
+          serverDone = true
+          loop.stop()
+      ,
+    )
+
+  # Safety timeout — don't hang forever
+  discard loop.addTimer(5000) do (id: int):
+    server.close()
+    serverDone = true
+    loop.stop()
+
+  loop.run()
+
+  doAssert clientConnected, "client should have connected"
+  echo totalReceived.len # 580020
+  echo largePayload.len # 580058
+  doAssert totalReceived.len == largePayload.len, "server should have received all data"
+  doAssert cast[string](totalReceived) == largePayload, "received data mismatch"
+  doAssert clientReceived.len == largePayload.len, "client should have received echo"
+  doAssert cast[string](clientReceived) == largePayload, "echo mismatch"
+  loop.close()
+
