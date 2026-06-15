@@ -6,7 +6,8 @@
 
 ## powpow/platform/kqueue.nim — kqueue backend for macOS / BSD.
 ##
-## Uses Nim's std/kqueue for high-performance I/O event multiplexing.
+## Uses Nim's std/kqueue for high-performance I/O event multiplexing
+## with a pipe-based wake mechanism for cross-thread loop interruption.
 
 import ../types
 import std/[kqueue, posix]
@@ -17,22 +18,21 @@ const KQ_MAX_EVENTS = 1024
 
 type
   PlatformEvent* = object
-    ## A processed I/O event from the kqueue backend.
     fd*:     int
     events*: set[EventType]
-    udata*:  pointer          ## Opaque user data from registration
+    udata*:  pointer
 
   Platform* = ref object
-    ## kqueue-based I/O multiplexer with pre-allocated event buffers.
-    kqFd:    cint
-    kEvents: seq[KEvent]          ## raw kevent buffer
-    events*: seq[PlatformEvent]   ## converted events — access via [0..<count]
-    count*:  int                  ## number of events from last poll
+    kqFd:       cint
+    kEvents:    seq[KEvent]
+    events*:    seq[PlatformEvent]
+    count*:     int
+    wakeReadFd: cint
+    wakeWriteFd: cint
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 proc init*(T: typedesc[Platform]): T =
-  ## Create a new kqueue platform backend.
   result = T()
   result.kqFd = kqueue()
   if result.kqFd < 0:
@@ -41,8 +41,35 @@ proc init*(T: typedesc[Platform]): T =
   result.events  = newSeq[PlatformEvent](KQ_MAX_EVENTS)
   result.count   = 0
 
+  var pipeFds: array[2, cint]
+  if posix.pipe(pipeFds) < 0:
+    raise newException(OSError, "powpow: pipe() failed for wake mechanism")
+  result.wakeReadFd = pipeFds[0]
+  result.wakeWriteFd = pipeFds[1]
+  let flags = fcntl(result.wakeReadFd, F_GETFL, 0)
+  if flags >= 0: discard fcntl(result.wakeReadFd, F_SETFL, flags or O_NONBLOCK)
+  let wflags = fcntl(result.wakeWriteFd, F_GETFL, 0)
+  if wflags >= 0: discard fcntl(result.wakeWriteFd, F_SETFL, wflags or O_NONBLOCK)
+
+  var wev: KEvent
+  wev.ident  = result.wakeReadFd.csize_t
+  wev.filter = EVFILT_READ
+  wev.flags  = EV_ADD or EV_CLEAR
+  wev.fflags = 0
+  wev.data   = 0
+  wev.udata  = nil
+  if kevent(result.kqFd, addr wev, 1, nil, 0, nil) < 0:
+    discard posix.close(result.wakeReadFd)
+    discard posix.close(result.wakeWriteFd)
+    raise newException(OSError, "powpow: kevent ADD failed for wake fd")
+
 proc close*(p: Platform) =
-  ## Close the kqueue fd and release resources.
+  if p.wakeReadFd >= 0:
+    discard posix.close(p.wakeReadFd)
+    p.wakeReadFd = -1
+  if p.wakeWriteFd >= 0:
+    discard posix.close(p.wakeWriteFd)
+    p.wakeWriteFd = -1
   if p.kqFd >= 0:
     discard posix.close(p.kqFd)
     p.kqFd = -1
@@ -51,9 +78,6 @@ proc close*(p: Platform) =
 
 proc add*(p: Platform, fd: int, events: set[EventType],
           edgeTriggered = false, udata: pointer = nil) =
-  ## Register interest in `events` on `fd`.
-  ## `edgeTriggered` uses EV_CLEAR for edge-triggered notification.
-  ## `udata` is opaque user data returned in `PlatformEvent.udata` on poll.
   var n = 0
   var changes: array[2, KEvent]
   let flags: cushort =
@@ -84,8 +108,6 @@ proc add*(p: Platform, fd: int, events: set[EventType],
         "powpow: kevent ADD failed for fd " & $fd)
 
 proc remove*(p: Platform, fd: int) =
-  ## Remove all event registrations for `fd`.
-  # Best-effort: try both filters, ignore errors if not registered.
   var rd: KEvent
   rd.ident  = fd.csize_t
   rd.filter = EVFILT_READ
@@ -107,17 +129,12 @@ proc remove*(p: Platform, fd: int) =
 
 proc modify*(p: Platform, fd: int, events: set[EventType],
              edgeTriggered = false, udata: pointer = nil) =
-  ## Change the event interests for an already-registered `fd`.
-  ## Uses a single kevent() call: EV_ADD for desired filters,
-  ## EV_DELETE for removed ones. Preserves edge-triggered state
-  ## for filters that remain active.
   var n = 0
   var changes: array[2, KEvent]
   let flags: cushort =
     if edgeTriggered: EV_ADD or EV_CLEAR
     else:             EV_ADD
 
-  # READ filter: EV_ADD if desired, EV_DELETE otherwise
   changes[n].ident  = fd.csize_t
   changes[n].filter = EVFILT_READ
   changes[n].fflags = 0
@@ -129,7 +146,6 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
     changes[n].flags = EV_DELETE
   inc n
 
-  # WRITE filter: EV_ADD if desired, EV_DELETE otherwise
   changes[n].ident  = fd.csize_t
   changes[n].filter = EVFILT_WRITE
   changes[n].fflags = 0
@@ -143,16 +159,15 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
 
   discard kevent(p.kqFd, addr changes[0], n.cint, nil, 0, nil)
 
+# ── Wake ─────────────────────────────────────────────────────────────────────
+
+proc wake*(p: Platform) =
+  var byte: byte = 0
+  discard posix.write(p.wakeWriteFd, addr byte, 1)
+
 # ── Polling ──────────────────────────────────────────────────────────────────
 
 proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
-  ## Poll for I/O events.
-  ##
-  ## - `timeoutMs = -1` — block until an event fires
-  ## - `timeoutMs = 0`  — return immediately (non-blocking)
-  ## - `timeoutMs > 0`  — wait up to N milliseconds
-  ##
-  ## Returns the number of events. Access them via `p.events[0..<p.count]`.
   var ts: Timespec
   var tsPtr: ptr Timespec = nil
 
@@ -167,28 +182,35 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
                addr p.kEvents[0], KQ_MAX_EVENTS.cint, tsPtr)
     if n < 0:
       if errno == EINTR:
-        continue  # interrupted by signal — retry
+        continue
       p.count = 0
       return 0
     if n == 0:
       p.count = 0
-      return 0  # timeout
+      return 0
     break
 
-  p.count = n.int
+  p.count = 0
   for i in 0 ..< n.int:
     let kev = p.kEvents[i]
-    p.events[i].fd     = kev.ident.int
-    p.events[i].events = {}
-    p.events[i].udata  = kev.udata
+    if kev.ident.int == p.wakeReadFd:
+      var buf: array[8, byte]
+      discard posix.read(p.wakeReadFd, addr buf[0], 8)
+      continue
+
+    p.events[p.count].fd     = kev.ident.int
+    p.events[p.count].events = {}
+    p.events[p.count].udata  = kev.udata
 
     if (kev.flags and EV_ERROR) != 0:
-      p.events[i].events.incl Error
+      p.events[p.count].events.incl Error
     if (kev.flags and EV_EOF) != 0:
-      p.events[i].events.incl Hup
+      p.events[p.count].events.incl Hup
     if kev.filter == EVFILT_READ and (kev.flags and EV_ERROR) == 0:
-      p.events[i].events.incl Read
+      p.events[p.count].events.incl Read
     elif kev.filter == EVFILT_WRITE and (kev.flags and EV_ERROR) == 0:
-      p.events[i].events.incl Write
+      p.events[p.count].events.incl Write
+
+    inc p.count
 
   return p.count

@@ -4,23 +4,27 @@
 #          Made by Humans from OpenPeeps
 #          https://github.com/openpeeps/powpow
 
-## This module defines the main event loop and timer system for powpow.
-## The Loop type manages registered file descriptor watchers, timers, deferred
-## callbacks, and idle handlers.
+## powpow/loop.nim — The event loop.
 ##
-## The loop is built on top of a platform-specific backend (e.g. epoll on Linux)
-## that provides efficient I/O event multiplexing. The loop also provides a
-## simple timer system with support for one-shot and repeating timers, as well as
-## deferred callbacks that run at the beginning of the next iteration, and idle
-## handlers that run when no other events are pending.
+## A single-threaded, non-blocking event loop that drives fd I/O,
+## one-shot and repeating timers, deferred callbacks, and idle handlers.
+## Includes a self-pipe wake mechanism for thread-safe stop().
 
 import platform
 import types
 export types
 
-import std/[times, tables, deques, heapqueue, sets, posix]
+import std/[tables, deques, heapqueue, sets, monotimes]
+when defined(windows):
+  proc closesocket(s: int): cint {.importc: "closesocket", stdcall, dynlib: "ws2_32.dll".}
+else:
+  import std/posix
 
 # ── Timer internals ──────────────────────────────────────────────────────────
+
+const
+  MaxTimerBatch = 256
+    ## Maximum timers to fire per poll iteration. Limits I/O starvation.
 
 type
   TimerEntry = object
@@ -33,49 +37,42 @@ type
 proc `<`(a, b: TimerEntry): bool =
   a.deadline < b.deadline
 
-# Millisecond clock — uses std/monotimes for a cheap, monotonic clock.
-import std/monotimes
-
 proc monoMs(): int64 {.inline.} =
-  ## Current monotonic time in milliseconds.
-  getMonoTime().ticks div 1_000_000  # ns → ms
+  getMonoTime().ticks div 1_000_000
 
 # ── Watcher ──────────────────────────────────────────────────────────────────
 
 type
   FdWatcher* = object
-    ## A registered fd watcher.
     fd*:            int
     events*:        set[EventType]
     callback*:      FdCallback
     edgeTriggered*: bool
-    gen:            int              ## generation counter (stale event guard)
+    gen:            int
 
 # ── Loop ─────────────────────────────────────────────────────────────────────
 
 type
   Loop* = ref object
-    ## The event loop.
-    platform*: Platform          ## platform backend
-    fdWatchers:  Table[int, FdWatcher]   ## fd → watcher (incl. generation guard)
-    nextGen:     int                     ## next generation counter value
+    platform*:   Platform
+    fdWatchers:  Table[int, FdWatcher]
+    nextGen:     int
     timers:      HeapQueue[TimerEntry]
     nextTimerId: int
-    cancelled:   HashSet[TimerId]          ## lazily cancelled timer ids
-    deferred:    Deque[Callback]        ## pending deferred calls
-    idleCbs:     Table[int, Callback]      ## idle handlers (id → callback)
+    cancelled:   HashSet[TimerId]
+    deferred:    Deque[Callback]
+    idleCbs:     Table[int, Callback]
     nextIdleId:  int
-    running*:    bool
+    running:     bool
     stopFlag:    bool
-    bufPool*:    seq[ptr UncheckedArray[byte]]   ## recycled read buffers
+    bufPool*:    seq[ptr UncheckedArray[byte]]
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 proc newLoop*(): Loop =
-  ## Create a new event loop.
   Loop(
     platform:    Platform.init(),
-    fdWatchers:  initTable[int, FdWatcher](64),
+    fdWatchers:  initTable[int, FdWatcher](256),
     nextGen:     1,
     timers:      initHeapQueue[TimerEntry](),
     nextTimerId: 0,
@@ -89,11 +86,11 @@ proc newLoop*(): Loop =
   )
 
 proc close*(loop: Loop) =
-  ## Destroy the loop and release the platform backend.
-  ## Closes any fds still registered (e.g. client connections that
-  ## were not explicitly closed before shutdown).
   for fd in loop.fdWatchers.keys:
-    discard posix.close(fd.cint)
+    when defined(windows):
+      discard closesocket(fd)
+    else:
+      discard posix.close(fd.cint)
   loop.fdWatchers.clear()
   for buf in loop.bufPool:
     deallocShared(buf)
@@ -104,7 +101,6 @@ proc close*(loop: Loop) =
 
 proc register*(loop: Loop, fd: int, events: set[EventType],
                callback: FdCallback, edgeTriggered = false) =
-  ## Register an fd for the given `events` with a `callback`.
   let gen = loop.nextGen
   inc loop.nextGen
   let watcher = FdWatcher(fd: fd, events: events, callback: callback,
@@ -113,14 +109,11 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
   loop.platform.add(fd, events, edgeTriggered, cast[pointer](gen))
 
 proc unregister*(loop: Loop, fd: int) =
-  ## Unregister an fd watcher and remove it from the platform.
   if fd in loop.fdWatchers:
     loop.platform.remove(fd)
     loop.fdWatchers.del(fd)
 
 proc modify*(loop: Loop, fd: int, events: set[EventType]) =
-  ## Change the events an fd watcher is interested in.
-  ## Preserves the original edge-triggered mode from register().
   if fd in loop.fdWatchers:
     loop.fdWatchers[fd].events = events
     let et = loop.fdWatchers[fd].edgeTriggered
@@ -130,13 +123,11 @@ proc modify*(loop: Loop, fd: int, events: set[EventType]) =
 # ── deferred calls ──────────────────────────────────────────────────────────
 
 proc deferCall*(loop: Loop, cb: Callback) =
-  ## Schedule `cb` to be called at the beginning of the next loop iteration.
   loop.deferred.addLast(cb)
 
 # ── timers ───────────────────────────────────────────────────────────────────
 
 proc addTimer*(loop: Loop, delayMs: int, callback: TimerCallback): TimerId =
-  ## Schedule a one-shot timer that fires after `delayMs` milliseconds.
   inc loop.nextTimerId
   result = TimerId(loop.nextTimerId)
   loop.timers.push(TimerEntry(
@@ -149,7 +140,6 @@ proc addTimer*(loop: Loop, delayMs: int, callback: TimerCallback): TimerId =
 
 proc addInterval*(loop: Loop, intervalMs: int,
                   callback: TimerCallback): TimerId =
-  ## Schedule a repeating timer that fires every `intervalMs` milliseconds.
   inc loop.nextTimerId
   result = TimerId(loop.nextTimerId)
   loop.timers.push(TimerEntry(
@@ -161,57 +151,52 @@ proc addInterval*(loop: Loop, intervalMs: int,
   ))
 
 proc cancelTimer*(loop: Loop, id: TimerId) =
-  ## Cancel a pending timer. The timer will not fire.
-  ## (Lazy cancellation — the entry is skipped when it reaches the top.)
   loop.cancelled.incl(id)
 
 # ── idle handlers ────────────────────────────────────────────────────────────
 
 proc addIdle*(loop: Loop, cb: Callback): int =
-  ## Register a callback that runs when no other events are pending.
-  ## Returns an id that can be passed to `removeIdle`.
   inc loop.nextIdleId
   result = loop.nextIdleId
   loop.idleCbs[result] = cb
 
 proc removeIdle*(loop: Loop, id: int) =
-  ## Remove a previously registered idle callback by its id.
   loop.idleCbs.del(id)
 
 # ── control ──────────────────────────────────────────────────────────────────
 
 proc stop*(loop: Loop) =
-  ## Stop the loop after the current iteration completes.
   loop.stopFlag = true
+  loop.platform.wake()
 
 proc isRunning*(loop: Loop): bool =
   loop.running
 
 # ── internal: process timers ─────────────────────────────────────────────────
 
-proc processTimers(loop: Loop) =
-  ## Fire all expired timers.
-  let now = monoMs()
-  while loop.timers.len > 0:
+proc processTimers(loop: Loop; now: int64) =
+  var batch = 0
+  while loop.timers.len > 0 and batch < MaxTimerBatch:
     var top = loop.timers[0]
     if top.deadline > now:
       break
     discard loop.timers.pop()
+    inc batch
     if top.id in loop.cancelled:
       loop.cancelled.excl(top.id)
       continue
     top.callback(top.id.int)
-    # Reschedule interval timers
     if top.interval > 0:
       top.deadline = now + top.interval
       loop.timers.push(top)
 
-proc timerTimeout(loop: Loop): int =
-  ## Calculate the timeout for the next poll in milliseconds.
-  ## Returns -1 (block indefinitely) if there are no timers.
+  # Prune cancelled set when it grows large
+  if loop.cancelled.len > loop.timers.len * 2 + 16:
+    loop.cancelled.clear()
+
+proc timerTimeout(loop: Loop; now: int64): int =
   if loop.timers.len == 0:
     return -1
-  let now = monoMs()
   let wait = loop.timers[0].deadline - now
   if wait <= 0: return 0
   return wait.int
@@ -219,7 +204,6 @@ proc timerTimeout(loop: Loop): int =
 # ── internal: process deferred ───────────────────────────────────────────────
 
 proc processDeferred(loop: Loop) =
-  ## Execute all deferred callbacks.
   while loop.deferred.len > 0:
     let cb = loop.deferred.popFirst()
     cb()
@@ -227,49 +211,39 @@ proc processDeferred(loop: Loop) =
 # ── main loop ────────────────────────────────────────────────────────────────
 
 proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
-  ## Run a single iteration of the loop:
-  ## 1. Process deferred callbacks
-  ## 2. Process expired timers
-  ## 3. Poll the platform for I/O events
-  ## 4. Dispatch I/O events to registered watchers
-  ## 5. Run idle handlers if nothing happened
-  # 1 — deferred
+  let now = monoMs()
+
   processDeferred(loop)
   if loop.stopFlag: return
 
-  # 2 — timers
-  processTimers(loop)
+  processTimers(loop, now)
   if loop.stopFlag: return
 
-  # 3 — compute timeout and poll
   var timeout = timeoutMs
   if timeout < 0:
-    timeout = timerTimeout(loop)
+    timeout = timerTimeout(loop, now)
 
   let nEvents = loop.platform.poll(timeout)
 
-  # 4 — dispatch I/O events
   for i in 0 ..< nEvents:
     let pev = loop.platform.events[i]
-    let w = loop.fdWatchers.getOrDefault(pev.fd)
-    if w.callback != nil:
-      # Stale event guard: generation counter changed if fd was
-      # unregistered and re-registered within the same poll batch.
+    var w: ptr FdWatcher = nil
+    if pev.fd in loop.fdWatchers:
+      w = addr loop.fdWatchers[pev.fd]
+    if w != nil and w.callback != nil:
       if cast[int](pev.udata) == w.gen:
         w.callback(pev.fd, pev.events)
   if loop.stopFlag: return
 
-  # 5 — post-poll timers (some may have expired during the poll)
-  processTimers(loop)
+  let now2 = monoMs()
+  processTimers(loop, now2)
   if loop.stopFlag: return
 
-  # 6 — idle handlers (only if no events fired this iteration)
   if nEvents == 0 and loop.idleCbs.len > 0:
     for cb in loop.idleCbs.values:
       cb()
 
 proc run*(loop: Loop) =
-  ## Run the event loop until `stop()` is called.
   loop.running = true
   loop.stopFlag = false
   while not loop.stopFlag:
@@ -277,7 +251,6 @@ proc run*(loop: Loop) =
   loop.running = false
 
 proc runOnce*(loop: Loop) =
-  ## Run exactly one iteration of the event loop.
   loop.running = true
   loop.poll()
   loop.running = false

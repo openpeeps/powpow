@@ -8,6 +8,7 @@
 ##
 ## Universal I/O multiplexing via poll(2). Used when neither kqueue nor
 ## epoll is available. Does NOT support edge-triggered mode.
+## Includes a pipe-based wake mechanism for cross-thread loop interruption.
 
 import ../types
 import std/tables
@@ -39,23 +40,22 @@ proc c_poll(fds: ptr Pollfd, nfds: cuint,
 
 type
   PlatformEvent* = object
-    ## A processed I/O event from the poll backend.
     fd*:     int
     events*: set[EventType]
-    udata*:  pointer          ## Opaque user data from registration
+    udata*:  pointer
 
   Platform* = ref object
-    ## poll(2)-based I/O multiplexer.
-    pollFds:   seq[Pollfd]
-    fdToIdx:   Table[int, int]       ## fd → index in pollFds
-    udataMap:  Table[int, pointer]   ## fd → udata for modify() reuse
-    events*:   seq[PlatformEvent]    ## converted events
-    count*:    int                   ## number of events from last poll
+    pollFds:    seq[Pollfd]
+    fdToIdx:    Table[int, int]
+    udataMap:   Table[int, pointer]
+    events*:    seq[PlatformEvent]
+    count*:     int
+    wakeReadFd: cint
+    wakeWriteFd: cint
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 proc init*(T: typedesc[Platform]): T =
-  ## Create a new poll-based platform backend.
   result = T()
   result.pollFds = newSeq[Pollfd]()
   result.fdToIdx = initTable[int, int](64)
@@ -63,17 +63,52 @@ proc init*(T: typedesc[Platform]): T =
   result.events  = newSeq[PlatformEvent](POLL_MAX_EVENTS)
   result.count   = 0
 
+  var pipeFds: array[2, cint]
+  if c_pipe(addr pipeFds[0]) < 0:
+    raise newException(OSError, "powpow: pipe() failed for wake mechanism")
+  result.wakeReadFd = pipeFds[0]
+  result.wakeWriteFd = pipeFds[1]
+  let flags = fcntl(result.wakeReadFd, F_GETFL, 0)
+  if flags >= 0: discard fcntl(result.wakeReadFd, F_SETFL, flags or O_NONBLOCK)
+  let wflags = fcntl(result.wakeWriteFd, F_GETFL, 0)
+  if wflags >= 0: discard fcntl(result.wakeWriteFd, F_SETFL, wflags or O_NONBLOCK)
+
+  var pfd: Pollfd
+  pfd.fd = result.wakeReadFd
+  pfd.events = POLLIN
+  pfd.revents = 0
+  result.pollFds.add(pfd)
+
 proc close*(p: Platform) =
-  ## Release resources.
+  if p.wakeReadFd >= 0:
+    discard c_close(p.wakeReadFd)
+    p.wakeReadFd = -1
+  if p.wakeWriteFd >= 0:
+    discard c_close(p.wakeWriteFd)
+    p.wakeWriteFd = -1
   p.pollFds.setLen(0)
   p.fdToIdx.clear()
+
+# ── C wrappers ───────────────────────────────────────────────────────────────
+
+proc c_pipe(fds: ptr cint): cint {.importc: "pipe", header: "<unistd.h>".}
+proc c_close(fd: cint): cint {.importc: "close", header: "<unistd.h>".}
+proc fcntl(fd: cint, cmd: cint, arg: cint): cint {.
+  importc: "fcntl", header: "<fcntl.h>".}
+proc write(fd: cint, buf: pointer, count: csize_t): cint {.
+  importc: "write", header: "<unistd.h>".}
+proc read(fd: cint, buf: pointer, count: csize_t): cint {.
+  importc: "read", header: "<unistd.h>".}
+
+const
+  F_GETFL = 3
+  F_SETFL = 4
+  O_NONBLOCK = 4
 
 # ── Registration ─────────────────────────────────────────────────────────────
 
 proc add*(p: Platform, fd: int, events: set[EventType],
           edgeTriggered = false, udata: pointer = nil) =
-  ## Register interest in `events` on `fd`.
-  ## Note: `edgeTriggered` is ignored — poll(2) is always level-triggered.
   var pfd: Pollfd
   pfd.fd      = fd.cint
   pfd.events  = 0
@@ -87,12 +122,11 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   p.udataMap[fd] = udata
 
 proc remove*(p: Platform, fd: int) =
-  ## Remove all event registrations for `fd`.
+  if fd == p.wakeReadFd: return
   if fd notin p.fdToIdx: return
   let idx   = p.fdToIdx[fd]
   let last  = p.pollFds.len - 1
 
-  # Swap-remove for O(1) deletion
   if idx != last:
     p.pollFds[idx] = p.pollFds[last]
     p.fdToIdx[p.pollFds[idx].fd.int] = idx
@@ -103,7 +137,6 @@ proc remove*(p: Platform, fd: int) =
 
 proc modify*(p: Platform, fd: int, events: set[EventType],
              edgeTriggered = false, udata: pointer = nil) =
-  ## Change the event interests for an already-registered `fd`.
   if fd notin p.fdToIdx: return
   let idx = p.fdToIdx[fd]
   p.pollFds[idx].events = 0
@@ -111,10 +144,15 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
   if Write in events: p.pollFds[idx].events = p.pollFds[idx].events or POLLOUT
   p.udataMap[fd] = udata
 
+# ── Wake ─────────────────────────────────────────────────────────────────────
+
+proc wake*(p: Platform) =
+  var byte: byte = 0
+  discard write(p.wakeWriteFd, addr byte, 1)
+
 # ── Polling ──────────────────────────────────────────────────────────────────
 
 proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
-  ## Poll for I/O events. See kqueue/epoll backends for timeout semantics.
   if p.pollFds.len == 0:
     p.count = 0
     return 0
@@ -129,6 +167,11 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
   for i in 0 ..< p.pollFds.len:
     let rev = p.pollFds[i].revents
     if rev == 0: continue
+
+    if p.pollFds[i].fd.int == p.wakeReadFd:
+      var buf: array[8, byte]
+      discard read(p.wakeReadFd, addr buf[0], 8)
+      continue
 
     var evts: set[EventType] = {}
     if (rev and POLLIN) != 0:   evts.incl Read
