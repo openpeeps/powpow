@@ -6,3 +6,6 @@ testresults/
 /tests/*
 !/tests/*.nim
 !/tests/*.nims
+/examples/*
+!/examples/*.nim
+!/examples/*.nims
