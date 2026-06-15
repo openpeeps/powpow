@@ -42,7 +42,7 @@ jobs:
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
               -d${{ inputs.duration }} http://localhost:9000${{ inputs.path }}
           kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
-      - name: Single-threaded (Connection: close)
+      - name: 'Single-threaded (Connection: close)'
         run: |
           ./examples/httpserver & PID=$!; sleep 1
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
@@ -55,7 +55,7 @@ jobs:
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
               -d${{ inputs.duration }} http://localhost:9000${{ inputs.path }}
           kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
-      - name: Multi-threaded (Connection: close)
+      - name: 'Multi-threaded (Connection: close)'
         run: |
           ./examples/httpserver_threads & PID=$!; sleep 2
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
