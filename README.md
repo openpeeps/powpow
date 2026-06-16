@@ -38,68 +38,70 @@ Check examples in the `examples/` directory, or see the [API reference](https://
 
 
 ## Dummy Benchmarks
-Here you can find some wrk-based benchmarks I manually ran via Github Actions (see [latest results here](https://github.com/openpeeps/powpow/actions/runs/27617904105/job/81658449814)).
+Here you can find some wrk-based benchmarks I manually ran via Github Actions (see [latest results here](https://github.com/openpeeps/powpow/actions/runs/27644007710/job/81751133711)).
 
 - Single-threaded (keep-alive)
 ```
 ⚡ powpow HTTP server listening on http://localhost:9000
   Press Ctrl+C to stop
-Running 10s test @ http://127.0.0.1:9000/
+Running 5s test @ http://127.0.0.1:9000/
   4 threads and 100 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   263.79us   35.34us   3.29ms   87.34%
-    Req/Sec    20.65k    24.97k   69.58k    75.12%
-  825176 requests in 10.10s, 426.53MB read
-Requests/sec:  81707.97
-Transfer/sec:     42.23MB
+    Latency     1.02ms   61.67us   3.25ms   81.86%
+    Req/Sec    24.63k   818.23    26.67k    68.00%
+  489946 requests in 5.00s, 277.55MB read
+Requests/sec:  97965.24
+Transfer/sec:     55.50MB
 ```
 
 - Single-threaded (connection close)
 ```
 ⚡ powpow HTTP server listening on http://localhost:9000
   Press Ctrl+C to stop
-Running 10s test @ http://127.0.0.1:9000/
+Running 5s test @ http://127.0.0.1:9000/
   4 threads and 100 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    40.56us    9.83us   1.34ms   94.74%
-    Req/Sec    11.11k     1.63k   11.95k    97.06%
-  112745 requests in 10.01s, 57.74MB read
-Requests/sec:  11260.56
-Transfer/sec:      5.77MB
+    Latency     1.97ms  202.12us   4.22ms   80.09%
+    Req/Sec     9.13k     3.62k   18.16k    71.43%
+  184469 requests in 5.10s, 103.62MB read
+Requests/sec:  36174.22
+Transfer/sec:     20.32MB
 ```
 
 - Multi-threaded (keep-alive)
 ```
   worker #0 ready
-  worker #1 ready
   worker #2 ready
 ⚡ powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
+  worker #1 ready
   worker #3 ready
-Running 10s test @ http://127.0.0.1:9000/
+Running 5s test @ http://127.0.0.1:9000/
   4 threads and 100 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   237.70us  444.60us   8.84ms   93.13%
-    Req/Sec    34.12k    10.66k   76.39k    72.32%
-  1361919 requests in 10.10s, 703.96MB read
-Requests/sec: 134853.84
-Transfer/sec:     69.70MB
+    Latency   786.79us    1.11ms  11.73ms   84.24%
+    Req/Sec    50.98k     3.97k   86.53k    91.50%
+  1018820 requests in 5.03s, 526.62MB read
+Requests/sec: 202743.27
+Transfer/sec:    104.80MB
+
 ```
 
 - Multi-threaded (connection close)
 ```
   worker #0 ready
-  worker #1 ready
   worker #2 ready
-  worker #3 ready
 ⚡ powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
-Running 10s test @ http://127.0.0.1:9000/
+  worker #3 ready
+  worker #1 ready
+Running 5s test @ http://127.0.0.1:9000/
   4 threads and 100 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    42.20us   29.73us   2.26ms   98.63%
-    Req/Sec    10.63k     1.57k   11.99k    95.19%
-  109944 requests in 10.10s, 56.30MB read
-Requests/sec:  10885.54
-Transfer/sec:      5.57MB
+    Latency     1.31ms    0.95ms  15.44ms   67.66%
+    Req/Sec    13.24k   614.80    14.91k    81.50%
+  264133 requests in 5.01s, 135.27MB read
+Requests/sec:  52687.29
+Transfer/sec:     26.98MB
+
 ```
 
 ### ❤ Contributions & Support
