@@ -10,7 +10,7 @@
 ## Higher-level frameworks implement routing via the `OnRequestCallback`.
 ##
 ## ### Usage:
-## ```nim
+##   ```nim
 ##   let server = newHttpServer()
 ##   server.start do (req: HttpRequest, res: HttpResponse):
 ##     if req.getPath() == "/":
@@ -18,7 +18,7 @@
 ##     else:
 ##       res.sendError(Http404, "Not Found")
 ##   , Port(9000)
-## ```
+##   ```
 
 import std/[httpcore, tables, options, net, strutils, os, posix]
 

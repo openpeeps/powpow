@@ -12,13 +12,13 @@
 ## No single-threaded acceptor bottleneck, no cross-thread communication.
 ##
 ## Usage:
-## ```nim
+##   ```nim
 ##   let server = newMultiThreadHttpServer()
 ##   server.start do (req: HttpRequest, res: HttpResponse):
 ##     if req.getPath() == "/":
 ##       res.status(Http200).send("Hello!")
 ##   , "0.0.0.0", 9000
-## ```
+##   ```
 
 import std/[cpuinfo, httpcore, posix]
 import ../loop

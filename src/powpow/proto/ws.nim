@@ -9,22 +9,24 @@
 ## Two modes of operation:
 ##
 ## 1. Standalone — dedicated WebSocket server on its own TCP port:
-## ```nim
-##    let loop = newLoop()
-##    let wss = newWsServer(loop)
-##    wss.onOpen do (ws: WsConnection):
-##      echo "client connected"
-##    wss.onMessage do (ws: WsConnection, kind: WsFrameKind, data: openArray[byte]):
-##      ws.sendText("echo: " & cast[string](@data))
-##    wss.listen("0.0.0.0", 9001)
-##    loop.run()
-## ```
-## 
+##
+##   ```nim
+##   let loop = newLoop()
+##   let wss = newWsServer(loop)
+##   wss.onOpen do (ws: WsConnection):
+##     echo "client connected"
+##   wss.onMessage do (ws: WsConnection, kind: WsFrameKind, data: openArray[byte]):
+##     ws.sendText("echo: " & cast[string](@data))
+##   wss.listen("0.0.0.0", 9001)
+##   loop.run()
+##   ```
+##
 ## 2. Upgraded from HttpServer — route handler performs the handshake:
-## ```nim
-##    server.get("/ws") do (req: HttpRequest, res: Response):
-##      websocketUpgrade(res, req, onOpen, onMessage, onClose)
-## ```
+##
+##   ```nim
+##   server.get("/ws") do (req: HttpRequest, res: Response):
+##     websocketUpgrade(res, req, onOpen, onMessage, onClose)
+##   ```
 
 import std/[httpcore, sha1, base64, tables, strutils, posix]
 
