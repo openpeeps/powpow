@@ -29,7 +29,7 @@ import ../loop
 import ../types
 import ../net/tcp
 import ../net/common
-import httpserver
+import ./httpserver
 
 # ── Types ────────────────────────────────────────────────────────────────────
 

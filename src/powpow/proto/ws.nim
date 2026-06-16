@@ -26,12 +26,13 @@
 ##      websocketUpgrade(res, req, onOpen, onMessage, onClose)
 ## ```
 
+import std/[httpcore, sha1, base64, tables, strutils, posix]
+
 import ../net/tcp
 import ../loop
 import ../types
 import ../proto/http
 import ../proto/httpserver
-import std/[httpcore, sha1, base64, tables, strutils, posix]
 
 # ── Constants ────────────────────────────────────────────────────────────────
 

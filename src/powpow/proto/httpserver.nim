@@ -16,13 +16,16 @@
 ##   server.listen("0.0.0.0", 8080)
 ##   loop.run()
 
+import std/[httpcore, tables, options, strutils, os, posix, oids]
+
 import ../net/tcp
 import ../net/common
 import ../loop
 import ../types
-import http
-import std/[httpcore, tables, options, strutils, os, posix]
-import pkg/mimedb
+import ./http
+
+import pkg/[mimedb, multipart]
+import pkg/checksums/md5
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,13 +42,19 @@ type
   Handler* = proc(req: HttpRequest, res: Response) {.closure.}
     ## Route handler. Call `res.status(...).send(...)` to respond.
 
-  # RouteKey = object
-  #   httpMethod: HttpMethod
-  #   path:   string
+  BodyHandler* = proc(data: openArray[byte]; done: bool) {.closure.}
+    ## Streaming body handler. Receives body data as it arrives from the
+    ## network. `done` is true when the body is complete.
+    ##
+    ## Use with streaming routes to process large uploads without buffering:
+    ##   server.post("/upload", bodyHandler = cb) do (req, res): ...
 
   Session = object
     ## Per-connection state.
     parser: HttpParser
+    streamer: MultipartStreamerRef  ## Auto-created for multipart requests (nil otherwise)
+    sessionStreamFile: File         ## Open file handle for streamToFile (nil if inactive)
+    sessionStreamPath: string       ## Temp file path (empty if inactive)
     idleTimer: TimerId
     idleMs:    int
 
@@ -53,7 +62,9 @@ type
     ## A non-blocking HTTP/1.1 server.
     tcpServer: TcpServer
     loop:      Loop
-    routes:    Table[HttpMethod, Table[string, Handler]]  ## method → path → handler
+    routes:    Table[HttpMethod, Table[string, Handler]]    ## method → path → handler
+    bodyHandlers: Table[HttpMethod, Table[string, BodyHandler]]  ## method → path → body handler
+    streamToFileRoutes: Table[HttpMethod, Table[string, bool]]   ## method → path → streamToFile
     fallback:  Handler                      ## Catch-all handler (nil = 404)
     sessions:  Table[int, Session]          ## fd → parser session
     parserPool: seq[HttpParser]             ## recycled parser objects
@@ -617,6 +628,8 @@ proc newHttpServer*(loop: Loop): HttpServer =
     tcpServer: nil,
     loop:      loop,
     routes:    initTable[HttpMethod, Table[string, Handler]](8),
+    bodyHandlers: initTable[HttpMethod, Table[string, BodyHandler]](8),
+    streamToFileRoutes: initTable[HttpMethod, Table[string, bool]](8),
     fallback:  nil,
     sessions:  initTable[int, Session](64),
     parserPool: @[],
@@ -644,7 +657,15 @@ proc removeSession*(server: HttpServer, fd: int) =
   ## Clean up a connection's session. Public so protocol upgrade
   ## handlers (e.g. WebSocket) can take over a connection.
   if fd in server.sessions:
-    releaseParser(server, server.sessions[fd].parser)
+    let s = addr server.sessions[fd]
+    if s.streamer != nil:
+      s.streamer[].cleanup()
+      s.streamer = nil
+    if s.sessionStreamPath.len > 0:
+      s.sessionStreamFile.close()
+      removeFile(s.sessionStreamPath)
+      s.sessionStreamPath = ""
+    releaseParser(server, s.parser)
     server.sessions.del(fd)
 
 # ── Request dispatch ─────────────────────────────────────────────────────────
@@ -679,24 +700,115 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   ## Feed incoming bytes into the per-connection parser.
   ## Supports HTTP/1.1 pipelining: if multiple complete requests arrive
   ## in the same TCP read, all of them are processed in order.
+  ##
+  ## When multipart/form-data is detected in the Content-Type header,
+  ## a MultipartStreamer is auto-created and body data is streamed through it
+  ## via the lightweight fill→check→write→clear cycle.
+  ## Memory: ~68KB for any file size (4KB headers + 64KB write buffer).
   let fd = conn.fd.int
   if fd notin server.sessions:
     server.sessions[fd] = Session(parser: acquireParser(server))
 
-  server.sessions[fd].parser.feed(data)
+  let p = server.sessions[fd].parser
+  let prevPhase = p.phase
+  p.feed(data)
 
-  while server.sessions[fd].parser.isComplete():
-    let req = server.sessions[fd].parser.getRequest()
+  # Auto-detect multipart after headers are parsed.
+  # Catches two cases:
+  #   1. Headers + body in one TCP read (prevPhase = PhaseRequestLine, phase = PhaseBody/Complete)
+  #   2. Headers in previous read, body arriving now (prevPhase = PhaseHeaders, phase = PhaseBody)
+  if prevPhase < PhaseBody and p.phase >= PhaseBody and not p.streamingBody:
+    let ct = p.peekContentType()
+    if ct.len > 0 and ct.toLowerAscii().startsWith("multipart/form-data"):
+      var ms = newMultipartStreamerRef(ct)
+      let msRef = ms
+      server.sessions[fd].streamer = ms
+      if p.phase == PhaseBody:
+        p.onBodyData = proc(chunk: openArray[byte]; done: bool) =
+          msRef[].feed(chunk)
+        p.feed(@[])
+      elif p.phase == PhaseComplete:
+        let (buf, totalLen) = p.getBodyView()
+        if totalLen > 0 and buf != nil:
+          const StreamChunk = 65536
+          var pos = 0
+          while pos < totalLen:
+            let chunkLen = min(StreamChunk, totalLen - pos)
+            let chunk = cast[ptr UncheckedArray[byte]](cast[int](buf) + pos)
+            msRef[].feed(chunk, chunkLen)
+            pos += chunkLen
+    else:
+      let meth = p.peekMethod()
+      let path = p.peekPath()
+      # Check for streamToFile route (raw body → temp file)
+      if meth in server.streamToFileRoutes and
+         server.streamToFileRoutes[meth].getOrDefault(path):
+        let tmpDir = getTempDir() / getMD5(getAppDir())
+        discard existsOrCreateDir(tmpDir)
+        let fileId = $genOid()
+        let filePath = tmpDir / fileId
+        if p.phase == PhaseBody:
+          var f = open(filePath, fmWrite)
+          server.sessions[fd].sessionStreamFile = f
+          server.sessions[fd].sessionStreamPath = filePath
+          p.onBodyData = proc(chunk: openArray[byte]; done: bool) =
+            if chunk.len > 0:
+              discard server.sessions[fd].sessionStreamFile.writeBuffer(unsafeAddr chunk[0], chunk.len)
+            if done:
+              server.sessions[fd].sessionStreamFile.close()
+          p.feed(@[])
+        else:
+          # Body already fully buffered — write to file synchronously
+          var f = open(filePath, fmWrite)
+          let (buf, totalLen) = p.getBodyView()
+          if totalLen > 0 and buf != nil:
+            const StreamChunk = 65536
+            var pos = 0
+            while pos < totalLen:
+              let chunkLen = min(StreamChunk, totalLen - pos)
+              let src = cast[ptr UncheckedArray[byte]](cast[int](buf) + pos)
+              discard f.writeBuffer(cast[pointer](src), chunkLen)
+              pos += chunkLen
+          f.close()
+          server.sessions[fd].sessionStreamPath = filePath
+      # Check user-registered bodyHandler (non-multipart custom streaming)
+      elif meth in server.bodyHandlers:
+        let bh = server.bodyHandlers[meth].getOrDefault(path)
+        if bh != nil:
+          p.onBodyData = bh
+          p.feed(@[])
+
+  while p.isComplete():
+    let req = p.getRequest()
+    # Transfer completed streamer from session to request
+    if server.sessions[fd].streamer != nil:
+      req.streamer = server.sessions[fd].streamer
+      server.sessions[fd].streamer = nil
+      p.onBodyData = nil
+    # Transfer stream-to-file path if present
+    if server.sessions[fd].sessionStreamPath.len > 0:
+      req.streamPath = server.sessions[fd].sessionStreamPath
+      server.sessions[fd].sessionStreamPath = ""
     server.dispatchRequest(conn, req)
     if fd notin server.sessions:
       return  # removed by upgrade (e.g. websocketUpgrade)
     server.sessions[fd].parser.resetForNext()
-    discard server.sessions[fd].parser.feed(@[])
+    discard p.feed(@[])
     if conn.sendFileFd >= 0:
       break
 
-  if server.sessions[fd].parser.isError():
-    let errCode = server.sessions[fd].parser.error()
+  if p.isError():
+    if fd in server.sessions:
+      let s = addr server.sessions[fd]
+      if s.streamer != nil:
+        s.streamer[].cleanup()
+        s.streamer = nil
+      if s.sessionStreamPath.len > 0:
+        s.sessionStreamFile.close()
+        removeFile(s.sessionStreamPath)
+        s.sessionStreamPath = ""
+      p.onBodyData = nil
+    let errCode = p.error()
     let res = acquireResponse(server, conn)
     res.sendError(errCode, "Bad Request")
     if fd in server.sessions:
@@ -711,6 +823,18 @@ proc route*(server: HttpServer, meth: HttpMethod, path: string,
     server.routes[meth] = initTable[string, Handler]()
   server.routes[meth][path] = handler
 
+proc route*(server: HttpServer, meth: HttpMethod, path: string,
+            bodyHandler: BodyHandler, handler: Handler) =
+  ## Register a route handler with a streaming body handler.
+  ## The body handler receives body data as it arrives from the network.
+  ## When the body is complete, `done` is set to true.
+  if meth notin server.routes:
+    server.routes[meth] = initTable[string, Handler]()
+  server.routes[meth][path] = handler
+  if meth notin server.bodyHandlers:
+    server.bodyHandlers[meth] = initTable[string, BodyHandler]()
+  server.bodyHandlers[meth][path] = bodyHandler
+
 proc get*(server: HttpServer, path: string, handler: Handler) =
   ## Register a GET route handler.
   server.route(HttpGet, path, handler)
@@ -719,17 +843,74 @@ proc post*(server: HttpServer, path: string, handler: Handler) =
   ## Register a POST route handler.
   server.route(HttpPost, path, handler)
 
+proc post*(server: HttpServer, path: string, bodyHandler: BodyHandler,
+           handler: Handler) =
+  ## Register a POST route handler with a streaming body handler.
+  server.route(HttpPost, path, bodyHandler, handler)
+
+proc post*(server: HttpServer, path: string; streamToFile: bool;
+           handler: Handler) =
+  ## Register a POST route that streams the raw body to a temp file.
+  ## Memory: ~68KB regardless of body size.
+  server.route(HttpPost, path, handler)
+  if streamToFile:
+    if HttpPost notin server.streamToFileRoutes:
+      server.streamToFileRoutes[HttpPost] = initTable[string, bool]()
+    server.streamToFileRoutes[HttpPost][path] = true
+
 proc put*(server: HttpServer, path: string, handler: Handler) =
   ## Register a PUT route handler.
   server.route(HttpPut, path, handler)
+
+proc put*(server: HttpServer, path: string, bodyHandler: BodyHandler,
+          handler: Handler) =
+  ## Register a PUT route handler with a streaming body handler.
+  server.route(HttpPut, path, bodyHandler, handler)
+
+proc put*(server: HttpServer, path: string; streamToFile: bool;
+          handler: Handler) =
+  ## Register a PUT route that streams the raw body to a temp file.
+  server.route(HttpPut, path, handler)
+  if streamToFile:
+    if HttpPut notin server.streamToFileRoutes:
+      server.streamToFileRoutes[HttpPut] = initTable[string, bool]()
+    server.streamToFileRoutes[HttpPut][path] = true
 
 proc patch*(server: HttpServer, path: string, handler: Handler) =
   ## Register a PATCH route handler.
   server.route(HttpPatch, path, handler)
 
+proc patch*(server: HttpServer, path: string, bodyHandler: BodyHandler,
+            handler: Handler) =
+  ## Register a PATCH route handler with a streaming body handler.
+  server.route(HttpPatch, path, bodyHandler, handler)
+
+proc patch*(server: HttpServer, path: string, handler: Handler;
+            streamToFile: bool) =
+  ## Register a PATCH route that streams the raw body to a temp file.
+  server.route(HttpPatch, path, handler)
+  if streamToFile:
+    if HttpPatch notin server.streamToFileRoutes:
+      server.streamToFileRoutes[HttpPatch] = initTable[string, bool]()
+    server.streamToFileRoutes[HttpPatch][path] = true
+
 proc delete*(server: HttpServer, path: string, handler: Handler) =
   ## Register a DELETE route handler.
   server.route(HttpDelete, path, handler)
+
+proc delete*(server: HttpServer, path: string, bodyHandler: BodyHandler,
+             handler: Handler) =
+  ## Register a DELETE route handler with a streaming body handler.
+  server.route(HttpDelete, path, bodyHandler, handler)
+
+proc delete*(server: HttpServer, path: string, handler: Handler;
+             streamToFile: bool) =
+  ## Register a DELETE route that streams the raw body to a temp file.
+  server.route(HttpDelete, path, handler)
+  if streamToFile:
+    if HttpDelete notin server.streamToFileRoutes:
+      server.streamToFileRoutes[HttpDelete] = initTable[string, bool]()
+    server.streamToFileRoutes[HttpDelete][path] = true
 
 proc head*(server: HttpServer, path: string, handler: Handler) =
   ## Register a HEAD route handler.

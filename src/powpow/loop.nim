@@ -10,11 +10,11 @@
 ## one-shot and repeating timers, deferred callbacks, and idle handlers.
 ## Includes a self-pipe wake mechanism for thread-safe stop().
 
-import platform
-import types
+import std/[tables, deques, heapqueue, sets, monotimes]
+
+import ./platform, ./types
 export types
 
-import std/[tables, deques, heapqueue, sets, monotimes]
 when defined(windows):
   proc closesocket(s: int): cint {.importc: "closesocket", stdcall, dynlib: "ws2_32.dll".}
 else:

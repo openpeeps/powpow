@@ -15,9 +15,9 @@
 import ./loop
 import ./types
 
-import net/common
-import net/tcp
-import net/udp
+import ./net/common
+import ./net/tcp
+import ./net/udp
 
 export common
 export tcp
