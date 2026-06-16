@@ -158,7 +158,7 @@ proc newFileWatcher*(loop: Loop, path: string,
     loop.register(ifd.int, {Read}) do (fd: int, ev: set[EventType]):
       if Read notin ev: return
       var buf: array[4096, byte]
-      let n = posix.read(fd.cint, cast[pointer](addr buf[0]), csize_t(4096))
+      let n = posix.read(fd.cint, cast[pointer](addr buf[0]), 4096)
       if n <= 0: return
       var off = 0
       while off < n:
