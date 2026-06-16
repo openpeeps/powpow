@@ -54,17 +54,18 @@
       </select>
     </div>
     <ul class="simple simple-toc" id="toc-list">
-  <li>
+  <ul class="simple"><li><a class="reference" id="usagecolon_toc" href="#usagecolon">Usage:</a></li>
+</ul><li>
   <a class="reference reference-toplevel" href="#6" id="56">Imports</a>
 </li>
 <li>
   <details open>
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
-      <li><a class="reference" href="#BodyHandler" title="BodyHandler = proc (data: openArray[byte]; done: bool) {.closure.}">BodyHandler</a></li>
-<li><a class="reference" href="#Handler" title="Handler = proc (req: HttpRequest; res: Response) {.closure.}">Handler</a></li>
-<li><a class="reference" href="#HttpServer" title="HttpServer = ref object">HttpServer</a></li>
-<li><a class="reference" href="#Response" title="Response = ref object">Response</a></li>
+      <li><a class="reference" href="#HttpResponse" title="HttpResponse = ref object">HttpResponse</a></li>
+<li><a class="reference" href="#HttpServer" title="HttpServer = ref object
+  handler*: OnRequestCallback">HttpServer</a></li>
+<li><a class="reference" href="#OnRequestCallback" title="OnRequestCallback = proc (req: HttpRequest; res: HttpResponse) {.gcsafe.}">OnRequestCallback</a></li>
 
     </ul>
   </details>
@@ -88,28 +89,16 @@
 
 </ul>
 <ul class="simple nested-toc-section">close
-  <li><a class="reference" href="#close%2CResponse" title="close(res: Response): Response">close(res: Response): Response</a></li>
+  <li><a class="reference" href="#close%2CHttpResponse" title="close(res: HttpResponse): HttpResponse">close(res: HttpResponse): HttpResponse</a></li>
 <li><a class="reference" href="#close%2CHttpServer" title="close(server: HttpServer)">close(server: HttpServer)</a></li>
-
-</ul>
-<ul class="simple nested-toc-section">delete
-  <li><a class="reference" href="#delete%2CHttpServer%2Cstring%2CBodyHandler%2CHandler" title="delete(server: HttpServer; path: string; bodyHandler: BodyHandler;
-       handler: Handler)">delete(server: HttpServer; path: string; bodyHandler: BodyHandler;
-       handler: Handler)</a></li>
-<li><a class="reference" href="#delete%2CHttpServer%2Cstring%2CHandler" title="delete(server: HttpServer; path: string; handler: Handler)">delete(server: HttpServer; path: string; handler: Handler)</a></li>
-<li><a class="reference" href="#delete%2CHttpServer%2Cstring%2CHandler%2Cbool" title="delete(server: HttpServer; path: string; handler: Handler; streamToFile: bool)">delete(server: HttpServer; path: string; handler: Handler; streamToFile: bool)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">ensureTcpServer
   <li><a class="reference" href="#ensureTcpServer%2CHttpServer" title="ensureTcpServer(server: HttpServer)">ensureTcpServer(server: HttpServer)</a></li>
 
 </ul>
-<ul class="simple nested-toc-section">get
-  <li><a class="reference" href="#get%2CHttpServer%2Cstring%2CHandler" title="get(server: HttpServer; path: string; handler: Handler)">get(server: HttpServer; path: string; handler: Handler)</a></li>
-
-</ul>
 <ul class="simple nested-toc-section">getConn
-  <li><a class="reference" href="#getConn%2CResponse" title="getConn(res: Response): Connection">getConn(res: Response): Connection</a></li>
+  <li><a class="reference" href="#getConn%2CHttpResponse" title="getConn(res: HttpResponse): Connection">getConn(res: HttpResponse): Connection</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getFileExt
@@ -120,12 +109,8 @@
   <li><a class="reference" href="#getLoop%2CHttpServer" title="getLoop(server: HttpServer): Loop">getLoop(server: HttpServer): Loop</a></li>
 
 </ul>
-<ul class="simple nested-toc-section">head
-  <li><a class="reference" href="#head%2CHttpServer%2Cstring%2CHandler" title="head(server: HttpServer; path: string; handler: Handler)">head(server: HttpServer; path: string; handler: Handler)</a></li>
-
-</ul>
 <ul class="simple nested-toc-section">header
-  <li><a class="reference" href="#header%2CResponse%2Cstring%2Cstring" title="header(res: Response; key, value: string): Response">header(res: Response; key, value: string): Response</a></li>
+  <li><a class="reference" href="#header%2CHttpResponse%2Cstring%2Cstring" title="header(res: HttpResponse; key, value: string): HttpResponse">header(res: HttpResponse; key, value: string): HttpResponse</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">listen
@@ -137,20 +122,12 @@
 
 </ul>
 <ul class="simple nested-toc-section">markSent
-  <li><a class="reference" href="#markSent%2CResponse" title="markSent(res: Response)">markSent(res: Response)</a></li>
+  <li><a class="reference" href="#markSent%2CHttpResponse" title="markSent(res: HttpResponse)">markSent(res: HttpResponse)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">newHttpServer
   <li><a class="reference" href="#newHttpServer" title="newHttpServer(): HttpServer">newHttpServer(): HttpServer</a></li>
 <li><a class="reference" href="#newHttpServer%2CLoop" title="newHttpServer(loop: Loop): HttpServer">newHttpServer(loop: Loop): HttpServer</a></li>
-
-</ul>
-<ul class="simple nested-toc-section">notFound
-  <li><a class="reference" href="#notFound%2CHttpServer%2CHandler" title="notFound(server: HttpServer; handler: Handler)">notFound(server: HttpServer; handler: Handler)</a></li>
-
-</ul>
-<ul class="simple nested-toc-section">options
-  <li><a class="reference" href="#options%2CHttpServer%2Cstring%2CHandler" title="options(server: HttpServer; path: string; handler: Handler)">options(server: HttpServer; path: string; handler: Handler)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">parseRange
@@ -159,52 +136,23 @@
     start, length: int64]</a></li>
 
 </ul>
-<ul class="simple nested-toc-section">patch
-  <li><a class="reference" href="#patch%2CHttpServer%2Cstring%2CBodyHandler%2CHandler" title="patch(server: HttpServer; path: string; bodyHandler: BodyHandler;
-      handler: Handler)">patch(server: HttpServer; path: string; bodyHandler: BodyHandler;
-      handler: Handler)</a></li>
-<li><a class="reference" href="#patch%2CHttpServer%2Cstring%2CHandler" title="patch(server: HttpServer; path: string; handler: Handler)">patch(server: HttpServer; path: string; handler: Handler)</a></li>
-<li><a class="reference" href="#patch%2CHttpServer%2Cstring%2CHandler%2Cbool" title="patch(server: HttpServer; path: string; handler: Handler; streamToFile: bool)">patch(server: HttpServer; path: string; handler: Handler; streamToFile: bool)</a></li>
-
-</ul>
-<ul class="simple nested-toc-section">post
-  <li><a class="reference" href="#post%2CHttpServer%2Cstring%2CBodyHandler%2CHandler" title="post(server: HttpServer; path: string; bodyHandler: BodyHandler;
-     handler: Handler)">post(server: HttpServer; path: string; bodyHandler: BodyHandler;
-     handler: Handler)</a></li>
-<li><a class="reference" href="#post%2CHttpServer%2Cstring%2CHandler" title="post(server: HttpServer; path: string; handler: Handler)">post(server: HttpServer; path: string; handler: Handler)</a></li>
-<li><a class="reference" href="#post%2CHttpServer%2Cstring%2Cbool%2CHandler" title="post(server: HttpServer; path: string; streamToFile: bool; handler: Handler)">post(server: HttpServer; path: string; streamToFile: bool; handler: Handler)</a></li>
-
-</ul>
-<ul class="simple nested-toc-section">put
-  <li><a class="reference" href="#put%2CHttpServer%2Cstring%2CBodyHandler%2CHandler" title="put(server: HttpServer; path: string; bodyHandler: BodyHandler; handler: Handler)">put(server: HttpServer; path: string; bodyHandler: BodyHandler; handler: Handler)</a></li>
-<li><a class="reference" href="#put%2CHttpServer%2Cstring%2CHandler" title="put(server: HttpServer; path: string; handler: Handler)">put(server: HttpServer; path: string; handler: Handler)</a></li>
-<li><a class="reference" href="#put%2CHttpServer%2Cstring%2Cbool%2CHandler" title="put(server: HttpServer; path: string; streamToFile: bool; handler: Handler)">put(server: HttpServer; path: string; streamToFile: bool; handler: Handler)</a></li>
-
-</ul>
 <ul class="simple nested-toc-section">removeSession
   <li><a class="reference" href="#removeSession%2CHttpServer%2Cint" title="removeSession(server: HttpServer; fd: int)">removeSession(server: HttpServer; fd: int)</a></li>
 
 </ul>
-<ul class="simple nested-toc-section">route
-  <li><a class="reference" href="#route%2CHttpServer%2CHttpMethod%2Cstring%2CBodyHandler%2CHandler" title="route(server: HttpServer; meth: HttpMethod; path: string;
-      bodyHandler: BodyHandler; handler: Handler)">route(server: HttpServer; meth: HttpMethod; path: string;
-      bodyHandler: BodyHandler; handler: Handler)</a></li>
-<li><a class="reference" href="#route%2CHttpServer%2CHttpMethod%2Cstring%2CHandler" title="route(server: HttpServer; meth: HttpMethod; path: string; handler: Handler)">route(server: HttpServer; meth: HttpMethod; path: string; handler: Handler)</a></li>
-
-</ul>
 <ul class="simple nested-toc-section">send
-  <li><a class="reference" href="#send%2CResponse%2Cseq%5Bbyte%5D" title="send(res: Response; body: seq[byte])">send(res: Response; body: seq[byte])</a></li>
-<li><a class="reference" href="#send%2CResponse%2Cstring" title="send(res: Response; body: string = &quot;&quot;)">send(res: Response; body: string = &quot;&quot;)</a></li>
+  <li><a class="reference" href="#send%2CHttpResponse%2Cseq%5Bbyte%5D" title="send(res: HttpResponse; body: seq[byte])">send(res: HttpResponse; body: seq[byte])</a></li>
+<li><a class="reference" href="#send%2CHttpResponse%2Cstring" title="send(res: HttpResponse; body: string = &quot;&quot;)">send(res: HttpResponse; body: string = &quot;&quot;)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">sendError
-  <li><a class="reference" href="#sendError%2CResponse%2CHttpCode%2Cstring" title="sendError(res: Response; code: HttpCode; msg: string = &quot;&quot;)">sendError(res: Response; code: HttpCode; msg: string = &quot;&quot;)</a></li>
+  <li><a class="reference" href="#sendError%2CHttpResponse%2CHttpCode%2Cstring" title="sendError(res: HttpResponse; code: HttpCode; msg: string = &quot;&quot;)">sendError(res: HttpResponse; code: HttpCode; msg: string = &quot;&quot;)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">sendFile
-  <li><a class="reference" href="#sendFile%2CResponse%2Cstring%2CHttpRequest" title="sendFile(res: Response; path: string; req: HttpRequest = default(HttpRequest);
-         closeConn = true)">sendFile(res: Response; path: string; req: HttpRequest = default(HttpRequest);
-         closeConn = true)</a></li>
+  <li><a class="reference" href="#sendFile%2CHttpResponse%2Cstring%2CHttpRequest" title="sendFile(res: HttpResponse; path: string;
+         req: HttpRequest = default(HttpRequest); closeConn = true)">sendFile(res: HttpResponse; path: string;
+         req: HttpRequest = default(HttpRequest); closeConn = true)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">setKeepAliveTimeout
@@ -212,11 +160,11 @@
 
 </ul>
 <ul class="simple nested-toc-section">start
-  <li><a class="reference" href="#start%2CHttpServer%2CPort" title="start(server: HttpServer; port: Port)">start(server: HttpServer; port: Port)</a></li>
+  <li><a class="reference" href="#start%2CHttpServer%2COnRequestCallback%2CPort" title="start(server: HttpServer; handler: OnRequestCallback; port: Port)">start(server: HttpServer; handler: OnRequestCallback; port: Port)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">status
-  <li><a class="reference" href="#status%2CResponse%2CHttpCode" title="status(res: Response; code: HttpCode): Response">status(res: Response; code: HttpCode): Response</a></li>
+  <li><a class="reference" href="#status%2CHttpResponse%2CHttpCode" title="status(res: HttpResponse; code: HttpCode): HttpResponse">status(res: HttpResponse; code: HttpCode): HttpResponse</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">stop
@@ -224,8 +172,8 @@
 
 </ul>
 <ul class="simple nested-toc-section">streamFile
-  <li><a class="reference" href="#streamFile%2CResponse%2Cstring%2CHttpRequest" title="streamFile(res: Response; path: string; req: HttpRequest;
-           chunkSize = DefaultChunkSize)">streamFile(res: Response; path: string; req: HttpRequest;
+  <li><a class="reference" href="#streamFile%2CHttpResponse%2Cstring%2CHttpRequest" title="streamFile(res: HttpResponse; path: string; req: HttpRequest;
+           chunkSize = DefaultChunkSize)">streamFile(res: HttpResponse; path: string; req: HttpRequest;
            chunkSize = DefaultChunkSize)</a></li>
 
 </ul>
@@ -246,8 +194,15 @@
     <div id="tocRoot"></div>
     
     <p class="module-desc"><p>A non-blocking HTTP/1.1 server built on top of powpow's TCP primitives.</p>
-<p>Combines the TCP transport layer with the incremental HTTP parser to provide a high-level routing server with minimal overhead.</p>
-<p>Usage: let server = newHttpServer(loop) server.get(&quot;/&quot;) do (req: HttpRequest, res: Response): res.status(Http200).send(&quot;Hello!&quot;) server.listen(&quot;0.0.0.0&quot;, 8080) loop.run()</p>
+<p>Combines the TCP transport layer with the incremental HTTP parser. Higher-level frameworks implement routing via the <tt class="docutils literal"><span class="pre"><span class="Identifier">OnRequestCallback</span></span></tt>.</p>
+
+<h3><a class="toc-backref" id="usagecolon" href="#usagecolon">Usage:</a></h3><p><pre class="listing">  <span class="Keyword">let</span> <span class="Identifier">server</span> <span class="Operator">=</span> <span class="Identifier">newHttpServer</span><span class="Punctuation">(</span><span class="Punctuation">)</span>
+  <span class="Identifier">server</span><span class="Operator">.</span><span class="Identifier">start</span> <span class="Keyword">do</span> <span class="Punctuation">(</span><span class="Identifier">req</span><span class="Punctuation">:</span> <span class="Identifier">HttpRequest</span><span class="Punctuation">,</span> <span class="Identifier">res</span><span class="Punctuation">:</span> <span class="Identifier">HttpResponse</span><span class="Punctuation">)</span><span class="Punctuation">:</span>
+    <span class="Keyword">if</span> <span class="Identifier">req</span><span class="Operator">.</span><span class="Identifier">getPath</span><span class="Punctuation">(</span><span class="Punctuation">)</span> <span class="Operator">==</span> <span class="StringLit">&quot;/&quot;</span><span class="Punctuation">:</span>
+      <span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">status</span><span class="Punctuation">(</span><span class="Identifier">Http200</span><span class="Punctuation">)</span><span class="Operator">.</span><span class="Identifier">send</span><span class="Punctuation">(</span><span class="StringLit">&quot;Hello, World!&quot;</span><span class="Punctuation">)</span>
+    <span class="Keyword">else</span><span class="Punctuation">:</span>
+      <span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">sendError</span><span class="Punctuation">(</span><span class="Identifier">Http404</span><span class="Punctuation">,</span> <span class="StringLit">&quot;Not Found&quot;</span><span class="Punctuation">)</span>
+  <span class="Punctuation">,</span> <span class="Identifier">Port</span><span class="Punctuation">(</span><span class="DecNumber">9000</span><span class="Punctuation">)</span></pre></p>
 </p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
@@ -258,37 +213,28 @@
 <div class="section" id="7">
   <h1><a class="toc-backref" href="#7">Types</a></h1>
   <dl class="item">
-    <div id="BodyHandler">
-  <dt><pre><a href="#BodyHandler"><span class="Identifier">BodyHandler</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">done</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
+    <div id="HttpResponse">
+  <dt><pre><a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
   <dd>
     
-    <p>Streaming body handler. Receives body data as it arrives from the network. <tt class="docutils literal"><span class="pre"><span class="Identifier">done</span></span></tt> is true when the body is complete.</p>
-<p>Use with streaming routes to process large uploads without buffering: server.post(&quot;/upload&quot;, bodyHandler = cb) do (req, res): ...</p>
-
-    
-  </dd>
-</div>
-<div id="Handler">
-  <dt><pre><a href="#Handler"><span class="Identifier">Handler</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
-  <dd>
-    
-    Route handler. Call <tt class="docutils literal"><span class="pre"><span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">status</span><span class="Punctuation">(</span><span class="Operator">...</span><span class="Punctuation">)</span><span class="Operator">.</span><span class="Identifier">send</span><span class="Punctuation">(</span><span class="Operator">...</span><span class="Punctuation">)</span></span></tt> to respond.
+    Build and send an HTTP response.
     
   </dd>
 </div>
 <div id="HttpServer">
-  <dt><pre><a href="#HttpServer"><span class="Identifier">HttpServer</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
+  <dt><pre><a href="#HttpServer"><span class="Identifier">HttpServer</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
+  <span class="Identifier">handler</span><span class="Operator">*</span><span class="Other">:</span> <a href="#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a></pre></dt>
   <dd>
     
-    A non-blocking HTTP/1.1 server.
+    
     
   </dd>
 </div>
-<div id="Response">
-  <dt><pre><a href="#Response"><span class="Identifier">Response</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
+<div id="OnRequestCallback">
+  <dt><pre><a href="#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span></span>.}</pre></dt>
   <dd>
     
-    Build and send an HTTP response.
+    User-provided callback invoked for every parsed HTTP request. Higher-level frameworks implement routing on top of this.
     
   </dd>
 </div>
@@ -333,9 +279,9 @@
 
 </div>
 <div id="close-procs-all">
-  <div id="close,Response">
-  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CResponse"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-                                      <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="close,HttpResponse">
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CHttpResponse"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Mark this response to send &quot;Connection: close&quot; and shut down the TCP connection after the response is sent.
@@ -352,36 +298,6 @@
 </div>
 
 </div>
-<div id="delete-procs-all">
-  <div id="delete,HttpServer,string,BodyHandler,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#delete%2CHttpServer%2Cstring%2CBodyHandler%2CHandler"><span class="Identifier">delete</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">bodyHandler</span><span class="Other">:</span> <a href="#BodyHandler"><span class="Identifier">BodyHandler</span></a><span class="Other">;</span>
-            <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a DELETE route handler with a streaming body handler.
-    
-  </dd>
-</div>
-<div id="delete,HttpServer,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#delete%2CHttpServer%2Cstring%2CHandler"><span class="Identifier">delete</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a DELETE route handler.
-    
-  </dd>
-</div>
-<div id="delete,HttpServer,string,Handler,bool">
-  <dt><pre><span class="Keyword">proc</span> <a href="#delete%2CHttpServer%2Cstring%2CHandler%2Cbool"><span class="Identifier">delete</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">;</span>
-            <span class="Identifier">streamToFile</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a DELETE route that streams the raw body to a temp file.
-    
-  </dd>
-</div>
-
-</div>
 <div id="ensureTcpServer-procs-all">
   <div id="ensureTcpServer,HttpServer">
   <dt><pre><span class="Keyword">proc</span> <a href="#ensureTcpServer%2CHttpServer"><span class="Identifier">ensureTcpServer</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -393,21 +309,9 @@
 </div>
 
 </div>
-<div id="get-procs-all">
-  <div id="get,HttpServer,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#get%2CHttpServer%2Cstring%2CHandler"><span class="Identifier">get</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a GET route handler.
-    
-  </dd>
-</div>
-
-</div>
 <div id="getConn-procs-all">
-  <div id="getConn,Response">
-  <dt><pre><span class="Keyword">proc</span> <a href="#getConn%2CResponse"><span class="Identifier">getConn</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">)</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+  <div id="getConn,HttpResponse">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getConn%2CHttpResponse"><span class="Identifier">getConn</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -440,21 +344,9 @@
 </div>
 
 </div>
-<div id="head-procs-all">
-  <div id="head,HttpServer,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#head%2CHttpServer%2Cstring%2CHandler"><span class="Identifier">head</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a HEAD route handler.
-    
-  </dd>
-</div>
-
-</div>
 <div id="header-procs-all">
-  <div id="header,Response,string,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#header%2CResponse%2Cstring%2Cstring"><span class="Identifier">header</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">key</span><span class="Other">,</span> <span class="Identifier">value</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span>
+  <div id="header,HttpResponse,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#header%2CHttpResponse%2Cstring%2Cstring"><span class="Identifier">header</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">key</span><span class="Other">,</span> <span class="Identifier">value</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span>
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -489,8 +381,8 @@
 
 </div>
 <div id="markSent-procs-all">
-  <div id="markSent,Response">
-  <dt><pre><span class="Keyword">proc</span> <a href="#markSent%2CResponse"><span class="Identifier">markSent</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="markSent,HttpResponse">
+  <dt><pre><span class="Keyword">proc</span> <a href="#markSent%2CHttpResponse"><span class="Identifier">markSent</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Mark this response as sent without writing any bytes. Used by upgrade handlers that send the response manually.
@@ -505,7 +397,7 @@
                                    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Create a new HTTP server with an internal event loop.
+    
     
   </dd>
 </div>
@@ -513,31 +405,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer%2CLoop"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Create a new HTTP server.
     
-  </dd>
-</div>
-
-</div>
-<div id="notFound-procs-all">
-  <div id="notFound,HttpServer,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#notFound%2CHttpServer%2CHandler"><span class="Identifier">notFound</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a catch-all handler for unmatched routes.
-    
-  </dd>
-</div>
-
-</div>
-<div id="options-procs-all">
-  <div id="options,HttpServer,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#options%2CHttpServer%2Cstring%2CHandler"><span class="Identifier">options</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register an OPTIONS route handler.
     
   </dd>
 </div>
@@ -555,96 +423,6 @@
 </div>
 
 </div>
-<div id="patch-procs-all">
-  <div id="patch,HttpServer,string,BodyHandler,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#patch%2CHttpServer%2Cstring%2CBodyHandler%2CHandler"><span class="Identifier">patch</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">bodyHandler</span><span class="Other">:</span> <a href="#BodyHandler"><span class="Identifier">BodyHandler</span></a><span class="Other">;</span>
-           <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a PATCH route handler with a streaming body handler.
-    
-  </dd>
-</div>
-<div id="patch,HttpServer,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#patch%2CHttpServer%2Cstring%2CHandler"><span class="Identifier">patch</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a PATCH route handler.
-    
-  </dd>
-</div>
-<div id="patch,HttpServer,string,Handler,bool">
-  <dt><pre><span class="Keyword">proc</span> <a href="#patch%2CHttpServer%2Cstring%2CHandler%2Cbool"><span class="Identifier">patch</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">;</span>
-           <span class="Identifier">streamToFile</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a PATCH route that streams the raw body to a temp file.
-    
-  </dd>
-</div>
-
-</div>
-<div id="post-procs-all">
-  <div id="post,HttpServer,string,BodyHandler,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#post%2CHttpServer%2Cstring%2CBodyHandler%2CHandler"><span class="Identifier">post</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">bodyHandler</span><span class="Other">:</span> <a href="#BodyHandler"><span class="Identifier">BodyHandler</span></a><span class="Other">;</span>
-          <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a POST route handler with a streaming body handler.
-    
-  </dd>
-</div>
-<div id="post,HttpServer,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#post%2CHttpServer%2Cstring%2CHandler"><span class="Identifier">post</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a POST route handler.
-    
-  </dd>
-</div>
-<div id="post,HttpServer,string,bool,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#post%2CHttpServer%2Cstring%2Cbool%2CHandler"><span class="Identifier">post</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">streamToFile</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a POST route that streams the raw body to a temp file. Memory: ~68KB regardless of body size.
-    
-  </dd>
-</div>
-
-</div>
-<div id="put-procs-all">
-  <div id="put,HttpServer,string,BodyHandler,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#put%2CHttpServer%2Cstring%2CBodyHandler%2CHandler"><span class="Identifier">put</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">bodyHandler</span><span class="Other">:</span> <a href="#BodyHandler"><span class="Identifier">BodyHandler</span></a><span class="Other">;</span>
-         <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a PUT route handler with a streaming body handler.
-    
-  </dd>
-</div>
-<div id="put,HttpServer,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#put%2CHttpServer%2Cstring%2CHandler"><span class="Identifier">put</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a PUT route handler.
-    
-  </dd>
-</div>
-<div id="put,HttpServer,string,bool,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#put%2CHttpServer%2Cstring%2Cbool%2CHandler"><span class="Identifier">put</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">streamToFile</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a PUT route that streams the raw body to a temp file.
-    
-  </dd>
-</div>
-
-</div>
 <div id="removeSession-procs-all">
   <div id="removeSession,HttpServer,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#removeSession%2CHttpServer%2Cint"><span class="Identifier">removeSession</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
@@ -657,31 +435,9 @@
 </div>
 
 </div>
-<div id="route-procs-all">
-  <div id="route,HttpServer,HttpMethod,string,BodyHandler,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#route%2CHttpServer%2CHttpMethod%2Cstring%2CBodyHandler%2CHandler"><span class="Identifier">route</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">meth</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
-           <span class="Identifier">bodyHandler</span><span class="Other">:</span> <a href="#BodyHandler"><span class="Identifier">BodyHandler</span></a><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a route handler with a streaming body handler. The body handler receives body data as it arrives from the network. When the body is complete, <tt class="docutils literal"><span class="pre"><span class="Identifier">done</span></span></tt> is set to true.
-    
-  </dd>
-</div>
-<div id="route,HttpServer,HttpMethod,string,Handler">
-  <dt><pre><span class="Keyword">proc</span> <a href="#route%2CHttpServer%2CHttpMethod%2Cstring%2CHandler"><span class="Identifier">route</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">meth</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#Handler"><span class="Identifier">Handler</span></a><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    Register a route handler.
-    
-  </dd>
-</div>
-
-</div>
 <div id="send-procs-all">
-  <div id="send,Response,seq[byte]">
-  <dt><pre><span class="Keyword">proc</span> <a href="#send%2CResponse%2Cseq%5Bbyte%5D"><span class="Identifier">send</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">body</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+  <div id="send,HttpResponse,seq[byte]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#send%2CHttpResponse%2Cseq%5Bbyte%5D"><span class="Identifier">send</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">body</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -689,8 +445,8 @@
     
   </dd>
 </div>
-<div id="send,Response,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#send%2CResponse%2Cstring"><span class="Identifier">send</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">body</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+<div id="send,HttpResponse,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#send%2CHttpResponse%2Cstring"><span class="Identifier">send</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">body</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -701,8 +457,8 @@
 
 </div>
 <div id="sendError-procs-all">
-  <div id="sendError,Response,HttpCode,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#sendError%2CResponse%2CHttpCode%2Cstring"><span class="Identifier">sendError</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">;</span> <span class="Identifier">msg</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.
+  <div id="sendError,HttpResponse,HttpCode,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sendError%2CHttpResponse%2CHttpCode%2Cstring"><span class="Identifier">sendError</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">;</span> <span class="Identifier">msg</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -713,8 +469,8 @@
 
 </div>
 <div id="sendFile-procs-all">
-  <div id="sendFile,Response,string,HttpRequest">
-  <dt><pre><span class="Keyword">proc</span> <a href="#sendFile%2CResponse%2Cstring%2CHttpRequest"><span class="Identifier">sendFile</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
+  <div id="sendFile,HttpResponse,string,HttpRequest">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sendFile%2CHttpResponse%2Cstring%2CHttpRequest"><span class="Identifier">sendFile</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
               <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a> <span class="Other">=</span> <span class="Identifier">default</span><span class="Other">(</span><a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">;</span> <span class="Identifier">closeConn</span> <span class="Other">=</span> <span class="Identifier">true</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -738,21 +494,21 @@
 
 </div>
 <div id="start-procs-all">
-  <div id="start,HttpServer,Port">
-  <dt><pre><span class="Keyword">proc</span> <a href="#start%2CHttpServer%2CPort"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">Port</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="start,HttpServer,OnRequestCallback,Port">
+  <dt><pre><span class="Keyword">proc</span> <a href="#start%2CHttpServer%2COnRequestCallback%2CPort"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">Port</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Start the HTTP server on the given port.
+    
     
   </dd>
 </div>
 
 </div>
 <div id="status-procs-all">
-  <div id="status,Response,HttpCode">
-  <dt><pre><span class="Keyword">proc</span> <a href="#status%2CResponse%2CHttpCode"><span class="Identifier">status</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">)</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="status,HttpResponse,HttpCode">
+  <dt><pre><span class="Keyword">proc</span> <a href="#status%2CHttpResponse%2CHttpCode"><span class="Identifier">status</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Set the HTTP status code.
@@ -774,10 +530,10 @@
 
 </div>
 <div id="streamFile-procs-all">
-  <div id="streamFile,Response,string,HttpRequest">
-  <dt><pre><span class="Keyword">proc</span> <a href="#streamFile%2CResponse%2Cstring%2CHttpRequest"><span class="Identifier">streamFile</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span>
-                <span class="Identifier">chunkSize</span> <span class="Other">=</span> <span class="Identifier">DefaultChunkSize</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="streamFile,HttpResponse,string,HttpRequest">
+  <dt><pre><span class="Keyword">proc</span> <a href="#streamFile%2CHttpResponse%2Cstring%2CHttpRequest"><span class="Identifier">streamFile</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span>
+                <span class="Identifier">chunkSize</span> <span class="Other">=</span> <span class="Identifier">DefaultChunkSize</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
+    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     <p>Stream a file for media playback with per-response byte limiting. Always process Range requests. Caps each response body to <tt class="docutils literal"><span class="pre"><span class="Identifier">chunkSize</span></span></tt> bytes (default 1 MB) so a seek only transfers one chunk, not the entire remaining file. Always uses keep-alive.</p>
@@ -810,7 +566,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 15:28:00 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
       </div>
     </div>
   </div>

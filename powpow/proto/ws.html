@@ -145,9 +145,9 @@
 
 </ul>
 <ul class="simple nested-toc-section">websocketUpgrade
-  <li><a class="reference" href="#websocketUpgrade%2CResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb" title="websocketUpgrade(res: Response; req: HttpRequest; server: HttpServer = nil;
+  <li><a class="reference" href="#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb" title="websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
-                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection">websocketUpgrade(res: Response; req: HttpRequest; server: HttpServer = nil;
+                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection">websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
                  onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection</a></li>
 
@@ -451,11 +451,12 @@
 
 </div>
 <div id="websocketUpgrade-procs-all">
-  <div id="websocketUpgrade,Response,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb">
-  <dt><pre><span class="Keyword">proc</span> <a href="#websocketUpgrade%2CResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb"><span class="Identifier">websocketUpgrade</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">server</span><span class="Other">:</span> <a href="httpserver.html#HttpServer"><span class="Identifier">HttpServer</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
-                      <span class="Identifier">onOpen</span><span class="Other">:</span> <a href="#WsOpenCb"><span class="Identifier">WsOpenCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onMessage</span><span class="Other">:</span> <a href="#WsMessageCb"><span class="Identifier">WsMessageCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
-                      <span class="Identifier">onClose</span><span class="Other">:</span> <a href="#WsCloseCb"><span class="Identifier">WsCloseCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onError</span><span class="Other">:</span> <a href="#WsErrorCb"><span class="Identifier">WsErrorCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.
-    <span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+  <div id="websocketUpgrade,HttpResponse,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb">
+  <dt><pre><span class="Keyword">proc</span> <a href="#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb"><span class="Identifier">websocketUpgrade</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span>
+                      <span class="Identifier">server</span><span class="Other">:</span> <a href="httpserver.html#HttpServer"><span class="Identifier">HttpServer</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onOpen</span><span class="Other">:</span> <a href="#WsOpenCb"><span class="Identifier">WsOpenCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
+                      <span class="Identifier">onMessage</span><span class="Other">:</span> <a href="#WsMessageCb"><span class="Identifier">WsMessageCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onClose</span><span class="Other">:</span> <a href="#WsCloseCb"><span class="Identifier">WsCloseCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
+                      <span class="Identifier">onError</span><span class="Other">:</span> <a href="#WsErrorCb"><span class="Identifier">WsErrorCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
+    </span><span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -508,7 +509,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 15:28:00 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
       </div>
     </div>
   </div>

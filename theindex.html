@@ -59,10 +59,6 @@
 <li><a class="reference external"
           data-doc-search-tag="udp: proc bindUdp(loop: Loop; address: string; port: int; onData: OnUdpData): UdpSocket" href="powpow/net/udp.html#bindUdp%2CLoop%2Cstring%2Cint%2COnUdpData">udp: proc bindUdp(loop: Loop; address: string; port: int; onData: OnUdpData): UdpSocket</a></li>
           </ul></dd>
-<dt><a name="BodyHandler" href="#BodyHandler"><span>BodyHandler:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: type BodyHandler" href="powpow/proto/httpserver.html#BodyHandler">httpserver: type BodyHandler</a></li>
-          </ul></dd>
 <dt><a name="BodyStream" href="#BodyStream"><span>BodyStream:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: object BodyStream" href="powpow/proto/http.html#BodyStream">http: object BodyStream</a></li>
@@ -95,9 +91,9 @@
           <li><a class="reference external"
           data-doc-search-tag="epoll: proc close(p: Platform)" href="powpow/platform/epoll.html#close%2CPlatform">epoll: proc close(p: Platform)</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc close(server: HttpServer)" href="powpow/proto/httpserver.html#close%2CHttpServer">httpserver: proc close(server: HttpServer)</a></li>
+          data-doc-search-tag="httpserver: proc close(res: HttpResponse): HttpResponse" href="powpow/proto/httpserver.html#close%2CHttpResponse">httpserver: proc close(res: HttpResponse): HttpResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc close(res: Response): Response" href="powpow/proto/httpserver.html#close%2CResponse">httpserver: proc close(res: Response): Response</a></li>
+          data-doc-search-tag="httpserver: proc close(server: HttpServer)" href="powpow/proto/httpserver.html#close%2CHttpServer">httpserver: proc close(server: HttpServer)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="multithread: proc close(srv: MultiThreadHttpServer)" href="powpow/proto/multithread.html#close%2CMultiThreadHttpServer">multithread: proc close(srv: MultiThreadHttpServer)</a></li>
           <li><a class="reference external"
@@ -187,18 +183,6 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc deferCall(loop: Loop; cb: Callback)" href="powpow/loop.html#deferCall%2CLoop%2CCallback">loop: proc deferCall(loop: Loop; cb: Callback)</a></li>
           </ul></dd>
-<dt><a name="delete" href="#delete"><span>delete:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc delete(server: HttpServer; path: string; bodyHandler: BodyHandler;
-       handler: Handler)" href="powpow/proto/httpserver.html#delete%2CHttpServer%2Cstring%2CBodyHandler%2CHandler">httpserver: proc delete(server: HttpServer; path: string; bodyHandler: BodyHandler;
-       handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc delete(server: HttpServer; path: string; handler: Handler)" href="powpow/proto/httpserver.html#delete%2CHttpServer%2Cstring%2CHandler">httpserver: proc delete(server: HttpServer; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc delete(server: HttpServer; path: string; handler: Handler; streamToFile: bool)" href="powpow/proto/httpserver.html#delete%2CHttpServer%2Cstring%2CHandler%2Cbool">httpserver: proc delete(server: HttpServer; path: string; handler: Handler; streamToFile: bool)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc delete(srv: MultiThreadHttpServer; path: string; handler: Handler)" href="powpow/proto/multithread.html#delete%2CMultiThreadHttpServer%2Cstring%2CHandler">multithread: proc delete(srv: MultiThreadHttpServer; path: string; handler: Handler)</a></li>
-          </ul></dd>
 <dt><a name="drainChunk" href="#drainChunk"><span>drainChunk:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc drainChunk(stream: var BodyStream; len: Natural)" href="powpow/proto/http.html#drainChunk%2CBodyStream%2CNatural">http: proc drainChunk(stream: var BodyStream; len: Natural)</a></li>
@@ -261,12 +245,6 @@
 <li><a class="reference external"
           data-doc-search-tag="simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int" href="powpow/proto/simdscan.html#findDoubleCRLFSse2%2Cptr.UncheckedArray%5Bbyte%5D%2Cint%2Cint">simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int</a></li>
           </ul></dd>
-<dt><a name="get" href="#get"><span>get:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc get(server: HttpServer; path: string; handler: Handler)" href="powpow/proto/httpserver.html#get%2CHttpServer%2Cstring%2CHandler">httpserver: proc get(server: HttpServer; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc get(srv: MultiThreadHttpServer; path: string; handler: Handler)" href="powpow/proto/multithread.html#get%2CMultiThreadHttpServer%2Cstring%2CHandler">multithread: proc get(srv: MultiThreadHttpServer; path: string; handler: Handler)</a></li>
-          </ul></dd>
 <dt><a name="getBody" href="#getBody"><span>getBody:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getBody(req: HttpRequest): seq[byte]" href="powpow/proto/http.html#getBody%2CHttpRequest">http: proc getBody(req: HttpRequest): seq[byte]</a></li>
@@ -285,7 +263,7 @@
           </ul></dd>
 <dt><a name="getConn" href="#getConn"><span>getConn:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc getConn(res: Response): Connection" href="powpow/proto/httpserver.html#getConn%2CResponse">httpserver: proc getConn(res: Response): Connection</a></li>
+          data-doc-search-tag="httpserver: proc getConn(res: HttpResponse): Connection" href="powpow/proto/httpserver.html#getConn%2CHttpResponse">httpserver: proc getConn(res: HttpResponse): Connection</a></li>
           </ul></dd>
 <dt><a name="getConnectionClose" href="#getConnectionClose"><span>getConnectionClose:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -343,23 +321,13 @@
 <li><a class="reference external"
           data-doc-search-tag="http: proc getUrl(req: HttpRequest): string" href="powpow/proto/http.html#getUrl%2CHttpRequest">http: proc getUrl(req: HttpRequest): string</a></li>
           </ul></dd>
-<dt><a name="Handler" href="#Handler"><span>Handler:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: type Handler" href="powpow/proto/httpserver.html#Handler">httpserver: type Handler</a></li>
-          </ul></dd>
 <dt><a name="hasSse2" href="#hasSse2"><span>hasSse2:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="simdscan: const hasSse2" href="powpow/proto/simdscan.html#hasSse2">simdscan: const hasSse2</a></li>
           </ul></dd>
-<dt><a name="head" href="#head"><span>head:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc head(server: HttpServer; path: string; handler: Handler)" href="powpow/proto/httpserver.html#head%2CHttpServer%2Cstring%2CHandler">httpserver: proc head(server: HttpServer; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc head(srv: MultiThreadHttpServer; path: string; handler: Handler)" href="powpow/proto/multithread.html#head%2CMultiThreadHttpServer%2Cstring%2CHandler">multithread: proc head(srv: MultiThreadHttpServer; path: string; handler: Handler)</a></li>
-          </ul></dd>
 <dt><a name="header" href="#header"><span>header:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc header(res: Response; key, value: string): Response" href="powpow/proto/httpserver.html#header%2CResponse%2Cstring%2Cstring">httpserver: proc header(res: Response; key, value: string): Response</a></li>
+          data-doc-search-tag="httpserver: proc header(res: HttpResponse; key, value: string): HttpResponse" href="powpow/proto/httpserver.html#header%2CHttpResponse%2Cstring%2Cstring">httpserver: proc header(res: HttpResponse; key, value: string): HttpResponse</a></li>
           </ul></dd>
 <dt><a name="headerBytes" href="#headerBytes"><span>headerBytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -376,6 +344,10 @@
 <dt><a name="HttpRequest" href="#HttpRequest"><span>HttpRequest:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: type HttpRequest" href="powpow/proto/http.html#HttpRequest">http: type HttpRequest</a></li>
+          </ul></dd>
+<dt><a name="HttpResponse" href="#HttpResponse"><span>HttpResponse:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: type HttpResponse" href="powpow/proto/httpserver.html#HttpResponse">httpserver: type HttpResponse</a></li>
           </ul></dd>
 <dt><a name="HttpServer" href="#HttpServer"><span>HttpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -435,7 +407,7 @@
           </ul></dd>
 <dt><a name="markSent" href="#markSent"><span>markSent:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc markSent(res: Response)" href="powpow/proto/httpserver.html#markSent%2CResponse">httpserver: proc markSent(res: Response)</a></li>
+          data-doc-search-tag="httpserver: proc markSent(res: HttpResponse)" href="powpow/proto/httpserver.html#markSent%2CHttpResponse">httpserver: proc markSent(res: HttpResponse)</a></li>
           </ul></dd>
 <dt><a name="MaxHeaders" href="#MaxHeaders"><span>MaxHeaders:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -495,12 +467,6 @@
 <li><a class="reference external"
           data-doc-search-tag="ws: proc newWsServer(loop: Loop): WsServer" href="powpow/proto/ws.html#newWsServer%2CLoop">ws: proc newWsServer(loop: Loop): WsServer</a></li>
           </ul></dd>
-<dt><a name="notFound" href="#notFound"><span>notFound:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc notFound(server: HttpServer; handler: Handler)" href="powpow/proto/httpserver.html#notFound%2CHttpServer%2CHandler">httpserver: proc notFound(server: HttpServer; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc notFound(srv: MultiThreadHttpServer; handler: Handler)" href="powpow/proto/multithread.html#notFound%2CMultiThreadHttpServer%2CHandler">multithread: proc notFound(srv: MultiThreadHttpServer; handler: Handler)</a></li>
-          </ul></dd>
 <dt><a name="OnAccept" href="#OnAccept"><span>OnAccept:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: type OnAccept" href="powpow/net/tcp.html#OnAccept">tcp: type OnAccept</a></li>
@@ -529,6 +495,10 @@
 <li><a class="reference external"
           data-doc-search-tag="ws: proc onOpen(wss: WsServer; cb: WsOpenCb)" href="powpow/proto/ws.html#onOpen%2CWsServer%2CWsOpenCb">ws: proc onOpen(wss: WsServer; cb: WsOpenCb)</a></li>
           </ul></dd>
+<dt><a name="OnRequestCallback" href="#OnRequestCallback"><span>OnRequestCallback:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: type OnRequestCallback" href="powpow/proto/httpserver.html#OnRequestCallback">httpserver: type OnRequestCallback</a></li>
+          </ul></dd>
 <dt><a name="OnUdpData" href="#OnUdpData"><span>OnUdpData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="udp: type OnUdpData" href="powpow/net/udp.html#OnUdpData">udp: type OnUdpData</a></li>
@@ -536,12 +506,6 @@
 <dt><a name="openFileRead" href="#openFileRead"><span>openFileRead:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc openFileRead(path: string): int" href="powpow/net/common.html#openFileRead%2Cstring">common: proc openFileRead(path: string): int</a></li>
-          </ul></dd>
-<dt><a name="options" href="#options"><span>options:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc options(server: HttpServer; path: string; handler: Handler)" href="powpow/proto/httpserver.html#options%2CHttpServer%2Cstring%2CHandler">httpserver: proc options(server: HttpServer; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc options(srv: MultiThreadHttpServer; path: string; handler: Handler)" href="powpow/proto/multithread.html#options%2CMultiThreadHttpServer%2Cstring%2CHandler">multithread: proc options(srv: MultiThreadHttpServer; path: string; handler: Handler)</a></li>
           </ul></dd>
 <dt><a name="O_RDONLY" href="#O_RDONLY"><span>O_RDONLY:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -556,18 +520,6 @@
           data-doc-search-tag="httpserver: proc parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,
     start, length: int64]" href="powpow/proto/httpserver.html#parseRange%2Cstring%2Cint64">httpserver: proc parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,
     start, length: int64]</a></li>
-          </ul></dd>
-<dt><a name="patch" href="#patch"><span>patch:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc patch(server: HttpServer; path: string; bodyHandler: BodyHandler;
-      handler: Handler)" href="powpow/proto/httpserver.html#patch%2CHttpServer%2Cstring%2CBodyHandler%2CHandler">httpserver: proc patch(server: HttpServer; path: string; bodyHandler: BodyHandler;
-      handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc patch(server: HttpServer; path: string; handler: Handler)" href="powpow/proto/httpserver.html#patch%2CHttpServer%2Cstring%2CHandler">httpserver: proc patch(server: HttpServer; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc patch(server: HttpServer; path: string; handler: Handler; streamToFile: bool)" href="powpow/proto/httpserver.html#patch%2CHttpServer%2Cstring%2CHandler%2Cbool">httpserver: proc patch(server: HttpServer; path: string; handler: Handler; streamToFile: bool)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc patch(srv: MultiThreadHttpServer; path: string; handler: Handler)" href="powpow/proto/multithread.html#patch%2CMultiThreadHttpServer%2Cstring%2CHandler">multithread: proc patch(srv: MultiThreadHttpServer; path: string; handler: Handler)</a></li>
           </ul></dd>
 <dt><a name="peekAll" href="#peekAll"><span>peekAll:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -629,28 +581,6 @@
           <li><a class="reference external"
           data-doc-search-tag="epoll: proc poll(p: Platform; timeoutMs: int): int" href="powpow/platform/epoll.html#poll%2CPlatform%2Cint">epoll: proc poll(p: Platform; timeoutMs: int): int</a></li>
           </ul></dd>
-<dt><a name="post" href="#post"><span>post:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc post(server: HttpServer; path: string; bodyHandler: BodyHandler;
-     handler: Handler)" href="powpow/proto/httpserver.html#post%2CHttpServer%2Cstring%2CBodyHandler%2CHandler">httpserver: proc post(server: HttpServer; path: string; bodyHandler: BodyHandler;
-     handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc post(server: HttpServer; path: string; streamToFile: bool; handler: Handler)" href="powpow/proto/httpserver.html#post%2CHttpServer%2Cstring%2Cbool%2CHandler">httpserver: proc post(server: HttpServer; path: string; streamToFile: bool; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc post(server: HttpServer; path: string; handler: Handler)" href="powpow/proto/httpserver.html#post%2CHttpServer%2Cstring%2CHandler">httpserver: proc post(server: HttpServer; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc post(srv: MultiThreadHttpServer; path: string; handler: Handler)" href="powpow/proto/multithread.html#post%2CMultiThreadHttpServer%2Cstring%2CHandler">multithread: proc post(srv: MultiThreadHttpServer; path: string; handler: Handler)</a></li>
-          </ul></dd>
-<dt><a name="put" href="#put"><span>put:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc put(server: HttpServer; path: string; bodyHandler: BodyHandler; handler: Handler)" href="powpow/proto/httpserver.html#put%2CHttpServer%2Cstring%2CBodyHandler%2CHandler">httpserver: proc put(server: HttpServer; path: string; bodyHandler: BodyHandler; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc put(server: HttpServer; path: string; streamToFile: bool; handler: Handler)" href="powpow/proto/httpserver.html#put%2CHttpServer%2Cstring%2Cbool%2CHandler">httpserver: proc put(server: HttpServer; path: string; streamToFile: bool; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc put(server: HttpServer; path: string; handler: Handler)" href="powpow/proto/httpserver.html#put%2CHttpServer%2Cstring%2CHandler">httpserver: proc put(server: HttpServer; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc put(srv: MultiThreadHttpServer; path: string; handler: Handler)" href="powpow/proto/multithread.html#put%2CMultiThreadHttpServer%2Cstring%2CHandler">multithread: proc put(srv: MultiThreadHttpServer; path: string; handler: Handler)</a></li>
-          </ul></dd>
 <dt><a name="Read" href="#Read"><span>Read:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="types: EventType.Read" href="powpow/types.html#Read">types: EventType.Read</a></li>
@@ -703,22 +633,6 @@
 <li><a class="reference external"
           data-doc-search-tag="common: proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage" href="powpow/net/common.html#resolveAddr%2Cstring%2Cint%2Cint">common: proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage</a></li>
           </ul></dd>
-<dt><a name="Response" href="#Response"><span>Response:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: type Response" href="powpow/proto/httpserver.html#Response">httpserver: type Response</a></li>
-          </ul></dd>
-<dt><a name="route" href="#route"><span>route:</span></a></dt><dd><ul class="simple">
-<li><a class="reference external"
-          data-doc-search-tag="httpserver: proc route(server: HttpServer; meth: HttpMethod; path: string;
-      bodyHandler: BodyHandler; handler: Handler)" href="powpow/proto/httpserver.html#route%2CHttpServer%2CHttpMethod%2Cstring%2CBodyHandler%2CHandler">httpserver: proc route(server: HttpServer; meth: HttpMethod; path: string;
-      bodyHandler: BodyHandler; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc route(server: HttpServer; meth: HttpMethod; path: string; handler: Handler)" href="powpow/proto/httpserver.html#route%2CHttpServer%2CHttpMethod%2Cstring%2CHandler">httpserver: proc route(server: HttpServer; meth: HttpMethod; path: string; handler: Handler)</a></li>
-          <li><a class="reference external"
-          data-doc-search-tag="multithread: proc route(srv: MultiThreadHttpServer; meth: HttpMethod; path: string;
-      handler: Handler)" href="powpow/proto/multithread.html#route%2CMultiThreadHttpServer%2CHttpMethod%2Cstring%2CHandler">multithread: proc route(srv: MultiThreadHttpServer; meth: HttpMethod; path: string;
-      handler: Handler)</a></li>
-          </ul></dd>
 <dt><a name="run" href="#run"><span>run:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="loop: proc run(loop: Loop)" href="powpow/loop.html#run%2CLoop">loop: proc run(loop: Loop)</a></li>
@@ -753,9 +667,9 @@
           <li><a class="reference external"
           data-doc-search-tag="udp: proc send(sock: UdpSocket; data: string): int" href="powpow/net/udp.html#send%2CUdpSocket%2Cstring">udp: proc send(sock: UdpSocket; data: string): int</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc send(res: Response; body: seq[byte])" href="powpow/proto/httpserver.html#send%2CResponse%2Cseq%5Bbyte%5D">httpserver: proc send(res: Response; body: seq[byte])</a></li>
+          data-doc-search-tag="httpserver: proc send(res: HttpResponse; body: seq[byte])" href="powpow/proto/httpserver.html#send%2CHttpResponse%2Cseq%5Bbyte%5D">httpserver: proc send(res: HttpResponse; body: seq[byte])</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc send(res: Response; body: string = &quot;&quot;)" href="powpow/proto/httpserver.html#send%2CResponse%2Cstring">httpserver: proc send(res: Response; body: string = &quot;&quot;)</a></li>
+          data-doc-search-tag="httpserver: proc send(res: HttpResponse; body: string = &quot;&quot;)" href="powpow/proto/httpserver.html#send%2CHttpResponse%2Cstring">httpserver: proc send(res: HttpResponse; body: string = &quot;&quot;)</a></li>
           </ul></dd>
 <dt><a name="sendBinary" href="#sendBinary"><span>sendBinary:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -763,13 +677,13 @@
           </ul></dd>
 <dt><a name="sendError" href="#sendError"><span>sendError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc sendError(res: Response; code: HttpCode; msg: string = &quot;&quot;)" href="powpow/proto/httpserver.html#sendError%2CResponse%2CHttpCode%2Cstring">httpserver: proc sendError(res: Response; code: HttpCode; msg: string = &quot;&quot;)</a></li>
+          data-doc-search-tag="httpserver: proc sendError(res: HttpResponse; code: HttpCode; msg: string = &quot;&quot;)" href="powpow/proto/httpserver.html#sendError%2CHttpResponse%2CHttpCode%2Cstring">httpserver: proc sendError(res: HttpResponse; code: HttpCode; msg: string = &quot;&quot;)</a></li>
           </ul></dd>
 <dt><a name="sendFile" href="#sendFile"><span>sendFile:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc sendFile(res: Response; path: string; req: HttpRequest = default(HttpRequest);
-         closeConn = true)" href="powpow/proto/httpserver.html#sendFile%2CResponse%2Cstring%2CHttpRequest">httpserver: proc sendFile(res: Response; path: string; req: HttpRequest = default(HttpRequest);
-         closeConn = true)</a></li>
+          data-doc-search-tag="httpserver: proc sendFile(res: HttpResponse; path: string;
+         req: HttpRequest = default(HttpRequest); closeConn = true)" href="powpow/proto/httpserver.html#sendFile%2CHttpResponse%2Cstring%2CHttpRequest">httpserver: proc sendFile(res: HttpResponse; path: string;
+         req: HttpRequest = default(HttpRequest); closeConn = true)</a></li>
           </ul></dd>
 <dt><a name="sendFileChunk" href="#sendFileChunk"><span>sendFileChunk:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -871,11 +785,15 @@
           </ul></dd>
 <dt><a name="start" href="#start"><span>start:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc start(server: HttpServer; port: Port)" href="powpow/proto/httpserver.html#start%2CHttpServer%2CPort">httpserver: proc start(server: HttpServer; port: Port)</a></li>
+          data-doc-search-tag="httpserver: proc start(server: HttpServer; handler: OnRequestCallback; port: Port)" href="powpow/proto/httpserver.html#start%2CHttpServer%2COnRequestCallback%2CPort">httpserver: proc start(server: HttpServer; handler: OnRequestCallback; port: Port)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
+      port: int)" href="powpow/proto/multithread.html#start%2CMultiThreadHttpServer%2COnRequestCallback%2Cstring%2Cint">multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
+      port: int)</a></li>
           </ul></dd>
 <dt><a name="status" href="#status"><span>status:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc status(res: Response; code: HttpCode): Response" href="powpow/proto/httpserver.html#status%2CResponse%2CHttpCode">httpserver: proc status(res: Response; code: HttpCode): Response</a></li>
+          data-doc-search-tag="httpserver: proc status(res: HttpResponse; code: HttpCode): HttpResponse" href="powpow/proto/httpserver.html#status%2CHttpResponse%2CHttpCode">httpserver: proc status(res: HttpResponse; code: HttpCode): HttpResponse</a></li>
           </ul></dd>
 <dt><a name="stop" href="#stop"><span>stop:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -885,8 +803,8 @@
           </ul></dd>
 <dt><a name="streamFile" href="#streamFile"><span>streamFile:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc streamFile(res: Response; path: string; req: HttpRequest;
-           chunkSize = DefaultChunkSize)" href="powpow/proto/httpserver.html#streamFile%2CResponse%2Cstring%2CHttpRequest">httpserver: proc streamFile(res: Response; path: string; req: HttpRequest;
+          data-doc-search-tag="httpserver: proc streamFile(res: HttpResponse; path: string; req: HttpRequest;
+           chunkSize = DefaultChunkSize)" href="powpow/proto/httpserver.html#streamFile%2CHttpResponse%2Cstring%2CHttpRequest">httpserver: proc streamFile(res: HttpResponse; path: string; req: HttpRequest;
            chunkSize = DefaultChunkSize)</a></li>
           </ul></dd>
 <dt><a name="streamToFile" href="#streamToFile"><span>streamToFile:</span></a></dt><dd><ul class="simple">
@@ -927,9 +845,9 @@
           </ul></dd>
 <dt><a name="websocketUpgrade" href="#websocketUpgrade"><span>websocketUpgrade:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="ws: proc websocketUpgrade(res: Response; req: HttpRequest; server: HttpServer = nil;
+          data-doc-search-tag="ws: proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
-                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection" href="powpow/proto/ws.html#websocketUpgrade%2CResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb">ws: proc websocketUpgrade(res: Response; req: HttpRequest; server: HttpServer = nil;
+                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection" href="powpow/proto/ws.html#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb">ws: proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
                  onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection</a></li>
           </ul></dd>
@@ -1007,7 +925,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 15:28:00 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
       </div>
     </div>
   </div>
