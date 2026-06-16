@@ -1,0 +1,14 @@
+nimTitle	multithread	powpow/proto/multithread.html	module powpow/proto/multithread		0
+nim	MultiThreadHttpServer	powpow/proto/multithread.html#MultiThreadHttpServer	type MultiThreadHttpServer		58
+nim	newMultiThreadHttpServer	powpow/proto/multithread.html#newMultiThreadHttpServer,int	proc newMultiThreadHttpServer(numThreads: int = 0): MultiThreadHttpServer		127
+nim	route	powpow/proto/multithread.html#route,MultiThreadHttpServer,HttpMethod,string,Handler	proc route(srv: MultiThreadHttpServer; meth: HttpMethod; path: string;\n      handler: Handler)		140
+nim	get	powpow/proto/multithread.html#get,MultiThreadHttpServer,string,Handler	proc get(srv: MultiThreadHttpServer; path: string; handler: Handler)		144
+nim	post	powpow/proto/multithread.html#post,MultiThreadHttpServer,string,Handler	proc post(srv: MultiThreadHttpServer; path: string; handler: Handler)		147
+nim	put	powpow/proto/multithread.html#put,MultiThreadHttpServer,string,Handler	proc put(srv: MultiThreadHttpServer; path: string; handler: Handler)		150
+nim	patch	powpow/proto/multithread.html#patch,MultiThreadHttpServer,string,Handler	proc patch(srv: MultiThreadHttpServer; path: string; handler: Handler)		153
+nim	delete	powpow/proto/multithread.html#delete,MultiThreadHttpServer,string,Handler	proc delete(srv: MultiThreadHttpServer; path: string; handler: Handler)		156
+nim	head	powpow/proto/multithread.html#head,MultiThreadHttpServer,string,Handler	proc head(srv: MultiThreadHttpServer; path: string; handler: Handler)		159
+nim	options	powpow/proto/multithread.html#options,MultiThreadHttpServer,string,Handler	proc options(srv: MultiThreadHttpServer; path: string; handler: Handler)		162
+nim	notFound	powpow/proto/multithread.html#notFound,MultiThreadHttpServer,Handler	proc notFound(srv: MultiThreadHttpServer; handler: Handler)		165
+nim	close	powpow/proto/multithread.html#close,MultiThreadHttpServer	proc close(srv: MultiThreadHttpServer)		170
+nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,int	proc listen(srv: MultiThreadHttpServer; address: string; port: int)		177

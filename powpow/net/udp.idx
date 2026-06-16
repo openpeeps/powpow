@@ -1,0 +1,13 @@
+nimTitle	udp	powpow/net/udp.html	module powpow/net/udp		0
+nim	UdpMessage	powpow/net/udp.html#UdpMessage	object UdpMessage		20
+nim	OnUdpData	powpow/net/udp.html#OnUdpData	type OnUdpData		25
+nim	UdpSocket	powpow/net/udp.html#UdpSocket	type UdpSocket		27
+nim	close	powpow/net/udp.html#close,UdpSocket	proc close(sock: UdpSocket)		36
+nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,openArray[byte],string,int	proc sendTo(sock: UdpSocket; data: openArray[byte]; address: string; port: int): int		47
+nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,string,string,int	proc sendTo(sock: UdpSocket; data: string; address: string; port: int): int		60
+nim	send	powpow/net/udp.html#send,UdpSocket,openArray[byte]	proc send(sock: UdpSocket; data: openArray[byte]): int		64
+nim	send	powpow/net/udp.html#send,UdpSocket,string	proc send(sock: UdpSocket; data: string): int		72
+nim	bindUdp	powpow/net/udp.html#bindUdp,Loop,string,int,OnUdpData	proc bindUdp(loop: Loop; address: string; port: int; onData: OnUdpData): UdpSocket		101
+nim	connectUdp	powpow/net/udp.html#connectUdp,Loop,string,int,OnUdpData	proc connectUdp(loop: Loop; address: string; port: int; onData: OnUdpData = nil): UdpSocket		133
+nimgrp	send	powpow/net/udp.html#send-procs-all	proc		64
+nimgrp	sendto	powpow/net/udp.html#sendTo-procs-all	proc		47

@@ -1,0 +1,33 @@
+nimTitle	ws	powpow/proto/ws.html	module powpow/proto/ws		0
+nim	wsContinuation	powpow/proto/ws.html#wsContinuation	WsFrameKind.wsContinuation		47
+nim	wsText	powpow/proto/ws.html#wsText	WsFrameKind.wsText		47
+nim	wsBinary	powpow/proto/ws.html#wsBinary	WsFrameKind.wsBinary		47
+nim	wsClose	powpow/proto/ws.html#wsClose	WsFrameKind.wsClose		47
+nim	wsPing	powpow/proto/ws.html#wsPing	WsFrameKind.wsPing		47
+nim	wsPong	powpow/proto/ws.html#wsPong	WsFrameKind.wsPong		47
+nim	WsFrameKind	powpow/proto/ws.html#WsFrameKind	enum WsFrameKind		47
+nim	WsConnection	powpow/proto/ws.html#WsConnection	type WsConnection		56
+nim	WsMessageCb	powpow/proto/ws.html#WsMessageCb	type WsMessageCb		70
+nim	WsCloseCb	powpow/proto/ws.html#WsCloseCb	type WsCloseCb		72
+nim	WsErrorCb	powpow/proto/ws.html#WsErrorCb	type WsErrorCb		74
+nim	WsOpenCb	powpow/proto/ws.html#WsOpenCb	type WsOpenCb		75
+nim	WsServer	powpow/proto/ws.html#WsServer	type WsServer		101
+nim	reset	powpow/proto/ws.html#reset,WsFrameParser	proc reset(p: WsFrameParser)		120
+nim	computeAcceptKey	powpow/proto/ws.html#computeAcceptKey,string	proc computeAcceptKey(clientKey: string): string		133
+nim	buildHandshakeResponse	powpow/proto/ws.html#buildHandshakeResponse,string	proc buildHandshakeResponse(acceptKey: string): string		139
+nim	sendHandshake	powpow/proto/ws.html#sendHandshake,Connection,string	proc sendHandshake(conn: Connection; clientKey: string)		148
+nim	writeFrame	powpow/proto/ws.html#writeFrame,Connection,int,openArray[byte]	proc writeFrame(conn: Connection; opcode: int; payload: openArray[byte])		155
+nim	writeFrameMasked	powpow/proto/ws.html#writeFrameMasked,Connection,int,openArray[byte],array[,uint8]	proc writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];\n                 mask: array[4, uint8])		186
+nim	sendText	powpow/proto/ws.html#sendText,WsConnection,string	proc sendText(ws: WsConnection; s: string)		227
+nim	sendBinary	powpow/proto/ws.html#sendBinary,WsConnection,openArray[byte]	proc sendBinary(ws: WsConnection; data: openArray[byte])		234
+nim	sendPing	powpow/proto/ws.html#sendPing,WsConnection,openArray[byte]	proc sendPing(ws: WsConnection; data: openArray[byte] = [])		241
+nim	sendPong	powpow/proto/ws.html#sendPong,WsConnection,openArray[byte]	proc sendPong(ws: WsConnection; data: openArray[byte] = [])		248
+nim	closeWs	powpow/proto/ws.html#closeWs,WsConnection,int,string	proc closeWs(ws: WsConnection; code: int = 1000; reason: string = "")		255
+nim	newWsServer	powpow/proto/ws.html#newWsServer,Loop	proc newWsServer(loop: Loop): WsServer		479
+nim	onOpen	powpow/proto/ws.html#onOpen,WsServer,WsOpenCb	proc onOpen(wss: WsServer; cb: WsOpenCb)		487
+nim	onMessage	powpow/proto/ws.html#onMessage,WsServer,WsMessageCb	proc onMessage(wss: WsServer; cb: WsMessageCb)		491
+nim	onClose	powpow/proto/ws.html#onClose,WsServer,WsCloseCb	proc onClose(wss: WsServer; cb: WsCloseCb)		495
+nim	onError	powpow/proto/ws.html#onError,WsServer,WsErrorCb	proc onError(wss: WsServer; cb: WsErrorCb)		499
+nim	listen	powpow/proto/ws.html#listen,WsServer,string,int	proc listen(wss: WsServer; address: string; port: int)		503
+nim	close	powpow/proto/ws.html#close,WsServer	proc close(wss: WsServer)		620
+nim	websocketUpgrade	powpow/proto/ws.html#websocketUpgrade,Response,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb	proc websocketUpgrade(res: Response; req: HttpRequest; server: HttpServer = nil;\n                 onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;\n                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection		628
