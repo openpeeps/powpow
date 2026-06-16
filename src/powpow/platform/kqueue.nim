@@ -14,7 +14,7 @@ import std/[kqueue, posix]
 
 const
   EventCapacityMin = 64
-  EventCapacityMax = 4096
+  EventCapacityMax = 16384
 
 # ── Public types ─────────────────────────────────────────────────────────────
 

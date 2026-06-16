@@ -24,7 +24,7 @@ const
 
 const
   EventCapacityMin = 64
-  EventCapacityMax = 4096
+  EventCapacityMax = 16384
 
 # ── C struct / syscall bindings ──────────────────────────────────────────────
 

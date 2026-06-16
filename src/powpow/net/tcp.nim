@@ -62,6 +62,7 @@ type
     sendFileFd*:      int
     sendFileOff*:     int64
     sendFileRemain*:  int64
+    data*:            pointer
 
   OnAccept*  = proc(conn: Connection) {.closure.}
   OnData*    = proc(conn: Connection, data: openArray[byte]) {.closure.}
@@ -95,9 +96,6 @@ proc close*(conn: Connection) =
   conn.state = Closed
   if conn.server != nil:
     conn.server.fdConn.del(conn.fd.int)
-  if conn.corked:
-    setTcpCork(conn.fd, false)
-    conn.corked = false
   if conn.sendFileFd >= 0:
     closeFile(conn.sendFileFd)
     conn.sendFileFd = -1
@@ -379,7 +377,6 @@ proc acceptClients(server: TcpServer) =
     if clientFd.int < 0:
       if sockWouldBlock():
         return
-      server.loop.modify(server.fd.int, {Read})
       return
     
     let conn = acquireConnection(server, clientFd)

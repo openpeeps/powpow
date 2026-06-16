@@ -660,14 +660,11 @@ proc websocketUpgrade*(
 
     # Get the underlying connection before sending the handshake
     let conn = res.getConn()
-    let fd = conn.fd.int
 
-    # Mark response as sent (we'll send the 101 manually)
     res.markSent()
 
-    # Clean up the HTTP server's session for this connection
     if server != nil:
-      server.removeSession(fd)
+      server.removeSession(conn)
 
     # Send the 101 Switching Protocols response
     conn.sendHandshake(clientKey)

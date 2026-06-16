@@ -15,7 +15,7 @@ import std/[epoll, posix]
 
 const
   EventCapacityMin = 64
-  EventCapacityMax = 4096
+  EventCapacityMax = 16384
 
 # ── eventfd ──────────────────────────────────────────────────────────────────
 

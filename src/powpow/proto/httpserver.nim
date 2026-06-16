@@ -47,7 +47,7 @@ type
     ## User-provided callback invoked for every parsed HTTP request.
     ## Higher-level frameworks implement routing on top of this.
 
-  Session = object
+  ConnHttp* = ref object
     parser: HttpParser
     streamer: MultipartStreamerRef
     sessionStreamFile: File
@@ -59,7 +59,7 @@ type
     tcpServer: TcpServer
     loop:      Loop
     handler*:  OnRequestCallback
-    sessions:  Table[int, Session]
+    connRoots: Table[int, ConnHttp]
     parserPool: seq[HttpParser]
     reqPool:   seq[HttpRequest]
     resPool:   seq[HttpResponse]
@@ -652,7 +652,7 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     tcpServer: nil,
     loop:      loop,
     handler:   nil,
-    sessions:  initTable[int, Session](64),
+    connRoots: initTable[int, ConnHttp](64),
     parserPool: @[],
     reqPool:   @[],
     resPool:   @[],
@@ -692,20 +692,19 @@ proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
   ## Set the keep-alive idle timeout in milliseconds. 0 disables it.
   server.keepAliveMs = ms
 
-proc removeSession*(server: HttpServer, fd: int) =
-  ## Clean up a connection's session. Public so protocol upgrade
-  ## handlers (e.g. WebSocket) can take over a connection.
-  if fd in server.sessions:
-    let s = addr server.sessions[fd]
-    if s.streamer != nil:
-      s.streamer[].cleanup()
-      s.streamer = nil
-    if s.sessionStreamPath.len > 0:
-      s.sessionStreamFile.close()
-      removeFile(s.sessionStreamPath)
-      s.sessionStreamPath = ""
-    releaseParser(server, s.parser)
-    server.sessions.del(fd)
+proc removeSession*(server: HttpServer, conn: Connection) =
+  let ctx = cast[ConnHttp](conn.data)
+  if ctx == nil: return
+  server.connRoots.del(conn.fd.int)
+  if ctx.streamer != nil:
+    ctx.streamer[].cleanup()
+    ctx.streamer = nil
+  if ctx.sessionStreamPath.len > 0:
+    ctx.sessionStreamFile.close()
+    removeFile(ctx.sessionStreamPath)
+    ctx.sessionStreamPath = ""
+  releaseParser(server, ctx.parser)
+  conn.data = nil
 
 # ── Request dispatch ─────────────────────────────────────────────────────────
 
@@ -731,18 +730,16 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   ## a MultipartStreamer is auto-created and body data is streamed through it
   ## via the lightweight fill→check→write→clear cycle.
   ## Memory: ~68KB for any file size (4KB headers + 64KB write buffer).
-  let fd = conn.fd.int
-  if fd notin server.sessions:
-    server.sessions[fd] = Session(parser: acquireParser(server))
-
-  let p = server.sessions[fd].parser
+  let ctx = if conn.data != nil: cast[ConnHttp](conn.data)
+            else:
+              let c = ConnHttp(parser: acquireParser(server))
+              conn.data = cast[pointer](c)
+              server.connRoots[conn.fd.int] = c
+              c
+  let p = ctx.parser
   let prevPhase = p.phase
   p.feed(data)
 
-  # Auto-detect multipart after headers are parsed.
-  # Catches two cases:
-  #   1. Headers + body in one TCP read (prevPhase = PhaseRequestLine, phase = PhaseBody/Complete)
-  #   2. Headers in previous read, body arriving now (prevPhase = PhaseHeaders, phase = PhaseBody)
   if prevPhase < PhaseBody and p.phase >= PhaseBody and not p.streamingBody:
     let ct = p.peekContentType()
     if ct.len >= 19:
@@ -754,7 +751,7 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
       if isMP:
         var ms = newMultipartStreamerRef(ct)
         let msRef = ms
-        server.sessions[fd].streamer = ms
+        ctx.streamer = ms
         if p.phase == PhaseBody:
           p.onBodyData = proc(chunk: openArray[byte]; done: bool) =
             msRef[].feed(chunk)
@@ -770,96 +767,77 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
               msRef[].feed(chunk, chunkLen)
               pos += chunkLen
 
-
   while p.isComplete():
     let req = server.acquireRequest(p)
-    if server.sessions[fd].streamer != nil:
-      req.streamer = server.sessions[fd].streamer
-      server.sessions[fd].streamer = nil
+    if ctx.streamer != nil:
+      req.streamer = ctx.streamer
+      ctx.streamer = nil
       p.onBodyData = nil
-    if server.sessions[fd].sessionStreamPath.len > 0:
-      req.streamPath = server.sessions[fd].sessionStreamPath
-      server.sessions[fd].sessionStreamPath = ""
+    if ctx.sessionStreamPath.len > 0:
+      req.streamPath = ctx.sessionStreamPath
+      ctx.sessionStreamPath = ""
     server.dispatchRequest(conn, req)
     releaseRequest(server, req)
-    if fd notin server.sessions:
+    if conn.data == nil:
       return
-    server.sessions[fd].parser.resetForNext()
+    ctx.parser.resetForNext()
     discard p.feed(@[])
     if conn.sendFileFd >= 0:
       break
 
   if p.isError():
-    if fd in server.sessions:
-      let s = addr server.sessions[fd]
-      if s.streamer != nil:
-        s.streamer[].cleanup()
-        s.streamer = nil
-      if s.sessionStreamPath.len > 0:
-        s.sessionStreamFile.close()
-        removeFile(s.sessionStreamPath)
-        s.sessionStreamPath = ""
-      p.onBodyData = nil
+    if ctx.streamer != nil:
+      ctx.streamer[].cleanup()
+      ctx.streamer = nil
+    if ctx.sessionStreamPath.len > 0:
+      ctx.sessionStreamFile.close()
+      removeFile(ctx.sessionStreamPath)
+      ctx.sessionStreamPath = ""
+    p.onBodyData = nil
     let errCode = p.error()
     let res = acquireHttpResponse(server, conn)
     res.sendError(errCode, "Bad Request")
-    if fd in server.sessions:
-      server.sessions[fd].parser.reset()
+    ctx.parser.reset()
 
 # ── Listen ───────────────────────────────────────────────────────────────────
 
 proc listen*(server: HttpServer, address: string, port: int) =
-  ## Bind and start accepting HTTP connections on a TCP port.
   server.tcpServer = newTcpServer(server.loop,
-    onAccept = proc(conn: Connection) =
-      # Pre-create session
-      server.sessions[conn.fd.int] = Session(parser: acquireParser(server))
-    ,
     onData = proc(conn: Connection, data: openArray[byte]) =
       server.handleConnectionData(conn, data)
     ,
     onClose = proc(conn: Connection) =
-      server.removeSession(conn.fd.int)
+      server.removeSession(conn)
     ,
   )
   server.tcpServer.listen(address, port)
 
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =
-    ## Bind and start accepting HTTP connections on a Unix domain socket.
     server.tcpServer = newTcpServer(server.loop,
-      onAccept = proc(conn: Connection) =
-        server.sessions[conn.fd.int] = Session(parser: acquireParser(server))
-      ,
       onData = proc(conn: Connection, data: openArray[byte]) =
         server.handleConnectionData(conn, data)
       ,
       onClose = proc(conn: Connection) =
-        server.removeSession(conn.fd.int)
+        server.removeSession(conn)
       ,
     )
     server.tcpServer.listenUnix(path, mode)
 
 proc close*(server: HttpServer) =
-  ## Shut down the server.
   if server.tcpServer != nil:
     server.tcpServer.close()
-  server.sessions.clear()
+  server.connRoots.clear()
   server.parserPool.setLen(0)
 
 proc ensureTcpServer*(server: HttpServer) =
-  ## Lazily create the underlying TcpServer (for multi-thread use where
-  ## listen() is called before routes are registered).
   if server.tcpServer != nil: return
   server.tcpServer = newTcpServer(server.loop,
-    onAccept = proc(conn: Connection) =
-      server.sessions[conn.fd.int] = Session(parser: acquireParser(server))
-    ,
     onData = proc(conn: Connection, data: openArray[byte]) =
       server.handleConnectionData(conn, data)
     ,
     onClose = proc(conn: Connection) =
-      server.removeSession(conn.fd.int)
+      server.removeSession(conn)
   )
 
 proc populatePools*(server: HttpServer; poolSize = 256) =

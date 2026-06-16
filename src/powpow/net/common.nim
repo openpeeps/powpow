@@ -145,6 +145,14 @@ else:
   proc gai_strerrorCompat(errcode: cint): cstring {.inline.} =
     gai_strerror(errcode)
 
+  proc ioctl(fd: cint; request: culong; arg: pointer): cint {.
+    importc: "ioctl", header: "<sys/ioctl.h>".}
+
+  when defined(macosx) or defined(bsd):
+    const FIONBIO = 0x8004667E.culong
+  else:
+    const FIONBIO = 0x5421.culong
+
   const UNIX_PATH_MAX* = 107
 
 # ── Platform-independent socket functions ───────────────────────────────────
@@ -175,17 +183,15 @@ proc lastSocketError*(): cint {.inline.} =
 # ── Socket options ───────────────────────────────────────────────────────────
 
 proc setNonBlocking*(fd: SocketHandle) =
-  ## Put a socket into non-blocking mode.
+  ## Put a socket into non-blocking mode using a single ioctl syscall.
   when defined(windows):
     var mode: int32 = 1
     if ioctlsocket(fd, FIONBIO, addr mode) < 0:
       raise newException(NetError, "ioctlsocket FIONBIO failed")
   else:
-    let flags = fcntl(fd, F_GETFL, 0)
-    if flags < 0:
-      raise newException(NetError, "fcntl F_GETFL failed")
-    if fcntl(fd, F_SETFL, flags or O_NONBLOCK) < 0:
-      raise newException(NetError, "fcntl F_SETFL O_NONBLOCK failed")
+    var one: cint = 1
+    if ioctl(fd.cint, FIONBIO, addr one) < 0:
+      raise newException(NetError, "ioctl FIONBIO failed")
 
 proc setReuseAddr*(fd: SocketHandle) =
   ## Enable SO_REUSEADDR on a socket.
