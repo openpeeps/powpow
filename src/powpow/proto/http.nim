@@ -85,25 +85,28 @@ type
     bodyStreamed*: int64           ## Bytes streamed via callback so far
     streamingBody*: bool         ## true when body is being streamed to callback
 
+    # Cached materialized values (filled during feed())
+    methodCache*:  HttpMethod
+    pathCache:     string
+    queryCache:    string
+    contentTypeVal: string
+
     phase:      ParsePhase
     errorCode:  HttpCode
 
   HttpRequest* = ref object
     ## A parsed HTTP request with lazy accessor methods.
-    parser:      HttpParser
-    httpMethod:  HttpMethod     ## Resolved during request line parse
-    streamer*:   MultipartStreamerRef  ## Multipart streamer (nil if not multipart)
-    streamPath*: string              ## Temp file path for streamToFile routes
+    parser*:     HttpParser
+    httpMethod*: HttpMethod
+    streamer*:   MultipartStreamerRef
+    streamPath*: string
 
     # Lazily materialized fields
-    pathVal:     string
-    pathReady:   bool
-    queryVal:    string
-    queryReady:  bool
-    headersVal:  HttpHeaders
-    headersReady: bool
-    bodyVal:     seq[byte]
-    bodyReady:   bool
+    urlVal*:      string
+    headersVal*:  HttpHeaders
+    headersReady*: bool
+    bodyVal*:     seq[byte]
+    bodyReady*:   bool
 
   BodyStream* = object
     ## A stream for reading the request body in chunks.
@@ -150,6 +153,10 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     bodyStart:     0,
     bodyLen:       0,
     chunkBodyLen:  0,
+    methodCache:   HttpGet,
+    pathCache:     "",
+    queryCache:    "",
+    contentTypeVal:"",
     phase:         PhaseRequestLine,
     errorCode:     Http200,
   )
@@ -177,6 +184,10 @@ proc reset*(p: HttpParser) =
   p.chunkBodyLen  = 0
   p.phase         = PhaseRequestLine
   p.errorCode     = Http200
+  p.methodCache   = HttpGet
+  p.pathCache.setLen(0)
+  p.queryCache.setLen(0)
+  p.contentTypeVal.setLen(0)
   if p.buf.len > 8192:  # shrink oversized buffers back to 4KB
     p.buf = newSeq[byte](4096)
 
@@ -221,6 +232,10 @@ proc resetForNext*(p: HttpParser) =
   p.streamingBody = false
   p.phase         = PhaseRequestLine
   p.errorCode     = Http200
+  p.methodCache   = HttpGet
+  p.pathCache.setLen(0)
+  p.queryCache.setLen(0)
+  p.contentTypeVal.setLen(0)
 
 proc phase*(p: HttpParser): ParsePhase {.inline.} = p.phase
 
@@ -268,6 +283,18 @@ proc parseRequestLine(p: HttpParser): bool =
     p.queryEnd = i
   else:
     p.pathEnd = i
+
+  # Materialize cached values at parse time (zero-alloc on subsequent access)
+  let bufPtr = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+  p.methodCache = parseMethod(bufPtr, p.methodLen)
+  if p.pathEnd > p.pathStart:
+    let plen = p.pathEnd - p.pathStart
+    p.pathCache = newString(plen)
+    copyMem(addr p.pathCache[0], addr bufPtr[p.pathStart], plen)
+  if p.queryStart >= 0:
+    let qlen = p.queryEnd - p.queryStart
+    p.queryCache = newString(qlen)
+    copyMem(addr p.queryCache[0], addr bufPtr[p.queryStart], qlen)
 
   if i >= crlf:
     p.phase = PhaseError
@@ -402,6 +429,27 @@ proc scanHeaders(p: HttpParser): bool =
                       break
                   if isClose:
                     p.connectionClose = true
+
+        # Quick check for Content-Type
+        if lineLen >= 14:
+          let c = char(buf[lineStart])
+          if c == 'C' or c == 'c':
+            const ctKey = "content-type:"
+            if lineLen >= ctKey.len:
+              var isCT = true
+              for j in 0 ..< ctKey.len:
+                let ch = char(buf[lineStart + j])
+                if ch != ctKey[j] and ch != (char(ord(ctKey[j]) xor 32)):
+                  isCT = false
+                  break
+              if isCT:
+                var valStart = lineStart + ctKey.len
+                while valStart < i and char(buf[valStart]) == ' ':
+                  inc valStart
+                let valLen = i - valStart
+                if valLen > 0:
+                  p.contentTypeVal = newString(valLen)
+                  copyMem(addr p.contentTypeVal[0], addr buf[valStart], valLen)
 
         inc i  # skip \r
       inc i  # skip \n
@@ -717,116 +765,48 @@ proc error*(p: HttpParser): HttpCode {.inline.} =
 # ── Peek accessors (available during PhaseBody) ────────────────────────────────
 
 proc peekMethod*(p: HttpParser): HttpMethod {.inline.} =
-  ## Get the HTTP method. Available after PhaseHeaders (no need to wait for body).
-  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-  parseMethod(buf, p.methodLen)
+  ## Get the HTTP method. Zero-alloc — already resolved during parse.
+  p.methodCache
 
-proc peekPath*(p: HttpParser): string =
-  ## Get the request path (e.g. "/api/users"). Available after PhaseHeaders.
-  if p.pathStart < 0: return ""
-  let len = p.pathEnd - p.pathStart
-  result = newString(len)
-  if len > 0:
-    copyMem(addr result[0], addr p.buf[p.pathStart], len)
+proc peekPath*(p: HttpParser): lent string =
+  ## Get the request path. Zero-alloc — already cached during parse.
+  p.pathCache
 
-proc peekContentType*(p: HttpParser): string =
-  ## Quick-scan the header section for Content-Type value.
-  ## Available after PhaseHeaders. Returns "" if not found.
-  ## Used by the server to decide whether to set up streaming multipart.
-  if p.headerEnd < 0: return ""
-  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-  var i = 0
-  var lineStart = 0
-  # Skip request line
-  while i < p.headerEnd - 3:
-    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
-      i += 2
-      lineStart = i
-      break
-    inc i
-  # Scan header lines
-  while i < p.headerEnd - 1:
-    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
-      let lineLen = i - lineStart
-      if lineLen >= 14:
-        let c = char(buf[lineStart])
-        if c == 'C' or c == 'c':
-          const ctKey = "content-type:"
-          if lineLen >= ctKey.len:
-            var isCT = true
-            for j in 0 ..< ctKey.len:
-              let ch = char(buf[lineStart + j])
-              if ch != ctKey[j] and ch != (char(ord(ctKey[j]) xor 32)):
-                isCT = false
-                break
-            if isCT:
-              var valStart = lineStart + ctKey.len
-              while valStart < i and char(buf[valStart]) == ' ':
-                inc valStart
-              let valLen = i - valStart
-              result = newString(valLen)
-              if valLen > 0:
-                copyMem(addr result[0], addr buf[valStart], valLen)
-              return
-      inc i  # skip \r
-      inc i  # skip \n
-      lineStart = i
-    else:
-      inc i
+proc peekContentType*(p: HttpParser): lent string =
+  ## Get the Content-Type header value. Zero-alloc — cached during header scan.
+  p.contentTypeVal
 
 # ── HttpRequest: lazy accessors ──────────────────────────────────────────────
 
 proc getRequest*(p: HttpParser): HttpRequest =
   ## Create a request view from the parser. Only valid when `isComplete()`.
   assert p.phase == PhaseComplete
-  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
   result = HttpRequest(
     parser:     p,
-    httpMethod: parseMethod(buf, p.methodLen),
-    pathReady:  false,
-    queryReady: false,
+    httpMethod: p.methodCache,
     headersReady: false,
     bodyReady:  false,
   )
 
 proc getMethod*(req: HttpRequest): HttpMethod {.inline.} =
-  ## Get the HTTP method. Zero-copy — already resolved during parsing.
+  ## Get the HTTP method. Zero-alloc — already resolved during parse.
   req.httpMethod
 
-proc getPath*(req: HttpRequest): string =
-  ## Get the request path (e.g. "/api/users"). Materialized on first call.
-  if not req.pathReady:
-    let p = req.parser
-    let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-    let len = p.pathEnd - p.pathStart
-    req.pathVal = newString(len)
-    if len > 0:
-      copyMem(addr req.pathVal[0], addr buf[p.pathStart], len)
-    req.pathReady = true
-  return req.pathVal
+proc getPath*(req: HttpRequest): lent string =
+  ## Get the request path. Zero-alloc — cached in parser during parse.
+  req.parser.pathCache
 
-proc getQuery*(req: HttpRequest): string =
-  ## Get the query string (e.g. "foo=bar&baz=1"), or "" if none. Lazy.
-  if not req.queryReady:
-    let p = req.parser
-    if p.queryStart >= 0:
-      let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-      let len = p.queryEnd - p.queryStart
-      req.queryVal = newString(len)
-      if len > 0:
-        copyMem(addr req.queryVal[0], addr buf[p.queryStart], len)
-    else:
-      req.queryVal = ""
-    req.queryReady = true
-  return req.queryVal
+proc getQuery*(req: HttpRequest): lent string =
+  ## Get the query string, or "" if none. Zero-alloc — cached in parser.
+  req.parser.queryCache
 
-proc getUrl*(req: HttpRequest): string =
-  ## Get the full URL path including query (e.g. "/api/users?page=1"). Lazy.
-  let path = req.getPath()
-  let query = req.getQuery()
-  if query.len > 0:
-    return path & "?" & query
-  return path
+proc getUrl*(req: HttpRequest): lent string =
+  ## Get the full URL path including query. Cached on first call.
+  if req.urlVal.len == 0:
+    let path = req.parser.pathCache
+    let query = req.parser.queryCache
+    req.urlVal = if query.len > 0: path & "?" & query else: path
+  req.urlVal
 
 proc getHeaders*(req: HttpRequest): HttpHeaders =
   ## Parse and return headers. Materialized on first call, then cached.

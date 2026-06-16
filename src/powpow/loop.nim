@@ -70,7 +70,7 @@ type
     idleCbs:       Table[int, Callback]
     nextIdleId:    int
     deadCount:     int
-    retired:       seq[FdWatcher]
+    fdWatcherPool: seq[FdWatcher]
     running:       bool
     stopFlag:      bool
     bufPool*:      seq[ptr UncheckedArray[byte]]
@@ -90,7 +90,8 @@ proc newLoop*(): Loop =
     idleCbs:     initTable[int, Callback](),
     nextIdleId:  0,
     deadCount:   0,
-    retired:     @[],
+    fdWatcherPool: @[],
+
     running:     false,
     stopFlag:    false,
     bufPool:     @[],
@@ -104,7 +105,6 @@ proc close*(loop: Loop) =
       else:
         discard posix.close(fd.cint)
   loop.fdWatchers.clear()
-  loop.retired.setLen(0)
   loop.deadCount = 0
   for buf in loop.bufPool:
     deallocShared(buf)
@@ -154,12 +154,17 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
     let old = loop.fdWatchers[fd]
     if old.alive:
       old.alive = false
-      old.callback = nil
       inc loop.deadCount
-      loop.retired.add(old)
-  let watcher = FdWatcher(
-    fd: fd, events: events, callback: callback,
-    edgeTriggered: edgeTriggered, gen: gen, alive: true)
+      loop.fdWatcherPool.add(old)
+  let watcher = if loop.fdWatcherPool.len > 0:
+    let w = loop.fdWatcherPool.pop()
+    w.fd = fd; w.events = events; w.callback = callback
+    w.edgeTriggered = edgeTriggered; w.gen = gen; w.alive = true
+    w
+  else:
+    FdWatcher(
+      fd: fd, events: events, callback: callback,
+      edgeTriggered: edgeTriggered, gen: gen, alive: true)
   loop.fdWatchers[fd] = watcher
   loop.platform.add(fd, events, edgeTriggered, cast[pointer](watcher))
   loop.platform.ensureCapacity(loop.fdWatchers.len)
@@ -169,9 +174,8 @@ proc unregister*(loop: Loop, fd: int) =
     let w = loop.fdWatchers[fd]
     if not w.alive: return
     w.alive = false
-    w.callback = nil
     inc loop.deadCount
-    loop.retired.add(w)
+    loop.fdWatcherPool.add(w)
     loop.platform.remove(fd)
 
 proc unregisterFd*(loop: Loop, fd: int) =
@@ -181,9 +185,8 @@ proc unregisterFd*(loop: Loop, fd: int) =
   if fd in loop.fdWatchers:
     let w = loop.fdWatchers[fd]
     w.alive = false
-    w.callback = nil
     inc loop.deadCount
-    loop.retired.add(w)
+    loop.fdWatcherPool.add(w)
     loop.fdWatchers.del(fd)
 
 proc modify*(loop: Loop, fd: int, events: set[EventType]) =
@@ -340,8 +343,6 @@ proc sweepDead(loop: Loop) =
     for fd in dead:
       loop.fdWatchers.del(fd)
     loop.deadCount = 0
-  if loop.retired.len > 256:
-    loop.retired.setLen(0)
 
 # ── main loop ────────────────────────────────────────────────────────────────
 

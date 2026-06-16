@@ -61,6 +61,7 @@ type
     handler*:  OnRequestCallback
     sessions:  Table[int, Session]
     parserPool: seq[HttpParser]
+    reqPool:   seq[HttpRequest]
     resPool:   seq[HttpResponse]
     keepAliveMs: int
 
@@ -217,18 +218,13 @@ proc writeUint(buf: ptr UncheckedArray[byte], n: int64): int =
   return ndigits
 
 proc send*(res: HttpResponse, body: string = "") =
-  ## Send the response with a string body.
-  ## Uses scatter-write (writev) to send headers + body with zero
-  ## intermediate string allocations.
   if res.sent: return
   res.sent = true
   let connHeader = if res.closeConn: "close" else: "keep-alive"
 
-  # Write fixed header parts into a stack buffer (zero heap allocation)
   var hdrBuf: array[256, byte]
   var p = 0
 
-  # Status line: "HTTP/1.1 200 OK\r\n"
   copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
   p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
   hdrBuf[p] = byte(' '); p += 1
@@ -236,62 +232,64 @@ proc send*(res: HttpResponse, body: string = "") =
   copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  # Content-Length
   copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
   p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), body.len)
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  # Connection
   copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
   copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  # Server
   copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
 
-  # Build scatter-write iovec array
-  type Part = tuple[data: ptr UncheckedArray[byte], len: int]
-  const MaxParts = 150
-  let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
-
-  template scatterWrite(parts: var openArray[Part], count: var int) =
-    parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
-    for (k, v) in res.headers:
-      parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
-      parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
-      parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
-      parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
-    parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+  # Fast path: single write for tiny responses (≤512 bytes, no custom headers)
+  let totalLen = p + 2 + body.len
+  if totalLen <= 512 and res.headers.len == 0:
+    var buf: array[512, byte]
+    copyMem(addr buf[0], addr hdrBuf[0], p)
+    var pos = p
+    copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
     if body.len > 0:
-      parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
-
-  if numParts <= MaxParts:
-    var parts: array[MaxParts, Part]
-    var count = 0
-    scatterWrite(parts, count)
-    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+      copyMem(addr buf[pos], unsafeAddr body[0], body.len); pos += body.len
+    discard sockSend(res.conn.fd, addr buf[0], pos)
   else:
-    var parts = newSeq[Part](numParts)
-    var count = 0
-    scatterWrite(parts, count)
-    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+    type Part = tuple[data: ptr UncheckedArray[byte], len: int]
+    const MaxParts = 150
+    let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
+
+    template scatterWrite(parts: var openArray[Part], count: var int) =
+      parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
+      for (k, v) in res.headers:
+        parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+      if body.len > 0:
+        parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
+
+    if numParts <= MaxParts:
+      var parts: array[MaxParts, Part]
+      var count = 0
+      scatterWrite(parts, count)
+      discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+    else:
+      var parts = newSeq[Part](numParts)
+      var count = 0
+      scatterWrite(parts, count)
+      discard res.conn.sendv(parts.toOpenArray(0, count - 1))
 
   if res.closeConn:
     res.conn.closeAfterDrain()
 
 proc send*(res: HttpResponse, body: seq[byte]) =
-  ## Send the response with a raw byte body.
-  ## Uses scatter-write (writev) to send headers + body with zero
-  ## intermediate string allocations.
   if res.sent: return
   res.sent = true
   let connHeader = if res.closeConn: "close" else: "keep-alive"
 
-  # Write fixed header parts into a stack buffer (zero heap allocation)
   var hdrBuf: array[256, byte]
   var p = 0
 
-  # Status line: "HTTP/1.1 200 OK\r\n"
   copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
   p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
   hdrBuf[p] = byte(' '); p += 1
@@ -299,45 +297,51 @@ proc send*(res: HttpResponse, body: seq[byte]) =
   copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  # Content-Length
   copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
   p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), body.len)
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  # Connection
   copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
   copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  # Server
   copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
 
-  # Build scatter-write iovec array
-  type Part = tuple[data: ptr UncheckedArray[byte], len: int]
-  const MaxParts = 150
-  let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
-
-  template scatterWrite(parts: var openArray[Part], count: var int) =
-    parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
-    for (k, v) in res.headers:
-      parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
-      parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
-      parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
-      parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
-    parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+  let totalLen = p + 2 + body.len
+  if totalLen <= 512 and res.headers.len == 0:
+    var buf: array[512, byte]
+    copyMem(addr buf[0], addr hdrBuf[0], p)
+    var pos = p
+    copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
     if body.len > 0:
-      parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
-
-  if numParts <= MaxParts:
-    var parts: array[MaxParts, Part]
-    var count = 0
-    scatterWrite(parts, count)
-    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+      copyMem(addr buf[pos], addr body[0], body.len); pos += body.len
+    discard sockSend(res.conn.fd, addr buf[0], pos)
   else:
-    var parts = newSeq[Part](numParts)
-    var count = 0
-    scatterWrite(parts, count)
-    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+    type Part = tuple[data: ptr UncheckedArray[byte], len: int]
+    const MaxParts = 150
+    let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
+
+    template scatterWrite(parts: var openArray[Part], count: var int) =
+      parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
+      for (k, v) in res.headers:
+        parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+      parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+      if body.len > 0:
+        parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
+
+    if numParts <= MaxParts:
+      var parts: array[MaxParts, Part]
+      var count = 0
+      scatterWrite(parts, count)
+      discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+    else:
+      var parts = newSeq[Part](numParts)
+      var count = 0
+      scatterWrite(parts, count)
+      discard res.conn.sendv(parts.toOpenArray(0, count - 1))
 
   if res.closeConn:
     res.conn.closeAfterDrain()
@@ -620,6 +624,25 @@ proc releaseHttpResponse(server: HttpServer, res: HttpResponse) =
   if server.resPool.len < MaxResPoolSize:
     server.resPool.add(res)
 
+proc acquireRequest(server: HttpServer, p: HttpParser): HttpRequest =
+  if server.reqPool.len > 0:
+    result = server.reqPool.pop()
+    result.parser = p
+    result.httpMethod = p.methodCache
+    result.urlVal.setLen(0)
+    result.headersReady = false
+    result.bodyReady = false
+  else:
+    result = HttpRequest(parser: p, httpMethod: p.methodCache)
+
+proc releaseRequest(server: HttpServer, req: HttpRequest) =
+  req.streamPath.setLen(0)
+  req.streamer = nil
+  req.urlVal.setLen(0)
+  req.headersReady = false
+  req.bodyReady = false
+  server.reqPool.add(req)
+
 # ── HttpServer lifecycle ─────────────────────────────────────────────────────
 
 proc populatePools*(server: HttpServer; poolSize = 256)
@@ -631,6 +654,7 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     handler:   nil,
     sessions:  initTable[int, Session](64),
     parserPool: @[],
+    reqPool:   @[],
     resPool:   @[],
     keepAliveMs: DefaultKeepAliveMs
   )
@@ -721,40 +745,45 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   #   2. Headers in previous read, body arriving now (prevPhase = PhaseHeaders, phase = PhaseBody)
   if prevPhase < PhaseBody and p.phase >= PhaseBody and not p.streamingBody:
     let ct = p.peekContentType()
-    if ct.len > 0 and ct.toLowerAscii().startsWith("multipart/form-data"):
-      var ms = newMultipartStreamerRef(ct)
-      let msRef = ms
-      server.sessions[fd].streamer = ms
-      if p.phase == PhaseBody:
-        p.onBodyData = proc(chunk: openArray[byte]; done: bool) =
-          msRef[].feed(chunk)
-        p.feed(@[])
-      elif p.phase == PhaseComplete:
-        let (buf, totalLen) = p.getBodyView()
-        if totalLen > 0 and buf != nil:
-          const StreamChunk = 65536
-          var pos = 0
-          while pos < totalLen:
-            let chunkLen = min(StreamChunk, totalLen - pos)
-            let chunk = cast[ptr UncheckedArray[byte]](cast[int](buf) + pos)
-            msRef[].feed(chunk, chunkLen)
-            pos += chunkLen
+    if ct.len >= 19:
+      var isMP = true
+      const mpKey = "multipart/form-data"
+      for i in 0 ..< mpKey.len:
+        if (char(ord(ct[i]) or 32)) != mpKey[i]:
+          isMP = false; break
+      if isMP:
+        var ms = newMultipartStreamerRef(ct)
+        let msRef = ms
+        server.sessions[fd].streamer = ms
+        if p.phase == PhaseBody:
+          p.onBodyData = proc(chunk: openArray[byte]; done: bool) =
+            msRef[].feed(chunk)
+          p.feed(@[])
+        elif p.phase == PhaseComplete:
+          let (buf, totalLen) = p.getBodyView()
+          if totalLen > 0 and buf != nil:
+            const StreamChunk = 65536
+            var pos = 0
+            while pos < totalLen:
+              let chunkLen = min(StreamChunk, totalLen - pos)
+              let chunk = cast[ptr UncheckedArray[byte]](cast[int](buf) + pos)
+              msRef[].feed(chunk, chunkLen)
+              pos += chunkLen
 
 
   while p.isComplete():
-    let req = p.getRequest()
-    # Transfer completed streamer from session to request
+    let req = server.acquireRequest(p)
     if server.sessions[fd].streamer != nil:
       req.streamer = server.sessions[fd].streamer
       server.sessions[fd].streamer = nil
       p.onBodyData = nil
-    # Transfer stream-to-file path if present
     if server.sessions[fd].sessionStreamPath.len > 0:
       req.streamPath = server.sessions[fd].sessionStreamPath
       server.sessions[fd].sessionStreamPath = ""
     server.dispatchRequest(conn, req)
+    releaseRequest(server, req)
     if fd notin server.sessions:
-      return  # removed by upgrade (e.g. websocketUpgrade)
+      return
     server.sessions[fd].parser.resetForNext()
     discard p.feed(@[])
     if conn.sendFileFd >= 0:
