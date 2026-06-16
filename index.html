@@ -68,10 +68,13 @@
     
     <div id="tocRoot"></div>
     
-    <p class="module-desc"><p>powpow — High-performance event notification library for Nim.</p>
-<p>This is the main entry point. Importing <tt class="docutils literal"><span class="pre"><span class="Identifier">powpow</span></span></tt> gives you everything:</p>
-<p>import powpow</p>
-<p>let loop = newLoop() loop.register(fd, {Read}, proc(fd: int, ev: set<a class="reference internal" href="#EventType">EventType</a>) = echo &quot;fd &quot;, fd, &quot; is readable!&quot; ) loop.run()</p>
+    <p class="module-desc"><p>This is a high-performance, event notification library for Nim. It provides a low-level event loop and timer wheel, as well as higher-level abstractions for building TCP/UDP, HTTP and WebSocket servers.</p>
+<p>The library is designed to be minimal and efficient, with a focus on low-latency event handling and minimal overhead, providing a solid foundation for building high-performance networked applications in Nim.</p>
+<p>Features:</p>
+<ul class="simple"><li>Single-threaded, non-blocking event loop with edge-triggered I/O events</li>
+<li>Hierarchical timer wheel for efficient timer management</li>
+<li>Support for one-shot and repeating timers, deferred callbacks, and idle handlers</li>
+</ul>
 </p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
@@ -92,7 +95,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 13:52:28 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 14:02:45 UTC</small>
       </div>
     </div>
   </div>
