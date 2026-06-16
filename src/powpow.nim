@@ -97,10 +97,11 @@
 ## - Auto-initialization (WSAStartup on Windows, SIGPIPE ignore on POSIX)
 
 
-import powpow/[types, platform, loop, net, proto]
+import powpow/[types, platform, loop, net, proto, fswatch]
 
 export types
 export platform except close  # close is on Loop
 export loop
 export net
 export proto
+export fswatch
