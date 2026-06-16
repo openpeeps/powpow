@@ -14,8 +14,7 @@
 import ../src/powpow
 import std/[httpcore, strutils, times]
 
-let loop = newLoop()
-let server = newHttpServer(loop)
+let server = newHttpServer()
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
@@ -79,10 +78,7 @@ server.notFound do (req: HttpRequest, res: Response):
 
 # ── Start ────────────────────────────────────────────────────────────────────
 
-server.listen("0.0.0.0", 9000)
 echo "⚡ powpow HTTP server listening on http://localhost:9000"
 echo "  Press Ctrl+C to stop"
+server.start(Port(9000))
 
-loop.run()
-server.close()
-loop.close()

@@ -16,7 +16,7 @@
 ##   server.listen("0.0.0.0", 8080)
 ##   loop.run()
 
-import std/[httpcore, tables, options, strutils, os, posix, oids]
+import std/[httpcore, tables, options, net, strutils, os, posix, oids]
 
 import ../net/tcp
 import ../net/common
@@ -26,6 +26,7 @@ import ./http
 
 import pkg/[mimedb, multipart]
 import pkg/checksums/md5
+export Port
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,6 @@ const
   ServerHeader = "Server: powpow/0.1.0\r\n"
   MaxParserPoolSize = 2048
   MaxResPoolSize = 4048
-
 
 
 proc getFileExt*(path: string): string =
@@ -477,6 +477,12 @@ proc sendFile*(res: Response, path: string;
 const
   DefaultChunkSize* = 1_048_576
 
+#
+# Forward declarations
+#
+proc listen*(server: HttpServer, address: string, port: int)
+proc close*(server: HttpServer)
+
 proc streamFile*(res: Response, path: string, req: HttpRequest;
                  chunkSize = DefaultChunkSize) =
   ## Stream a file for media playback with per-response byte limiting.
@@ -636,6 +642,21 @@ proc newHttpServer*(loop: Loop): HttpServer =
     resPool:   @[],
     keepAliveMs: DefaultKeepAliveMs
   )
+
+proc newHttpServer*: HttpServer =
+  ## Create a new HTTP server with an internal event loop.
+  var eventLoop = newLoop()
+  newHttpServer(eventLoop)
+
+proc start*(server: HttpServer, port: Port) =
+  ## Start the HTTP server on the given port.
+  server.listen("0.0.0.0", port.int)
+  server.loop.run()
+
+proc stop*(server: HttpServer) =
+  ## Stop the HTTP server and close all connections
+  server.close()
+  server.loop.close()
 
 proc acquireParser(server: HttpServer): HttpParser =
   if server.parserPool.len > 0:
