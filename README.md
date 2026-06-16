@@ -27,10 +27,10 @@
 - Support for multiple event loops and multi-threaded applications
 
 > [!NOTE]
-> PowPow is experimental and under active development. The API may change without deprecation. If you are looking for a more stable and mature library, consider using [supranim](https://github.com/supranim/supranim) instead (based on LibEvent).
+> 💥 PowPow is experimental and under active development. The API may change without deprecation. If you are looking for a more stable and mature library, consider using [supranim](https://github.com/supranim/supranim) instead (based on LibEvent). 💥
 
 > [!WARNING]
-> This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms.
+> 💥 This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms. **Use it, test it, and do not hesitate to report any issues you find!** 💥 
 
 ## Examples
 Check examples in the `examples/` directory, or see the [API reference](https://openpeeps.github.io/powpow) for more details.
