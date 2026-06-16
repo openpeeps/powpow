@@ -1,10 +1,11 @@
 nimTitle	epoll	powpow/platform/epoll.html	module powpow/platform/epoll		0
-nim	PlatformEvent	powpow/platform/epoll.html#PlatformEvent	object PlatformEvent		21
-nim	Platform	powpow/platform/epoll.html#Platform	type Platform		26
-nim	init	powpow/platform/epoll.html#init,typedesc[Platform]	proc init(T: typedesc[Platform]): T:type		36
-nim	close	powpow/platform/epoll.html#close,Platform	proc close(p: Platform)		63
-nim	add	powpow/platform/epoll.html#add,Platform,int,set[EventType],pointer	proc add(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;\n    udata: pointer = nil)		76
-nim	remove	powpow/platform/epoll.html#remove,Platform,int	proc remove(p: Platform; fd: int)		90
-nim	modify	powpow/platform/epoll.html#modify,Platform,int,set[EventType],pointer	proc modify(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;\n       udata: pointer = nil)		94
-nim	wake	powpow/platform/epoll.html#wake,Platform	proc wake(p: Platform)		109
-nim	poll	powpow/platform/epoll.html#poll,Platform,int	proc poll(p: Platform; timeoutMs: int): int		115
+nim	PlatformEvent	powpow/platform/epoll.html#PlatformEvent	object PlatformEvent		30
+nim	Platform	powpow/platform/epoll.html#Platform	type Platform		35
+nim	init	powpow/platform/epoll.html#init,typedesc[Platform]	proc init(T: typedesc[Platform]): T:type		44
+nim	close	powpow/platform/epoll.html#close,Platform	proc close(p: Platform)		64
+nim	ensureCapacity	powpow/platform/epoll.html#ensureCapacity,Platform,int	proc ensureCapacity(p: Platform; fdCount: int)		74
+nim	add	powpow/platform/epoll.html#add,Platform,int,set[EventType],pointer	proc add(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;\n    udata: pointer = nil)		82
+nim	remove	powpow/platform/epoll.html#remove,Platform,int	proc remove(p: Platform; fd: int)		95
+nim	modify	powpow/platform/epoll.html#modify,Platform,int,set[EventType],pointer	proc modify(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;\n       udata: pointer = nil)		99
+nim	wake	powpow/platform/epoll.html#wake,Platform	proc wake(p: Platform)		114
+nim	poll	powpow/platform/epoll.html#poll,Platform,int	proc poll(p: Platform; timeoutMs: int): int		120

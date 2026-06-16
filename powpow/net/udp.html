@@ -159,7 +159,7 @@
     <div id="bindUdp-procs-all">
   <div id="bindUdp,Loop,string,int,OnUdpData">
   <dt><pre><span class="Keyword">proc</span> <a href="#bindUdp%2CLoop%2Cstring%2Cint%2COnUdpData"><span class="Identifier">bindUdp</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">onData</span><span class="Other">:</span> <a href="#OnUdpData"><span class="Identifier">OnUdpData</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#UdpSocket"><span class="Identifier">UdpSocket</span></a> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -170,7 +170,7 @@
 </div>
 <div id="close-procs-all">
   <div id="close,UdpSocket">
-  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CUdpSocket"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">sock</span><span class="Other">:</span> <a href="#UdpSocket"><span class="Identifier">UdpSocket</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CUdpSocket"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">sock</span><span class="Other">:</span> <a href="#UdpSocket"><span class="Identifier">UdpSocket</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -182,7 +182,7 @@
 <div id="connectUdp-procs-all">
   <div id="connectUdp,Loop,string,int,OnUdpData">
   <dt><pre><span class="Keyword">proc</span> <a href="#connectUdp%2CLoop%2Cstring%2Cint%2COnUdpData"><span class="Identifier">connectUdp</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">onData</span><span class="Other">:</span> <a href="#OnUdpData"><span class="Identifier">OnUdpData</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <a href="#UdpSocket"><span class="Identifier">UdpSocket</span></a> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -243,7 +243,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 12:40:31 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 13:48:23 UTC</small>
       </div>
     </div>
   </div>

@@ -278,7 +278,7 @@
 </div>
 <div id="close-procs-all">
   <div id="close,WsServer">
-  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CWsServer"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">wss</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CWsServer"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">wss</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Shut down the WebSocket server.
@@ -314,7 +314,7 @@
 <div id="listen-procs-all">
   <div id="listen,WsServer,string,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#listen%2CWsServer%2Cstring%2Cint"><span class="Identifier">listen</span></a><span class="Other">(</span><span class="Identifier">wss</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Bind and start accepting WebSocket connections on a dedicated port.
@@ -508,7 +508,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 12:40:32 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 13:48:24 UTC</small>
       </div>
     </div>
   </div>

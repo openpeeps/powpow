@@ -1,19 +1,19 @@
 nimTitle	loop	powpow/loop.html	module powpow/loop		0
-nim	FdWatcher	powpow/loop.html#FdWatcher	object FdWatcher		46
-nim	Loop	powpow/loop.html#Loop	type Loop		56
-nim	newLoop	powpow/loop.html#newLoop	proc newLoop(): Loop		72
-nim	close	powpow/loop.html#close,Loop	proc close(loop: Loop)		88
-nim	register	powpow/loop.html#register,Loop,int,set[EventType],FdCallback	proc register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;\n         edgeTriggered = false)		102
-nim	unregister	powpow/loop.html#unregister,Loop,int	proc unregister(loop: Loop; fd: int)		111
-nim	modify	powpow/loop.html#modify,Loop,int,set[EventType]	proc modify(loop: Loop; fd: int; events: set[EventType])		116
-nim	deferCall	powpow/loop.html#deferCall,Loop,Callback	proc deferCall(loop: Loop; cb: Callback)		125
-nim	addTimer	powpow/loop.html#addTimer,Loop,int,TimerCallback	proc addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId		130
-nim	addInterval	powpow/loop.html#addInterval,Loop,int,TimerCallback	proc addInterval(loop: Loop; intervalMs: int; callback: TimerCallback): TimerId		141
-nim	cancelTimer	powpow/loop.html#cancelTimer,Loop,TimerId	proc cancelTimer(loop: Loop; id: TimerId)		153
-nim	addIdle	powpow/loop.html#addIdle,Loop,Callback	proc addIdle(loop: Loop; cb: Callback): int		158
-nim	removeIdle	powpow/loop.html#removeIdle,Loop,int	proc removeIdle(loop: Loop; id: int)		163
-nim	stop	powpow/loop.html#stop,Loop	proc stop(loop: Loop)		168
-nim	isRunning	powpow/loop.html#isRunning,Loop	proc isRunning(loop: Loop): bool		172
-nim	poll	powpow/loop.html#poll,Loop,int	proc poll(loop: Loop; timeoutMs: int = -1)		213
-nim	run	powpow/loop.html#run,Loop	proc run(loop: Loop)		246
-nim	runOnce	powpow/loop.html#runOnce,Loop	proc runOnce(loop: Loop)		253
+nim	FdWatcher	powpow/loop.html#FdWatcher	type FdWatcher		49
+nim	Loop	powpow/loop.html#Loop	type Loop		60
+nim	newLoop	powpow/loop.html#newLoop	proc newLoop(): Loop		80
+nim	close	powpow/loop.html#close,Loop	proc close(loop: Loop)		99
+nim	register	powpow/loop.html#register,Loop,int,set[EventType],FdCallback	proc register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;\n         edgeTriggered = false)		149
+nim	unregister	powpow/loop.html#unregister,Loop,int	proc unregister(loop: Loop; fd: int)		167
+nim	modify	powpow/loop.html#modify,Loop,int,set[EventType]	proc modify(loop: Loop; fd: int; events: set[EventType])		177
+nim	deferCall	powpow/loop.html#deferCall,Loop,Callback	proc deferCall(loop: Loop; cb: Callback)		186
+nim	addTimer	powpow/loop.html#addTimer,Loop,int,TimerCallback	proc addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId		191
+nim	addInterval	powpow/loop.html#addInterval,Loop,int,TimerCallback	proc addInterval(loop: Loop; intervalMs: int; callback: TimerCallback): TimerId		203
+nim	cancelTimer	powpow/loop.html#cancelTimer,Loop,TimerId	proc cancelTimer(loop: Loop; id: TimerId)		216
+nim	addIdle	powpow/loop.html#addIdle,Loop,Callback	proc addIdle(loop: Loop; cb: Callback): int		221
+nim	removeIdle	powpow/loop.html#removeIdle,Loop,int	proc removeIdle(loop: Loop; id: int)		226
+nim	stop	powpow/loop.html#stop,Loop	proc stop(loop: Loop)		231
+nim	isRunning	powpow/loop.html#isRunning,Loop	proc isRunning(loop: Loop): bool		235
+nim	poll	powpow/loop.html#poll,Loop,int	proc poll(loop: Loop; timeoutMs: int = -1)		336
+nim	run	powpow/loop.html#run,Loop	proc run(loop: Loop)		371
+nim	runOnce	powpow/loop.html#runOnce,Loop	proc runOnce(loop: Loop)		378

@@ -4,8 +4,8 @@ nim	Write	powpow/types.html#Write	EventType.Write		10
 nim	Error	powpow/types.html#Error	EventType.Error		10
 nim	Hup	powpow/types.html#Hup	EventType.Hup		10
 nim	EventType	powpow/types.html#EventType	enum EventType		10
-nim	Callback	powpow/types.html#Callback	type Callback		17
-nim	FdCallback	powpow/types.html#FdCallback	type FdCallback		20
-nim	TimerCallback	powpow/types.html#TimerCallback	type TimerCallback		23
-nim	TimerId	powpow/types.html#TimerId	type TimerId		26
-nim	`==`	powpow/types.html#==,TimerId,TimerId	proc `==`(a, b: TimerId): bool		29
+nim	Callback	powpow/types.html#Callback	type Callback		16
+nim	FdCallback	powpow/types.html#FdCallback	type FdCallback		17
+nim	TimerCallback	powpow/types.html#TimerCallback	type TimerCallback		18
+nim	TimerId	powpow/types.html#TimerId	type TimerId		19
+nim	`==`	powpow/types.html#==,TimerId,TimerId	proc `==`(a, b: TimerId): bool		21

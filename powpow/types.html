@@ -60,10 +60,7 @@
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#Callback" title="Callback = proc () {.closure.}">Callback</a></li>
 <li><a class="reference" href="#EventType" title="EventType = enum
-  Read,                     ## fd is readable (data available or ready to accept)
-  Write,                    ## fd is writable (output buffer has space)
-  Error,                    ## Error condition on fd
-  Hup                        ## Peer closed connection / hangup detected">EventType</a></li>
+  Read, Write, Error, Hup">EventType</a></li>
 <li><a class="reference" href="#FdCallback" title="FdCallback = proc (fd: int; events: set[EventType]) {.closure.}">FdCallback</a></li>
 <li><a class="reference" href="#TimerCallback" title="TimerCallback = proc (id: int) {.closure.}">TimerCallback</a></li>
 <li><a class="reference" href="#TimerId" title="TimerId = distinct int">TimerId</a></li>
@@ -99,19 +96,16 @@
   <dt><pre><a href="#Callback"><span class="Identifier">Callback</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
   <dd>
     
-    Generic callback with no arguments, used for deferred calls and idle handlers.
+    
     
   </dd>
 </div>
 <div id="EventType">
   <dt><pre><a href="#EventType"><span class="Identifier">EventType</span></a> <span class="Other">=</span> <span class="Keyword">enum</span>
-  <span class="Identifier">Read</span><span class="Other">,</span>                     <span class="Comment">## fd is readable (data available or ready to accept)</span>
-  <span class="Identifier">Write</span><span class="Other">,</span>                    <span class="Comment">## fd is writable (output buffer has space)</span>
-  <span class="Identifier">Error</span><span class="Other">,</span>                    <span class="Comment">## Error condition on fd</span>
-  <span class="Identifier">Hup</span>                        <span class="Comment">## Peer closed connection / hangup detected</span></pre></dt>
+  <span class="Identifier">Read</span><span class="Other">,</span> <span class="Identifier">Write</span><span class="Other">,</span> <span class="Identifier">Error</span><span class="Other">,</span> <span class="Identifier">Hup</span></pre></dt>
   <dd>
     
-    I/O event types reported by the platform backend.
+    
     
   </dd>
 </div>
@@ -119,7 +113,7 @@
   <dt><pre><a href="#FdCallback"><span class="Identifier">FdCallback</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">events</span><span class="Other">:</span> <span class="Identifier">set</span><span class="Other">[</span><a href="#EventType"><span class="Identifier">EventType</span></a><span class="Other">]</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
   <dd>
     
-    Callback invoked when I/O events fire on a registered fd.
+    
     
   </dd>
 </div>
@@ -127,7 +121,7 @@
   <dt><pre><a href="#TimerCallback"><span class="Identifier">TimerCallback</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">id</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
   <dd>
     
-    Callback invoked when a timer expires. <tt class="docutils literal"><span class="pre"><span class="Identifier">id</span></span></tt> is the timer identifier.
+    
     
   </dd>
 </div>
@@ -135,7 +129,7 @@
   <dt><pre><a href="#TimerId"><span class="Identifier">TimerId</span></a> <span class="Other">=</span> <span class="Keyword">distinct</span> <span class="Identifier">int</span></pre></dt>
   <dd>
     
-    Unique identifier for a registered timer.
+    
     
   </dd>
 </div>
@@ -166,7 +160,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 12:40:31 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 13:48:22 UTC</small>
       </div>
     </div>
   </div>
