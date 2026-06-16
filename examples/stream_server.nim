@@ -4,6 +4,9 @@ import std/[httpcore, os]
 let loop = newLoop()
 let server = newHttpServer(loop)
 
+# We are going to use Big_buck_Bunny_4K.webm as a test file for streaming and downloading.
+# You can download this ~2.76 GB file from Wikipedia: https://en.wikipedia.org/wiki/File:Big_Buck_Bunny_4K.webm
+
 # streamFile: media streaming with chunk limiting (1 MB per response),
 # always keep-alive, always handles Range requests
 server.get("/video") do (req: HttpRequest, res: Response):

@@ -18,7 +18,7 @@
 - Built-in HTTP/1.1 server implementation
 - Built-in **WebSocket support** with standalone and upgrade modes
 - **HTTP over Unix Domain Sockets** (UDS) support for super fast local IPC
-- **Zero-copy file transmission** using `sendfile` (Linux) and `TransmitFile` (Windows)
+- **Zero-copy file transmission** using `sendfile` (Unix) and `TransmitFile` (Windows)
 - Chunked Request Body support for streaming uploads and large payloads
 - Memory-efficient Multipart Form Data parsing and Raw Body handling for file uploads
 - SIMD-accelerated parsing and formatting of HTTP messages
