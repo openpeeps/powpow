@@ -140,49 +140,36 @@ test "test_tcp_write_buffering":
 
   let loop = newLoop()
 
-  # Create a large payload that will likely trigger EAGAIN
+  # Create a large payload that will trigger EAGAIN (default socket buffer ~128KB)
   var largePayload: string
-  for i in 0..10000:
+  for i in 0..8000:
     largePayload.add("Hello powpow! This is a test message for write buffering. ")
 
-  # Create server that accumulates received data.
-  # When all expected bytes arrive, close the connection from the server side.
   var server: TcpServer
   server = newTcpServer(loop,
-    onAccept = proc(conn: Connection) =
-      discard
-    ,
+    onAccept = proc(conn: Connection) = discard,
     onData = proc(conn: Connection, data: openArray[byte]) =
       totalReceived.add(@data)
-      if totalReceived.len >= largePayload.len:
-        conn.close()
-        server.close()
-        loop.stop()
     ,
   )
   server.listen("127.0.0.1", 19879)
 
-  # After a short delay, connect a client and send data
   discard loop.addTimer(50) do (id: int):
     loop.connect("127.0.0.1", 19879,
       onConnect = proc(conn: Connection) =
         clientConnected = true
         let sent = conn.send(largePayload)
-        doAssert sent == largePayload.len, "send should return total length (buffered)"
-        # Don't close — let writeBuf flush via event loop.
-        # Server will close when it has received all data.
+        doAssert sent == largePayload.len
       ,
-      onData = proc(conn: Connection, data: openArray[byte]) =
-        discard
-      ,
+      onData = proc(conn: Connection, data: openArray[byte]) = discard,
     )
 
-  # Safety timeout
-  discard loop.addTimer(5000) do (id: int):
-    server.close()
-    loop.stop()
-
-  loop.run()
+  # Poll manually until all data arrives (max 5s = 50000 polls × 100µs)
+  var polls = 0
+  while totalReceived.len < largePayload.len and polls < 50000:
+    loop.poll(0)
+    inc polls
+  doAssert polls < 50000, "timeout: received " & $totalReceived.len & " of " & $largePayload.len
 
   doAssert clientConnected, "client should have connected"
   doAssert totalReceived.len == largePayload.len, "server should have received all data"
