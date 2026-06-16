@@ -12,7 +12,9 @@
 import ../types
 import std/[kqueue, posix]
 
-const KQ_MAX_EVENTS = 1024
+const
+  EventCapacityMin = 64
+  EventCapacityMax = 4096
 
 # ── Public types ─────────────────────────────────────────────────────────────
 
@@ -37,8 +39,8 @@ proc init*(T: typedesc[Platform]): T =
   result.kqFd = kqueue()
   if result.kqFd < 0:
     raise newException(OSError, "powpow: kqueue() failed")
-  result.kEvents = newSeq[KEvent](KQ_MAX_EVENTS)
-  result.events  = newSeq[PlatformEvent](KQ_MAX_EVENTS)
+  result.kEvents = newSeq[KEvent](EventCapacityMin)
+  result.events  = newSeq[PlatformEvent](EventCapacityMin)
   result.count   = 0
 
   var pipeFds: array[2, cint]
@@ -73,6 +75,14 @@ proc close*(p: Platform) =
   if p.kqFd >= 0:
     discard posix.close(p.kqFd)
     p.kqFd = -1
+
+# ── Capacity ─────────────────────────────────────────────────────────────────
+
+proc ensureCapacity*(p: Platform, fdCount: int) =
+  let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
+  if target > p.events.len:
+    p.events.setLen(target)
+    p.kEvents.setLen(target)
 
 # ── Registration ─────────────────────────────────────────────────────────────
 
@@ -179,7 +189,7 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
   var n: cint
   while true:
     n = kevent(p.kqFd, nil, 0,
-               addr p.kEvents[0], KQ_MAX_EVENTS.cint, tsPtr)
+               addr p.kEvents[0], p.kEvents.len.cint, tsPtr)
     if n < 0:
       if errno == EINTR:
         continue

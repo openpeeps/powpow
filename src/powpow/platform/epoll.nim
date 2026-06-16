@@ -7,13 +7,22 @@
 ## powpow/platform/epoll.nim — epoll backend for Linux.
 ##
 ## Uses Nim's std/epoll for high-performance I/O event multiplexing
-## with support for edge-triggered mode and a self-pipe wake mechanism
+## with support for edge-triggered mode and an eventfd wake mechanism
 ## for cross-thread loop interruption.
 
 import ../types
 import std/[epoll, posix]
 
-const EP_MAX_EVENTS = 1024
+const
+  EventCapacityMin = 64
+  EventCapacityMax = 4096
+
+# ── eventfd ──────────────────────────────────────────────────────────────────
+
+proc eventfd(initval: cuint, flags: cint): cint {.
+  importc: "eventfd", header: "<sys/eventfd.h>".}
+
+const EFD_NONBLOCK = 0x800
 
 # ── Public types ─────────────────────────────────────────────────────────────
 
@@ -28,8 +37,7 @@ type
     epEvents:   seq[EpollEvent]
     events*:    seq[PlatformEvent]
     count*:     int
-    wakeReadFd: cint
-    wakeWriteFd: cint
+    wakeFd:     cint
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -38,38 +46,36 @@ proc init*(T: typedesc[Platform]): T =
   result.epFd = epoll_create1(0)
   if result.epFd < 0:
     raise newException(OSError, "powpow: epoll_create1() failed")
-  result.epEvents = newSeq[EpollEvent](EP_MAX_EVENTS)
-  result.events   = newSeq[PlatformEvent](EP_MAX_EVENTS)
+  result.epEvents = newSeq[EpollEvent](EventCapacityMin)
+  result.events   = newSeq[PlatformEvent](EventCapacityMin)
   result.count    = 0
 
-  var pipeFds: array[2, cint]
-  if posix.pipe(pipeFds) < 0:
-    raise newException(OSError, "powpow: pipe() failed for wake mechanism")
-  result.wakeReadFd = pipeFds[0]
-  result.wakeWriteFd = pipeFds[1]
-  let flags = fcntl(result.wakeReadFd, F_GETFL, 0)
-  if flags >= 0: discard fcntl(result.wakeReadFd, F_SETFL, flags or O_NONBLOCK)
-  let wflags = fcntl(result.wakeWriteFd, F_GETFL, 0)
-  if wflags >= 0: discard fcntl(result.wakeWriteFd, F_SETFL, wflags or O_NONBLOCK)
+  result.wakeFd = eventfd(0, EFD_NONBLOCK)
+  if result.wakeFd < 0:
+    raise newException(OSError, "powpow: eventfd() failed for wake mechanism")
 
   var wev: EpollEvent
   wev.events = EPOLLIN
-  wev.data.fd = result.wakeReadFd
-  if epoll_ctl(result.epFd, EPOLL_CTL_ADD, result.wakeReadFd, addr wev) < 0:
-    discard posix.close(result.wakeReadFd)
-    discard posix.close(result.wakeWriteFd)
+  wev.data.fd = result.wakeFd
+  if epoll_ctl(result.epFd, EPOLL_CTL_ADD, result.wakeFd, addr wev) < 0:
+    discard posix.close(result.wakeFd)
     raise newException(OSError, "powpow: epoll_ctl ADD failed for wake fd")
 
 proc close*(p: Platform) =
-  if p.wakeReadFd >= 0:
-    discard posix.close(p.wakeReadFd)
-    p.wakeReadFd = -1
-  if p.wakeWriteFd >= 0:
-    discard posix.close(p.wakeWriteFd)
-    p.wakeWriteFd = -1
+  if p.wakeFd >= 0:
+    discard posix.close(p.wakeFd)
+    p.wakeFd = -1
   if p.epFd >= 0:
     discard posix.close(p.epFd)
     p.epFd = -1
+
+# ── Capacity ─────────────────────────────────────────────────────────────────
+
+proc ensureCapacity*(p: Platform, fdCount: int) =
+  let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
+  if target > p.events.len:
+    p.events.setLen(target)
+    p.epEvents.setLen(target)
 
 # ── Registration ─────────────────────────────────────────────────────────────
 
@@ -80,8 +86,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   if Read in events:  ev.events = ev.events or EPOLLIN
   if Write in events: ev.events = ev.events or EPOLLOUT
   if edgeTriggered:   ev.events = ev.events or EPOLLET
-  let packed = (cast[uint64](udata) shl 32) or cast[uint64](cast[uint32](fd))
-  cast[ptr uint64](addr ev.data)[] = packed
+  ev.data.ptr = udata
 
   if epoll_ctl(p.epFd, EPOLL_CTL_ADD, fd.cint, addr ev) < 0:
     raise newException(OSError,
@@ -98,7 +103,7 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
   if Read in events:  ev.events = ev.events or EPOLLIN
   if Write in events: ev.events = ev.events or EPOLLOUT
   if edgeTriggered:   ev.events = ev.events or EPOLLET
-  cast[ptr pointer](addr ev.data)[] = udata
+  ev.data.ptr = udata
 
   if epoll_ctl(p.epFd, EPOLL_CTL_MOD, fd.cint, addr ev) < 0:
     raise newException(OSError,
@@ -107,8 +112,8 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
 # ── Wake ─────────────────────────────────────────────────────────────────────
 
 proc wake*(p: Platform) =
-  var byte: byte = 0
-  discard posix.write(p.wakeWriteFd, addr byte, 1)
+  var val: uint64 = 1
+  discard posix.write(p.wakeFd, addr val, 8)
 
 # ── Polling ──────────────────────────────────────────────────────────────────
 
@@ -116,7 +121,7 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
   var n: cint
   while true:
     n = epoll_wait(p.epFd, addr p.epEvents[0],
-                  EP_MAX_EVENTS.cint, timeoutMs.cint)
+                   p.epEvents.len.cint, timeoutMs.cint)
     if n < 0:
       if errno == EINTR:
         continue
@@ -130,14 +135,13 @@ proc poll*(p: Platform, timeoutMs: int): int {.inline.} =
   p.count = 0
   for i in 0 ..< n.int:
     let epev = p.epEvents[i]
-    if epev.data.fd.int == p.wakeReadFd:
-      var buf: array[8, byte]
-      discard posix.read(p.wakeReadFd, addr buf[0], 8)
+    if epev.data.fd.int == p.wakeFd:
+      var val: uint64
+      discard posix.read(p.wakeFd, addr val, 8)
       continue
 
-    let packed = cast[ptr uint64](addr epev.data)[]
-    p.events[p.count].fd    = int(packed and 0xFFFF_FFFF'u64)
-    p.events[p.count].udata = cast[pointer](packed shr 32)
+    p.events[p.count].fd     = epev.data.fd.int
+    p.events[p.count].udata  = epev.data.ptr
     p.events[p.count].events = {}
 
     if (epev.events and EPOLLIN) != 0:   p.events[p.count].events.incl Read

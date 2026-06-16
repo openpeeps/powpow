@@ -22,7 +22,9 @@ const
   POLLHUP  = 0x010.cshort
   POLLNVAL = 0x020.cshort
 
-const POLL_MAX_EVENTS = 1024
+const
+  EventCapacityMin = 64
+  EventCapacityMax = 4096
 
 # ── C struct / syscall bindings ──────────────────────────────────────────────
 
@@ -60,7 +62,7 @@ proc init*(T: typedesc[Platform]): T =
   result.pollFds = newSeq[Pollfd]()
   result.fdToIdx = initTable[int, int](64)
   result.udataMap = initTable[int, pointer](64)
-  result.events  = newSeq[PlatformEvent](POLL_MAX_EVENTS)
+  result.events  = newSeq[PlatformEvent](EventCapacityMin)
   result.count   = 0
 
   var pipeFds: array[2, cint]
@@ -88,6 +90,13 @@ proc close*(p: Platform) =
     p.wakeWriteFd = -1
   p.pollFds.setLen(0)
   p.fdToIdx.clear()
+
+# ── Capacity ─────────────────────────────────────────────────────────────────
+
+proc ensureCapacity*(p: Platform, fdCount: int) =
+  let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
+  if target > p.events.len:
+    p.events.setLen(target)
 
 # ── C wrappers ───────────────────────────────────────────────────────────────
 

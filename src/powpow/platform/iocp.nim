@@ -87,7 +87,9 @@ const
   WSAECONNRESET = 10054
   WSAEWOULDBLOCK = 10035
 
-const IOCP_MAX_EVENTS = 1024
+const
+  EventCapacityMin = 64
+  EventCapacityMax = 4096
 
 # ── Completion packet ────────────────────────────────────────────────────────
 
@@ -144,7 +146,7 @@ proc init*(T: typedesc[Platform]): T =
   if result.iocp == nil or result.iocp == INVALID_HANDLE_VALUE:
     raise newException(OSError, "powpow: CreateIoCompletionPort() failed")
   result.fdStates = initTable[int, IocpFdState]()
-  result.events = newSeq[PlatformEvent](IOCP_MAX_EVENTS)
+  result.events = newSeq[PlatformEvent](EventCapacityMin)
   result.extPool = @[]
 
 proc close*(p: Platform) =
@@ -155,6 +157,13 @@ proc close*(p: Platform) =
   if p.iocp != nil and p.iocp != INVALID_HANDLE_VALUE:
     discard closeHandle(p.iocp)
     p.iocp = nil
+
+# ── Capacity ─────────────────────────────────────────────────────────────────
+
+proc ensureCapacity*(p: Platform, fdCount: int) =
+  let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
+  if target > p.events.len:
+    p.events.setLen(target)
 
 # ── Internal: post an async recv ─────────────────────────────────────────────
 
@@ -272,10 +281,11 @@ proc poll*(p: Platform, timeoutMs: int): int =
     lpCompletionKey: ULONG_PTR
     lpOverlapped: pointer
 
-  var cqBuf: array[IOCP_MAX_EVENTS, CqEntry]
+  const CqBufSize = 256
+  var cqBuf: array[CqBufSize, CqEntry]
 
   let ok = getQueuedCompletionStatusEx(
-    p.iocp, addr cqBuf[0], IOCP_MAX_EVENTS.DWORD,
+    p.iocp, addr cqBuf[0], CqBufSize.DWORD,
     numRemoved, timeoutMs.DWORD, 0)
 
   if not ok or numRemoved == 0:
