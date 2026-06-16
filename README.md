@@ -25,6 +25,7 @@
 - Built on top of `epoll` (Linux), and `kqueue` (BSD, macOS), `IOCP` (Windows)
 - Support for edge-triggered and level-triggered event notification
 - Support for multiple event loops and multi-threaded applications
+- Support for MIME type detection based on file extensions
 
 > [!NOTE]
 > 💥 PowPow is experimental and under active development. The API may change without deprecation. If you are looking for a more stable and mature library, consider using [supranim](https://github.com/supranim/supranim) instead (based on LibEvent). 💥
@@ -37,32 +38,68 @@ Check examples in the `examples/` directory, or see the [API reference](https://
 
 
 ## Dummy Benchmarks
-Here you can find some wrk-based benchmarks I ran on my local machine (Ryzen 5600, 32GB RAM)
+Here you can find some wrk-based benchmarks I manually ran via Github Actions (see [latest results here](https://github.com/openpeeps/powpow/actions/runs/27617904105/job/81658449814)).
 
-- HTTP/1.1 server with 100 concurrent connections and 2 threads, running on single-threaded event loop
+- Single-threaded (keep-alive)
 ```
-wrk -t2 -c100 -d5s http://localhost:9000                       
-Running 5s test @ http://localhost:9000
-  2 threads and 100 connections
+⚡ powpow HTTP server listening on http://localhost:9000
+  Press Ctrl+C to stop
+Running 10s test @ http://127.0.0.1:9000/
+  4 threads and 100 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   131.70us   10.77us 477.00us   88.89%
-    Req/Sec    70.27k    25.69k   97.40k    53.00%
-  698484 requests in 5.00s, 361.04MB read
-Requests/sec: 139676.30
-Transfer/sec:     72.20MB
+    Latency   263.79us   35.34us   3.29ms   87.34%
+    Req/Sec    20.65k    24.97k   69.58k    75.12%
+  825176 requests in 10.10s, 426.53MB read
+Requests/sec:  81707.97
+Transfer/sec:     42.23MB
 ```
 
-- HTTP/1.1 server with 100 concurrent connections and 2 threads, running on single-threaded event loop, with `Connection: close` header
+- Single-threaded (connection close)
 ```
-wrk -t2 -c100 -d5s http://localhost:9000 -H 'Connection: close'
-Running 5s test @ http://localhost:9000
-  2 threads and 100 connections
+⚡ powpow HTTP server listening on http://localhost:9000
+  Press Ctrl+C to stop
+Running 10s test @ http://127.0.0.1:9000/
+  4 threads and 100 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    36.91us  501.25us  47.79ms   99.86%
-    Req/Sec    11.62k     2.08k   13.88k    88.46%
-  60096 requests in 5.10s, 30.78MB read
-Requests/sec:  11781.15
-Transfer/sec:      6.03MB
+    Latency    40.56us    9.83us   1.34ms   94.74%
+    Req/Sec    11.11k     1.63k   11.95k    97.06%
+  112745 requests in 10.01s, 57.74MB read
+Requests/sec:  11260.56
+Transfer/sec:      5.77MB
+```
+
+- Multi-threaded (keep-alive)
+```
+  worker #0 ready
+  worker #1 ready
+  worker #2 ready
+⚡ powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
+  worker #3 ready
+Running 10s test @ http://127.0.0.1:9000/
+  4 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   237.70us  444.60us   8.84ms   93.13%
+    Req/Sec    34.12k    10.66k   76.39k    72.32%
+  1361919 requests in 10.10s, 703.96MB read
+Requests/sec: 134853.84
+Transfer/sec:     69.70MB
+```
+
+- Multi-threaded (connection close)
+```
+  worker #0 ready
+  worker #1 ready
+  worker #2 ready
+  worker #3 ready
+⚡ powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
+Running 10s test @ http://127.0.0.1:9000/
+  4 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    42.20us   29.73us   2.26ms   98.63%
+    Req/Sec    10.63k     1.57k   11.99k    95.19%
+  109944 requests in 10.10s, 56.30MB read
+Requests/sec:  10885.54
+Transfer/sec:      5.57MB
 ```
 
 ### ❤ Contributions & Support
