@@ -156,16 +156,12 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
       old.alive = false
       inc loop.deadCount
       loop.fdWatcherPool.add(old)
-  let watcher = if loop.fdWatcherPool.len > 0:
-    let w = loop.fdWatcherPool.pop()
-    w.fd = fd; w.events = events; w.callback = callback
-    w.edgeTriggered = edgeTriggered; w.gen = gen; w.alive = true
-    w
-  else:
-    FdWatcher(
-      fd: fd, events: events, callback: callback,
-      edgeTriggered: edgeTriggered, gen: gen, alive: true)
+  let watcher = FdWatcher(
+    fd: fd, events: events, callback: callback,
+    edgeTriggered: edgeTriggered, gen: gen, alive: true)
   loop.fdWatchers[fd] = watcher
+  # Don't reuse from pool — stale macOS kqueue events from before EV_DELETE
+  # can arrive after EV_ADD. New FdWatchers guarantee stale udata → dead watcher.
   loop.platform.add(fd, events, edgeTriggered, cast[pointer](watcher))
   loop.platform.ensureCapacity(loop.fdWatchers.len)
 
@@ -343,6 +339,8 @@ proc sweepDead(loop: Loop) =
     for fd in dead:
       loop.fdWatchers.del(fd)
     loop.deadCount = 0
+  if loop.fdWatcherPool.len > 256:
+    loop.fdWatcherPool.setLen(0)
 
 # ── main loop ────────────────────────────────────────────────────────────────
 
