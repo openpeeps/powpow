@@ -20,12 +20,16 @@ import std/[httpcore, strutils, times]
 # or omit the argument to default to countProcessors().
 let server = newMultiThreadHttpServer()
 
-# ── Routes ───────────────────────────────────────────────────────────────────
+# ── Handler ──────────────────────────────────────────────────────────────────
 
-server.get("/") do (req: HttpRequest, res: Response):
-  res.status(Http200)
-     .header("Content-Type", "text/html; charset=utf-8")
-     .send("""<!DOCTYPE html>
+proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+  let meth = req.getMethod()
+  let path = req.getPath()
+
+  if meth == HttpGet and path == "/":
+    res.status(Http200)
+       .header("Content-Type", "text/html; charset=utf-8")
+       .send("""<!DOCTYPE html>
 <html>
 <head><title>powpow</title></head>
 <body>
@@ -40,48 +44,46 @@ server.get("/") do (req: HttpRequest, res: Response):
 </body>
 </html>""")
 
-server.get("/hello") do (req: HttpRequest, res: Response):
-  let name = req.getQuery()
-  var greeting = "Hello, World!"
-  if name.len > 0:
-    for pair in name.split('&'):
-      let kv = pair.split('=')
-      if kv.len == 2 and kv[0] == "name":
-        greeting = "Hello, " & kv[1] & "!"
-        break
-  res.status(Http200)
-     .header("Content-Type", "text/plain; charset=utf-8")
-     .send(greeting)
+  elif meth == HttpGet and path == "/hello":
+    let name = req.getQuery()
+    var greeting = "Hello, World!"
+    if name.len > 0:
+      for pair in name.split('&'):
+        let kv = pair.split('=')
+        if kv.len == 2 and kv[0] == "name":
+          greeting = "Hello, " & kv[1] & "!"
+          break
+    res.status(Http200)
+       .header("Content-Type", "text/plain; charset=utf-8")
+       .send(greeting)
 
-server.get("/time") do (req: HttpRequest, res: Response):
-  res.status(Http200)
-     .header("Content-Type", "text/plain; charset=utf-8")
-     .send($now())
+  elif meth == HttpGet and path == "/time":
+    res.status(Http200)
+       .header("Content-Type", "text/plain; charset=utf-8")
+       .send($now())
 
-server.post("/api/echo") do (req: HttpRequest, res: Response):
-  let body = req.getBodyString()
-  let contentType = req.getHeaders().getOrDefault("Content-Type",
-                                                    @["application/octet-stream"].HttpHeaderValues)
-  res.status(Http200)
-     .header("Content-Type", contentType)
-     .send(body)
+  elif meth == HttpPost and path == "/api/echo":
+    let body = req.getBodyString()
+    let contentType = req.getHeaders().getOrDefault("Content-Type",
+                                                      @["application/octet-stream"].HttpHeaderValues)
+    res.status(Http200)
+       .header("Content-Type", contentType)
+       .send(body)
 
-server.delete("/api/items/:id") do (req: HttpRequest, res: Response):
-  # Simple path extraction (no router yet — just split manually)
-  let path = req.getPath()
-  let parts = path.split('/')
-  let id = if parts.len >= 4: parts[3] else: "?"
-  res.status(Http200)
-     .header("Content-Type", "application/json")
-     .send("{\"deleted\": \"" & id & "\"}")
+  elif meth == HttpDelete and path.startsWith("/api/items/"):
+    # Simple path extraction (no router yet — just split manually)
+    let parts = path.split('/')
+    let id = if parts.len >= 4: parts[3] else: "?"
+    res.status(Http200)
+       .header("Content-Type", "application/json")
+       .send("{\"deleted\": \"" & id & "\"}")
 
-# Catch-all 404
-server.notFound do (req: HttpRequest, res: Response):
-  res.sendError(Http404,
-    "404 Not Found: " & $req.getMethod() & " " & req.getPath())
+  else:
+    res.sendError(Http404,
+      "404 Not Found: " & $meth & " " & path)
 
 # ── Start ────────────────────────────────────────────────────────────────────
 
-# listen() blocks the main thread. Each worker thread runs its own
+# start() blocks the main thread. Each worker thread runs its own
 # event loop on the same port. Press Ctrl+C to stop.
-server.listen("0.0.0.0", 9000)
+server.start(handler, "0.0.0.0", 9000)

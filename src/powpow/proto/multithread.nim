@@ -1,28 +1,24 @@
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
 ## powpow/proto/multithread.nim — Multi-threaded HTTP server.
-##
-## Architecture:
-##   ┌──────┐ ┌──────┐ ┌──────┐
-##   │  W0  │ │  W1  │ │  W2  │  worker threads (each owns Loop + TcpServer)
-##   │  fd  │ │  fd  │ │  fd  │  each has its own SO_REUSEPORT listen socket
-##   └──────┘ └──────┘ └──────┘
 ##
 ## Each worker thread creates its own event loop + HTTP server + TCP server
 ## with a SO_REUSEPORT listen socket bound to the same address:port.
 ## The kernel distributes incoming connections across the workers.
-##
-## No single-threaded acceptor bottleneck, no pipe-based cross-thread
-## communication — each worker accepts connections directly.
+## No single-threaded acceptor bottleneck, no cross-thread communication.
 ##
 ## Usage:
-##   import powpow
-##
+## ```nim
 ##   let server = newMultiThreadHttpServer()
-##   server.get("/") do (req: HttpRequest, res: Response):
-##     res.status(Http200).send("Hello!")
-##   server.listen("0.0.0.0", 9000)
-##
-## `listen()` blocks the main thread until Ctrl+C.
-## Press Ctrl+C to stop.
+##   server.start do (req: HttpRequest, res: HttpResponse):
+##     if req.getPath() == "/":
+##       res.status(Http200).send("Hello!")
+##   , "0.0.0.0", 9000
+## ```
 
 import std/[cpuinfo, httpcore, posix]
 import ../loop
@@ -31,14 +27,7 @@ import ../net/tcp
 import ../net/common
 import ./httpserver
 
-# ── Types ────────────────────────────────────────────────────────────────────
-
 type
-  RouteDef = object
-    meth:    HttpMethod
-    path:    string
-    handler: Handler
-
   WorkerCtxObj = object
     wakeRd: cint
     wakeWr: cint
@@ -46,28 +35,20 @@ type
   WorkerCtx = ptr WorkerCtxObj
 
   WorkerArgObj = object
-    ctx:      WorkerCtx
-    routes:   seq[RouteDef]
-    fallback: Handler
-    idx:      int
-    address:  string
-    port:     int
+    ctx:     WorkerCtx
+    handler: OnRequestCallback
+    idx:     int
+    address: string
+    port:    int
 
   WorkerArg = ptr WorkerArgObj
 
   MultiThreadHttpServer* = ref object
     numThreads*: int
-    routes:      seq[RouteDef]
-    fallback:    Handler
+    handler:     OnRequestCallback
     threads:     seq[Thread[WorkerArg]]
     contexts:    seq[WorkerCtx]
     running:     bool
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-proc registerRoutes(server: HttpServer, defs: seq[RouteDef]) =
-  for r in defs:
-    server.route(r.meth, r.path, r.handler)
 
 proc newWorkerCtx(): WorkerCtx =
   result = cast[WorkerCtx](alloc0(sizeof(WorkerCtxObj)))
@@ -88,13 +69,10 @@ proc freeWorkerArg(arg: WorkerArg) =
   reset(arg[])
   dealloc(arg)
 
-# ── Worker thread ────────────────────────────────────────────────────────────
-
 proc workerMain(arg: WorkerArg) {.thread.} =
-  {.cast(gcsafe).}:
+  {.gcsafe.}:
     let ctx     = arg.ctx
-    let routes  = arg.routes
-    let fallback = arg.fallback
+    let handler = arg.handler
     let idx     = arg.idx
     let address = arg.address
     let port    = arg.port
@@ -102,9 +80,7 @@ proc workerMain(arg: WorkerArg) {.thread.} =
 
     let loop = newLoop()
     let server = newHttpServer(loop)
-    server.registerRoutes(routes)
-    if fallback != nil:
-      server.notFound(fallback)
+    server.handler = handler
     server.ensureTcpServer()
 
     loop.register(ctx.wakeRd.int, {Read}) do (fd: int, ev: set[EventType]):
@@ -122,50 +98,41 @@ proc workerMain(arg: WorkerArg) {.thread.} =
     server.close()
     loop.close()
 
-# ── Lifecycle ────────────────────────────────────────────────────────────────
-
 proc newMultiThreadHttpServer*(numThreads: int = 0): MultiThreadHttpServer =
   let n = if numThreads > 0: numThreads else: countProcessors()
   MultiThreadHttpServer(
     numThreads: n,
-    routes:     @[],
-    fallback:   nil,
+    handler:    nil,
     threads:    newSeq[Thread[WorkerArg]](n),
     contexts:   @[],
     running:    false,
   )
 
-# ── Route registration ─────────────────────────────────────────────────────
+proc listen*(srv: MultiThreadHttpServer, address: string, port: int) =
+  {.gcsafe.}:
+    srv.running = true
+    for i in 0 ..< srv.numThreads:
+      srv.contexts.add(newWorkerCtx())
+    for i in 0 ..< srv.numThreads:
+      let arg = cast[WorkerArg](alloc0(sizeof(WorkerArgObj)))
+      arg.ctx     = srv.contexts[i]
+      arg.handler = srv.handler
+      arg.idx     = i
+      arg.address = address
+      arg.port    = port
+      createThread(srv.threads[i], workerMain, arg)
+    echo "⚡ powpow accepting on ", address, ":", port,
+         " with ", srv.numThreads, " workers (SO_REUSEPORT)"
+    for i in 0 ..< srv.numThreads:
+      joinThread(srv.threads[i])
+    for ctx in srv.contexts:
+      freeWorkerCtx(ctx)
+    srv.contexts.setLen(0)
 
-proc route*(srv: MultiThreadHttpServer, meth: HttpMethod, path: string,
-            handler: Handler) =
-  srv.routes.add(RouteDef(meth: meth, path: path, handler: handler))
-
-proc get*(srv: MultiThreadHttpServer, path: string, handler: Handler) =
-  srv.route(HttpGet, path, handler)
-
-proc post*(srv: MultiThreadHttpServer, path: string, handler: Handler) =
-  srv.route(HttpPost, path, handler)
-
-proc put*(srv: MultiThreadHttpServer, path: string, handler: Handler) =
-  srv.route(HttpPut, path, handler)
-
-proc patch*(srv: MultiThreadHttpServer, path: string, handler: Handler) =
-  srv.route(HttpPatch, path, handler)
-
-proc delete*(srv: MultiThreadHttpServer, path: string, handler: Handler) =
-  srv.route(HttpDelete, path, handler)
-
-proc head*(srv: MultiThreadHttpServer, path: string, handler: Handler) =
-  srv.route(HttpHead, path, handler)
-
-proc options*(srv: MultiThreadHttpServer, path: string, handler: Handler) =
-  srv.route(HttpOptions, path, handler)
-
-proc notFound*(srv: MultiThreadHttpServer, handler: Handler) =
-  srv.fallback = handler
-
-# ── Listen / Close ───────────────────────────────────────────────────────────
+proc start*(srv: MultiThreadHttpServer, cb: OnRequestCallback,
+            address: string, port: int) =
+  srv.handler = cb
+  srv.listen(address, port)
 
 proc close*(srv: MultiThreadHttpServer) =
   srv.running = false
@@ -173,30 +140,3 @@ proc close*(srv: MultiThreadHttpServer) =
     if ctx.wakeWr >= 0:
       discard posix.close(ctx.wakeWr)
       ctx.wakeWr = -1
-
-proc listen*(srv: MultiThreadHttpServer, address: string, port: int) =
-  {.cast(gcsafe).}:
-    srv.running = true
-
-    for i in 0 ..< srv.numThreads:
-      srv.contexts.add(newWorkerCtx())
-
-    for i in 0 ..< srv.numThreads:
-      let arg = cast[WorkerArg](alloc0(sizeof(WorkerArgObj)))
-      arg.ctx      = srv.contexts[i]
-      arg.routes   = srv.routes
-      arg.fallback = srv.fallback
-      arg.idx      = i
-      arg.address  = address
-      arg.port     = port
-      createThread(srv.threads[i], workerMain, arg)
-
-    echo "⚡ powpow accepting on ", address, ":", port,
-         " with ", srv.numThreads, " workers (SO_REUSEPORT)"
-
-    for i in 0 ..< srv.numThreads:
-      joinThread(srv.threads[i])
-
-    for ctx in srv.contexts:
-      freeWorkerCtx(ctx)
-    srv.contexts.setLen(0)

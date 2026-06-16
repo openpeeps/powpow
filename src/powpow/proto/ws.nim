@@ -626,14 +626,14 @@ proc close*(wss: WsServer) =
 # ── HTTP → WebSocket upgrade ─────────────────────────────────────────────────
 
 proc websocketUpgrade*(
-    res: Response,
+    res: HttpResponse,
     req: HttpRequest,
     server: HttpServer = nil,
     onOpen: WsOpenCb = nil,
     onMessage: WsMessageCb = nil,
     onClose: WsCloseCb = nil,
     onError: WsErrorCb = nil
-): WsConnection {.discardable.} =
+): WsConnection {.gcsafe, discardable.} =
   ## Upgrade an HTTP connection to WebSocket. Call this from an HTTP route handler.
   ##
   ## After the upgrade, the connection is no longer managed by the HttpServer —
@@ -648,73 +648,73 @@ proc websocketUpgrade*(
   ##        onMessage = proc(ws: WsConnection, kind: WsFrameKind, data: openArray[byte]) =
   ##          ws.sendText(cast[string](@data)),
   ##      )
+  {.gcsafe.}:
+    let headers = req.getHeaders()
+    let clientKey = headerValue(headers, "Sec-WebSocket-Key")
+    let upgradeHeader = headerValue(headers, "Upgrade")
 
-  let headers = req.getHeaders()
-  let clientKey = headerValue(headers, "Sec-WebSocket-Key")
-  let upgradeHeader = headerValue(headers, "Upgrade")
+    if clientKey.len == 0 or upgradeHeader.toLowerAscii() != "websocket":
+      res.status(Http400)
+        .send("Bad Request: missing WebSocket headers")
+      return nil
 
-  if clientKey.len == 0 or upgradeHeader.toLowerAscii() != "websocket":
-    res.status(Http400)
-       .send("Bad Request: missing WebSocket headers")
-    return nil
+    # Get the underlying connection before sending the handshake
+    let conn = res.getConn()
+    let fd = conn.fd.int
 
-  # Get the underlying connection before sending the handshake
-  let conn = res.getConn()
-  let fd = conn.fd.int
+    # Mark response as sent (we'll send the 101 manually)
+    res.markSent()
 
-  # Mark response as sent (we'll send the 101 manually)
-  res.markSent()
+    # Clean up the HTTP server's session for this connection
+    if server != nil:
+      server.removeSession(fd)
 
-  # Clean up the HTTP server's session for this connection
-  if server != nil:
-    server.removeSession(fd)
+    # Send the 101 Switching Protocols response
+    conn.sendHandshake(clientKey)
 
-  # Send the 101 Switching Protocols response
-  conn.sendHandshake(clientKey)
+    # Create WebSocket connection
+    let ws = newWsConnection(conn)
+    ws.onOpen    = onOpen
+    ws.onMessage = onMessage
+    ws.onClose   = onClose
+    ws.onError   = onError
 
-  # Create WebSocket connection
-  let ws = newWsConnection(conn)
-  ws.onOpen    = onOpen
-  ws.onMessage = onMessage
-  ws.onClose   = onClose
-  ws.onError   = onError
-
-  # Re-register the fd for raw WebSocket frame handling.
-  # We need to unregister the old HTTP handler first.
-  conn.loop.unregister(conn.fd.int)
-  conn.loop.register(conn.fd.int, {Read}, edgeTriggered = true,
-    callback = proc(fd: int, ev: set[EventType]) =
-      if Error in ev or Hup in ev:
-        if not ws.onClose.isNil:
-          ws.onClose(ws, 1006, "Connection lost")
-        ws.conn.close()
-        return
-      if Read in ev:
-        var buf: array[65536, byte]
-        while true:
-          let n = posix.recv(ws.conn.fd, addr buf[0], buf.len, 0)
-          if n > 0:
-            ws.parseWsFrames(buf.toOpenArray(0, n - 1))
-            if ws.conn.state != Connected:
+    # Re-register the fd for raw WebSocket frame handling.
+    # We need to unregister the old HTTP handler first.
+    conn.loop.unregister(conn.fd.int)
+    conn.loop.register(conn.fd.int, {Read}, edgeTriggered = true,
+      callback = proc(fd: int, ev: set[EventType]) =
+        if Error in ev or Hup in ev:
+          if not ws.onClose.isNil:
+            ws.onClose(ws, 1006, "Connection lost")
+          ws.conn.close()
+          return
+        if Read in ev:
+          var buf: array[65536, byte]
+          while true:
+            let n = posix.recv(ws.conn.fd, addr buf[0], buf.len, 0)
+            if n > 0:
+              ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+              if ws.conn.state != Connected:
+                return
+            elif n == 0:
+              if not ws.onClose.isNil:
+                ws.onClose(ws, 1000, "")
+              ws.conn.close()
               return
-          elif n == 0:
-            if not ws.onClose.isNil:
-              ws.onClose(ws, 1000, "")
-            ws.conn.close()
-            return
-          else:
-            if errno == EAGAIN or errno == EWOULDBLOCK:
-              break
-            if errno == EINTR:
-              continue
-            if not ws.onError.isNil:
-              ws.onError(ws, "recv error: " & $errno)
-            ws.conn.close()
-            return
-  )
+            else:
+              if errno == EAGAIN or errno == EWOULDBLOCK:
+                break
+              if errno == EINTR:
+                continue
+              if not ws.onError.isNil:
+                ws.onError(ws, "recv error: " & $errno)
+              ws.conn.close()
+              return
+    )
 
-  # Fire onOpen
-  if not ws.onOpen.isNil:
-    ws.onOpen(ws)
+    # Fire onOpen
+    if not ws.onOpen.isNil:
+      ws.onOpen(ws)
 
-  return ws
+    return ws

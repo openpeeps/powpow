@@ -5,18 +5,22 @@
 #          https://github.com/openpeeps/powpow
 
 ## A non-blocking HTTP/1.1 server built on top of powpow's TCP primitives.
-## 
-## Combines the TCP transport layer with the incremental HTTP parser
-## to provide a high-level routing server with minimal overhead.
 ##
-## Usage:
-##   let server = newHttpServer(loop)
-##   server.get("/") do (req: HttpRequest, res: Response):
-##     res.status(Http200).send("Hello!")
-##   server.listen("0.0.0.0", 8080)
-##   loop.run()
+## Combines the TCP transport layer with the incremental HTTP parser.
+## Higher-level frameworks implement routing via the `OnRequestCallback`.
+##
+## ### Usage:
+## ```nim
+##   let server = newHttpServer()
+##   server.start do (req: HttpRequest, res: HttpResponse):
+##     if req.getPath() == "/":
+##       res.status(Http200).send("Hello, World!")
+##     else:
+##       res.sendError(Http404, "Not Found")
+##   , Port(9000)
+## ```
 
-import std/[httpcore, tables, options, net, strutils, os, posix, oids]
+import std/[httpcore, tables, options, net, strutils, os, posix]
 
 import ../net/tcp
 import ../net/common
@@ -25,13 +29,12 @@ import ../types
 import ./http
 
 import pkg/[mimedb, multipart]
-import pkg/checksums/md5
 export Port
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
 type
-  Response* = ref object
+  HttpResponse* = ref object
     ## Build and send an HTTP response.
     conn:       Connection
     sent:       bool
@@ -40,36 +43,25 @@ type
     bodyBytes:  seq[byte]
     closeConn:  bool           ## If true, send "Connection: close" and shut down
 
-  Handler* = proc(req: HttpRequest, res: Response) {.closure.}
-    ## Route handler. Call `res.status(...).send(...)` to respond.
-
-  BodyHandler* = proc(data: openArray[byte]; done: bool) {.closure.}
-    ## Streaming body handler. Receives body data as it arrives from the
-    ## network. `done` is true when the body is complete.
-    ##
-    ## Use with streaming routes to process large uploads without buffering:
-    ##   server.post("/upload", bodyHandler = cb) do (req, res): ...
+  OnRequestCallback* = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.}
+    ## User-provided callback invoked for every parsed HTTP request.
+    ## Higher-level frameworks implement routing on top of this.
 
   Session = object
-    ## Per-connection state.
     parser: HttpParser
-    streamer: MultipartStreamerRef  ## Auto-created for multipart requests (nil otherwise)
-    sessionStreamFile: File         ## Open file handle for streamToFile (nil if inactive)
-    sessionStreamPath: string       ## Temp file path (empty if inactive)
+    streamer: MultipartStreamerRef
+    sessionStreamFile: File
+    sessionStreamPath: string
     idleTimer: TimerId
     idleMs:    int
 
   HttpServer* = ref object
-    ## A non-blocking HTTP/1.1 server.
     tcpServer: TcpServer
     loop:      Loop
-    routes:    Table[HttpMethod, Table[string, Handler]]    ## method → path → handler
-    bodyHandlers: Table[HttpMethod, Table[string, BodyHandler]]  ## method → path → body handler
-    streamToFileRoutes: Table[HttpMethod, Table[string, bool]]   ## method → path → streamToFile
-    fallback:  Handler                      ## Catch-all handler (nil = 404)
-    sessions:  Table[int, Session]          ## fd → parser session
-    parserPool: seq[HttpParser]             ## recycled parser objects
-    resPool:   seq[Response]                ## recycled response objects
+    handler*:  OnRequestCallback
+    sessions:  Table[int, Session]
+    parserPool: seq[HttpParser]
+    resPool:   seq[HttpResponse]
     keepAliveMs: int
 
 const
@@ -143,10 +135,10 @@ proc parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, l
 
   result = (true, rangeStart, rangeEnd - rangeStart + 1)
 
-# ── Response ─────────────────────────────────────────────────────────────────
+# ── HttpResponse ─────────────────────────────────────────────────────────────────
 
-proc newResponse(conn: Connection): Response =
-  Response(
+proc newHttpResponse(conn: Connection): HttpResponse =
+  HttpResponse(
     conn:       conn,
     sent:       false,
     statusCode: Http200,
@@ -155,17 +147,17 @@ proc newResponse(conn: Connection): Response =
     closeConn:  false,
   )
 
-proc status*(res: Response, code: HttpCode): Response {.discardable.} =
+proc status*(res: HttpResponse, code: HttpCode): HttpResponse {.discardable.} =
   ## Set the HTTP status code.
   res.statusCode = code
   return res
 
-proc header*(res: Response, key, value: string): Response {.discardable.} =
+proc header*(res: HttpResponse, key, value: string): HttpResponse {.discardable.} =
   ## Add a response header.
   res.headers.add((key, value))
   return res
 
-proc close*(res: Response): Response {.discardable.} =
+proc close*(res: HttpResponse): HttpResponse {.discardable.} =
   ## Mark this response to send "Connection: close" and shut down the
   ## TCP connection after the response is sent.
   res.closeConn = true
@@ -224,7 +216,7 @@ proc writeUint(buf: ptr UncheckedArray[byte], n: int64): int =
     buf[i] = digits[ndigits - 1 - i]
   return ndigits
 
-proc send*(res: Response, body: string = "") =
+proc send*(res: HttpResponse, body: string = "") =
   ## Send the response with a string body.
   ## Uses scatter-write (writev) to send headers + body with zero
   ## intermediate string allocations.
@@ -287,7 +279,7 @@ proc send*(res: Response, body: string = "") =
   if res.closeConn:
     res.conn.closeAfterDrain()
 
-proc send*(res: Response, body: seq[byte]) =
+proc send*(res: HttpResponse, body: seq[byte]) =
   ## Send the response with a raw byte body.
   ## Uses scatter-write (writev) to send headers + body with zero
   ## intermediate string allocations.
@@ -355,7 +347,7 @@ proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) 
   copyMem(addr buf[p], name.cstring, name.len); p += name.len
   copyMem(addr buf[p], "\"\r\n".cstring, 3); p += 3
 
-proc sendFile*(res: Response, path: string;
+proc sendFile*(res: HttpResponse, path: string;
                req: HttpRequest = default(HttpRequest);
                closeConn = true) =
   ## Send a file for download using zero-copy when possible.
@@ -363,116 +355,117 @@ proc sendFile*(res: Response, path: string;
   ## Supports HTTP Range requests when `req` is provided.
   ## `closeConn` controls connection lifetime: true (default) closes after
   ## the transfer; false keeps the connection alive.
-  if res.sent: return
+  {.gcsafe.}:
+    if res.sent: return
 
-  let fileFd = openFileRead(path)
-  if fileFd < 0:
-    res.status(Http404).send("File not found")
-    return
+    let fileFd = openFileRead(path)
+    if fileFd < 0:
+      res.status(Http404).send("File not found")
+      return
 
-  var fileSize = getFileSize(fileFd)
-  if fileSize < 0:
-    closeFile(fileFd)
-    res.status(Http404).send("File not found")
-    return
+    var fileSize = getFileSize(fileFd)
+    if fileSize < 0:
+      closeFile(fileFd)
+      res.status(Http404).send("File not found")
+      return
 
-  var rangeStart = 0i64
-  var rangeLen = fileSize
-  var status = Http200
+    var rangeStart = 0i64
+    var rangeLen = fileSize
+    var status = Http200
 
-  if req != default(HttpRequest):
-    let headers = req.getHeaders()
-    if headers.hasKey("range"):
-      let rangeVal = headers["range"].toLowerAscii()
-      let r = parseRange(rangeVal, fileSize)
-      if r.ok:
-        rangeStart = r.start
-        rangeLen = r.length
-        status = Http206
-      elif rangeVal.startsWith("bytes="):
+    if req != default(HttpRequest):
+      let headers = req.getHeaders()
+      if headers.hasKey("range"):
+        let rangeVal = headers["range"].toLowerAscii()
+        let r = parseRange(rangeVal, fileSize)
+        if r.ok:
+          rangeStart = r.start
+          rangeLen = r.length
+          status = Http206
+        elif rangeVal.startsWith("bytes="):
+          closeFile(fileFd)
+          res.status(Http416).send("Range Not Satisfiable")
+          return
+
+    if closeConn:
+      res.closeConn = true
+    let connHeader = if closeConn: "close" else: "keep-alive"
+
+    res.sent = true
+    var hdrBuf: array[768, byte]
+    var p = 0
+
+    if status == Http200:
+      copyMem(addr hdrBuf[p], "HTTP/1.1 200 OK\r\n".cstring, 17); p += 17
+    else:
+      copyMem(addr hdrBuf[p], "HTTP/1.1 206 Partial Content\r\n".cstring, 30); p += 30
+
+    copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
+    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeLen)
+    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+    copyMem(addr hdrBuf[p], "Accept-Ranges: bytes\r\n".cstring, 22); p += 22
+
+    let ext = getFileExt(path)[1..^1]
+    let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
+    copyMem(addr hdrBuf[p], "Content-Type: ".cstring, 14); p += 14
+    copyMem(addr hdrBuf[p], mimeType.cstring, mimeType.len); p += mimeType.len
+    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+    let (_, fileName, _) = path.splitFile()
+    writeDisposition(cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), fileName, p)
+
+    copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
+    copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
+    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+    copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
+
+    for (k, v) in res.headers:
+      copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
+      copyMem(addr hdrBuf[p], ": ".cstring, 2); p += 2
+      copyMem(addr hdrBuf[p], v.cstring, v.len); p += v.len
+      copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+    if status == Http206:
+      copyMem(addr hdrBuf[p], "Content-Range: bytes ".cstring, 21); p += 21
+      p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart)
+      hdrBuf[p] = byte('-'); p += 1
+      p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart + rangeLen - 1)
+      hdrBuf[p] = byte('/'); p += 1
+      p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), fileSize)
+      copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+    type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
+    var parts: array[6, Part]
+    var count = 0
+    parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
+    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+
+    discard seekFile(fileFd, rangeStart)
+
+    var fileOff = rangeStart
+    var remain = rangeLen
+
+    while remain > 0:
+      let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
+      if n > 0:
+        continue
+      elif n == 0:
+        res.conn.sendFileFd = fileFd
+        res.conn.sendFileOff = fileOff
+        res.conn.sendFileRemain = remain
+        res.conn.loop.modify(res.conn.fd.int, {Read, Write})
+        return
+      else:
         closeFile(fileFd)
-        res.status(Http416).send("Range Not Satisfiable")
         return
 
-  if closeConn:
-    res.closeConn = true
-  let connHeader = if closeConn: "close" else: "keep-alive"
-
-  res.sent = true
-  var hdrBuf: array[768, byte]
-  var p = 0
-
-  if status == Http200:
-    copyMem(addr hdrBuf[p], "HTTP/1.1 200 OK\r\n".cstring, 17); p += 17
-  else:
-    copyMem(addr hdrBuf[p], "HTTP/1.1 206 Partial Content\r\n".cstring, 30); p += 30
-
-  copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeLen)
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  copyMem(addr hdrBuf[p], "Accept-Ranges: bytes\r\n".cstring, 22); p += 22
-
-  let ext = getFileExt(path)[1..^1]
-  let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
-  copyMem(addr hdrBuf[p], "Content-Type: ".cstring, 14); p += 14
-  copyMem(addr hdrBuf[p], mimeType.cstring, mimeType.len); p += mimeType.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  let (_, fileName, _) = path.splitFile()
-  writeDisposition(cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), fileName, p)
-
-  copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
-  copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
-
-  for (k, v) in res.headers:
-    copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
-    copyMem(addr hdrBuf[p], ": ".cstring, 2); p += 2
-    copyMem(addr hdrBuf[p], v.cstring, v.len); p += v.len
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  if status == Http206:
-    copyMem(addr hdrBuf[p], "Content-Range: bytes ".cstring, 21); p += 21
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart)
-    hdrBuf[p] = byte('-'); p += 1
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart + rangeLen - 1)
-    hdrBuf[p] = byte('/'); p += 1
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), fileSize)
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
-  var parts: array[6, Part]
-  var count = 0
-  parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
-  discard res.conn.sendv(parts.toOpenArray(0, count - 1))
-
-  discard seekFile(fileFd, rangeStart)
-
-  var fileOff = rangeStart
-  var remain = rangeLen
-
-  while remain > 0:
-    let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
-    if n > 0:
-      continue
-    elif n == 0:
-      res.conn.sendFileFd = fileFd
-      res.conn.sendFileOff = fileOff
-      res.conn.sendFileRemain = remain
-      res.conn.loop.modify(res.conn.fd.int, {Read, Write})
-      return
-    else:
-      closeFile(fileFd)
-      return
-
-  closeFile(fileFd)
-  if res.closeConn:
-    res.conn.closeAfterDrain()
+    closeFile(fileFd)
+    if res.closeConn:
+      res.conn.closeAfterDrain()
 
 const
   DefaultChunkSize* = 1_048_576
@@ -483,8 +476,8 @@ const
 proc listen*(server: HttpServer, address: string, port: int)
 proc close*(server: HttpServer)
 
-proc streamFile*(res: Response, path: string, req: HttpRequest;
-                 chunkSize = DefaultChunkSize) =
+proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
+                 chunkSize = DefaultChunkSize) {.gcsafe.} =
   ## Stream a file for media playback with per-response byte limiting.
   ## Always process Range requests. Caps each response body to `chunkSize`
   ## bytes (default 1 MB) so a seek only transfers one chunk, not the
@@ -493,122 +486,123 @@ proc streamFile*(res: Response, path: string, req: HttpRequest;
   ## No initial (no-Range) request sends 206 with `Content-Range: bytes
   ## 0-(chunkSize-1)/fileSize` — the browser learns the total file size
   ## from the suffix but only receives one chunk.
-  if res.sent: return
+  {.gcsafe.}:
+    if res.sent: return
 
-  let fileFd = openFileRead(path)
-  if fileFd < 0:
-    res.status(Http404).send("File not found")
-    return
-
-  var fileSize = getFileSize(fileFd)
-  if fileSize < 0:
-    closeFile(fileFd)
-    res.status(Http404).send("File not found")
-    return
-
-  var rangeStart = 0i64
-  var rangeLen = min(chunkSize.int64, fileSize)
-  var status = Http206
-
-  let headers = req.getHeaders()
-  if headers.hasKey("range"):
-    let rangeVal = headers["range"].toLowerAscii()
-    let r = parseRange(rangeVal, fileSize)
-    if r.ok:
-      rangeStart = r.start
-      rangeLen = min(r.length, chunkSize.int64)
-      status = Http206
-    elif rangeVal.startsWith("bytes="):
-      closeFile(fileFd)
-      res.status(Http416).send("Range Not Satisfiable")
+    let fileFd = openFileRead(path)
+    if fileFd < 0:
+      res.status(Http404).send("File not found")
       return
 
-  res.sent = true
-  var hdrBuf: array[768, byte]
-  var p = 0
+    var fileSize = getFileSize(fileFd)
+    if fileSize < 0:
+      closeFile(fileFd)
+      res.status(Http404).send("File not found")
+      return
 
-  copyMem(addr hdrBuf[p], "HTTP/1.1 206 Partial Content\r\n".cstring, 30); p += 30
+    var rangeStart = 0i64
+    var rangeLen = min(chunkSize.int64, fileSize)
+    var status = Http206
 
-  copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeLen)
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    let headers = req.getHeaders()
+    if headers.hasKey("range"):
+      let rangeVal = headers["range"].toLowerAscii()
+      let r = parseRange(rangeVal, fileSize)
+      if r.ok:
+        rangeStart = r.start
+        rangeLen = min(r.length, chunkSize.int64)
+        status = Http206
+      elif rangeVal.startsWith("bytes="):
+        closeFile(fileFd)
+        res.status(Http416).send("Range Not Satisfiable")
+        return
 
-  copyMem(addr hdrBuf[p], "Accept-Ranges: bytes\r\n".cstring, 22); p += 22
+    res.sent = true
+    var hdrBuf: array[768, byte]
+    var p = 0
 
-  let ext = getFileExt(path)[1..^1]
-  let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
-  copyMem(addr hdrBuf[p], "Content-Type: ".cstring, 14); p += 14
-  copyMem(addr hdrBuf[p], mimeType.cstring, mimeType.len); p += mimeType.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    copyMem(addr hdrBuf[p], "HTTP/1.1 206 Partial Content\r\n".cstring, 30); p += 30
 
-  copyMem(addr hdrBuf[p], "Connection: keep-alive\r\n".cstring, 24); p += 24
-
-  copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
-
-  for (k, v) in res.headers:
-    copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
-    copyMem(addr hdrBuf[p], ": ".cstring, 2); p += 2
-    copyMem(addr hdrBuf[p], v.cstring, v.len); p += v.len
+    copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
+    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeLen)
     copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  let rangeEnd = min(rangeStart + rangeLen - 1, fileSize - 1)
-  copyMem(addr hdrBuf[p], "Content-Range: bytes ".cstring, 21); p += 21
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart)
-  hdrBuf[p] = byte('-'); p += 1
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeEnd)
-  hdrBuf[p] = byte('/'); p += 1
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), fileSize)
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    copyMem(addr hdrBuf[p], "Accept-Ranges: bytes\r\n".cstring, 22); p += 22
 
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    let ext = getFileExt(path)[1..^1]
+    let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
+    copyMem(addr hdrBuf[p], "Content-Type: ".cstring, 14); p += 14
+    copyMem(addr hdrBuf[p], mimeType.cstring, mimeType.len); p += mimeType.len
+    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
-  var parts: array[6, Part]
-  var count = 0
-  parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
-  discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+    copyMem(addr hdrBuf[p], "Connection: keep-alive\r\n".cstring, 24); p += 24
 
-  discard seekFile(fileFd, rangeStart)
+    copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
 
-  var fileOff = rangeStart
-  var remain = rangeLen
+    for (k, v) in res.headers:
+      copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
+      copyMem(addr hdrBuf[p], ": ".cstring, 2); p += 2
+      copyMem(addr hdrBuf[p], v.cstring, v.len); p += v.len
+      copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  while remain > 0:
-    let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
-    if n > 0:
-      continue
-    elif n == 0:
-      res.conn.sendFileFd = fileFd
-      res.conn.sendFileOff = fileOff
-      res.conn.sendFileRemain = remain
-      res.conn.loop.modify(res.conn.fd.int, {Read, Write})
-      return
-    else:
-      closeFile(fileFd)
-      return
+    let rangeEnd = min(rangeStart + rangeLen - 1, fileSize - 1)
+    copyMem(addr hdrBuf[p], "Content-Range: bytes ".cstring, 21); p += 21
+    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart)
+    hdrBuf[p] = byte('-'); p += 1
+    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeEnd)
+    hdrBuf[p] = byte('/'); p += 1
+    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), fileSize)
+    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  closeFile(fileFd)
+    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-proc sendError*(res: Response, code: HttpCode, msg: string = "") =
+    type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
+    var parts: array[6, Part]
+    var count = 0
+    parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
+    discard res.conn.sendv(parts.toOpenArray(0, count - 1))
+
+    discard seekFile(fileFd, rangeStart)
+
+    var fileOff = rangeStart
+    var remain = rangeLen
+
+    while remain > 0:
+      let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
+      if n > 0:
+        continue
+      elif n == 0:
+        res.conn.sendFileFd = fileFd
+        res.conn.sendFileOff = fileOff
+        res.conn.sendFileRemain = remain
+        res.conn.loop.modify(res.conn.fd.int, {Read, Write})
+        return
+      else:
+        closeFile(fileFd)
+        return
+
+    closeFile(fileFd)
+
+proc sendError*(res: HttpResponse, code: HttpCode, msg: string = "") =
   ## Send an error response and close the connection.
   res.status(code)
   res.header("Content-Type", "text/plain; charset=utf-8")
   res.close()
   res.send(msg)
 
-proc getConn*(res: Response): Connection {.inline.} =
+proc getConn*(res: HttpResponse): Connection {.inline.} =
   ## Get the underlying TCP connection. Used by protocol upgrade
   ## handlers (e.g. WebSocket) that need direct access to the socket.
   res.conn
 
-proc markSent*(res: Response) {.inline.} =
+proc markSent*(res: HttpResponse) {.inline.} =
   ## Mark this response as sent without writing any bytes.
   ## Used by upgrade handlers that send the response manually.
   res.sent = true
 
-# ── Response pooling ──────────────────────────────────────────────────────────
+# ── HttpResponse pooling ──────────────────────────────────────────────────────────
 
-proc acquireResponse(server: HttpServer, conn: Connection): Response =
+proc acquireHttpResponse(server: HttpServer, conn: Connection): HttpResponse =
   if server.resPool.len > 0:
     result = server.resPool.pop()
     result.conn = conn
@@ -618,25 +612,21 @@ proc acquireResponse(server: HttpServer, conn: Connection): Response =
     result.statusCode = Http200
     result.closeConn = false
   else:
-    result = Response(
+    result = HttpResponse(
       conn: conn, sent: false, statusCode: Http200,
       headers: @[], bodyBytes: @[], closeConn: false)
 
-proc releaseResponse(server: HttpServer, res: Response) =
+proc releaseHttpResponse(server: HttpServer, res: HttpResponse) =
   if server.resPool.len < MaxResPoolSize:
     server.resPool.add(res)
 
 # ── HttpServer lifecycle ─────────────────────────────────────────────────────
 
 proc newHttpServer*(loop: Loop): HttpServer =
-  ## Create a new HTTP server.
   HttpServer(
     tcpServer: nil,
     loop:      loop,
-    routes:    initTable[HttpMethod, Table[string, Handler]](8),
-    bodyHandlers: initTable[HttpMethod, Table[string, BodyHandler]](8),
-    streamToFileRoutes: initTable[HttpMethod, Table[string, bool]](8),
-    fallback:  nil,
+    handler:   nil,
     sessions:  initTable[int, Session](64),
     parserPool: @[],
     resPool:   @[],
@@ -644,12 +634,11 @@ proc newHttpServer*(loop: Loop): HttpServer =
   )
 
 proc newHttpServer*: HttpServer =
-  ## Create a new HTTP server with an internal event loop.
   var eventLoop = newLoop()
   newHttpServer(eventLoop)
 
-proc start*(server: HttpServer, port: Port) =
-  ## Start the HTTP server on the given port.
+proc start*(server: HttpServer, handler: OnRequestCallback, port: Port) =
+  server.handler = handler
   server.listen("0.0.0.0", port.int)
   server.loop.run()
 
@@ -693,27 +682,14 @@ proc removeSession*(server: HttpServer, fd: int) =
 
 proc dispatchRequest(server: HttpServer, conn: Connection,
                      req: HttpRequest) =
-  ## Find a matching route and invoke the handler.
-  let meth = req.getMethod()
-  let path = req.getPath()
-  let res = acquireResponse(server, conn)
-
-  # Respect client's "Connection: close" header (fast-scanned during parse)
+  let res = acquireHttpResponse(server, conn)
   if req.getConnectionClose():
     res.closeConn = true
-
-  var matched = false
-  if meth in server.routes:
-    let handler = server.routes[meth].getOrDefault(path)
-    if handler != nil:
-      handler(req, res)
-      matched = true
-  if not matched:
-    if server.fallback != nil:
-      server.fallback(req, res)
-    else:
-      res.sendError(Http404, "Not Found")
-  releaseResponse(server, res)
+  if server.handler != nil:
+    server.handler(req, res)
+  else:
+    res.sendError(Http500, "No handler configured")
+  releaseHttpResponse(server, res)
 
 
 proc handleConnectionData(server: HttpServer, conn: Connection,
@@ -758,46 +734,7 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
             let chunk = cast[ptr UncheckedArray[byte]](cast[int](buf) + pos)
             msRef[].feed(chunk, chunkLen)
             pos += chunkLen
-    else:
-      let meth = p.peekMethod()
-      let path = p.peekPath()
-      # Check for streamToFile route (raw body → temp file)
-      if meth in server.streamToFileRoutes and
-         server.streamToFileRoutes[meth].getOrDefault(path):
-        let tmpDir = getTempDir() / getMD5(getAppDir())
-        discard existsOrCreateDir(tmpDir)
-        let fileId = $genOid()
-        let filePath = tmpDir / fileId
-        if p.phase == PhaseBody:
-          var f = open(filePath, fmWrite)
-          server.sessions[fd].sessionStreamFile = f
-          server.sessions[fd].sessionStreamPath = filePath
-          p.onBodyData = proc(chunk: openArray[byte]; done: bool) =
-            if chunk.len > 0:
-              discard server.sessions[fd].sessionStreamFile.writeBuffer(unsafeAddr chunk[0], chunk.len)
-            if done:
-              server.sessions[fd].sessionStreamFile.close()
-          p.feed(@[])
-        else:
-          # Body already fully buffered — write to file synchronously
-          var f = open(filePath, fmWrite)
-          let (buf, totalLen) = p.getBodyView()
-          if totalLen > 0 and buf != nil:
-            const StreamChunk = 65536
-            var pos = 0
-            while pos < totalLen:
-              let chunkLen = min(StreamChunk, totalLen - pos)
-              let src = cast[ptr UncheckedArray[byte]](cast[int](buf) + pos)
-              discard f.writeBuffer(cast[pointer](src), chunkLen)
-              pos += chunkLen
-          f.close()
-          server.sessions[fd].sessionStreamPath = filePath
-      # Check user-registered bodyHandler (non-multipart custom streaming)
-      elif meth in server.bodyHandlers:
-        let bh = server.bodyHandlers[meth].getOrDefault(path)
-        if bh != nil:
-          p.onBodyData = bh
-          p.feed(@[])
+
 
   while p.isComplete():
     let req = p.getRequest()
@@ -830,120 +767,10 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
         s.sessionStreamPath = ""
       p.onBodyData = nil
     let errCode = p.error()
-    let res = acquireResponse(server, conn)
+    let res = acquireHttpResponse(server, conn)
     res.sendError(errCode, "Bad Request")
     if fd in server.sessions:
       server.sessions[fd].parser.reset()
-
-# ── Route registration ───────────────────────────────────────────────────────
-
-proc route*(server: HttpServer, meth: HttpMethod, path: string,
-            handler: Handler) =
-  ## Register a route handler.
-  if meth notin server.routes:
-    server.routes[meth] = initTable[string, Handler]()
-  server.routes[meth][path] = handler
-
-proc route*(server: HttpServer, meth: HttpMethod, path: string,
-            bodyHandler: BodyHandler, handler: Handler) =
-  ## Register a route handler with a streaming body handler.
-  ## The body handler receives body data as it arrives from the network.
-  ## When the body is complete, `done` is set to true.
-  if meth notin server.routes:
-    server.routes[meth] = initTable[string, Handler]()
-  server.routes[meth][path] = handler
-  if meth notin server.bodyHandlers:
-    server.bodyHandlers[meth] = initTable[string, BodyHandler]()
-  server.bodyHandlers[meth][path] = bodyHandler
-
-proc get*(server: HttpServer, path: string, handler: Handler) =
-  ## Register a GET route handler.
-  server.route(HttpGet, path, handler)
-
-proc post*(server: HttpServer, path: string, handler: Handler) =
-  ## Register a POST route handler.
-  server.route(HttpPost, path, handler)
-
-proc post*(server: HttpServer, path: string, bodyHandler: BodyHandler,
-           handler: Handler) =
-  ## Register a POST route handler with a streaming body handler.
-  server.route(HttpPost, path, bodyHandler, handler)
-
-proc post*(server: HttpServer, path: string; streamToFile: bool;
-           handler: Handler) =
-  ## Register a POST route that streams the raw body to a temp file.
-  ## Memory: ~68KB regardless of body size.
-  server.route(HttpPost, path, handler)
-  if streamToFile:
-    if HttpPost notin server.streamToFileRoutes:
-      server.streamToFileRoutes[HttpPost] = initTable[string, bool]()
-    server.streamToFileRoutes[HttpPost][path] = true
-
-proc put*(server: HttpServer, path: string, handler: Handler) =
-  ## Register a PUT route handler.
-  server.route(HttpPut, path, handler)
-
-proc put*(server: HttpServer, path: string, bodyHandler: BodyHandler,
-          handler: Handler) =
-  ## Register a PUT route handler with a streaming body handler.
-  server.route(HttpPut, path, bodyHandler, handler)
-
-proc put*(server: HttpServer, path: string; streamToFile: bool;
-          handler: Handler) =
-  ## Register a PUT route that streams the raw body to a temp file.
-  server.route(HttpPut, path, handler)
-  if streamToFile:
-    if HttpPut notin server.streamToFileRoutes:
-      server.streamToFileRoutes[HttpPut] = initTable[string, bool]()
-    server.streamToFileRoutes[HttpPut][path] = true
-
-proc patch*(server: HttpServer, path: string, handler: Handler) =
-  ## Register a PATCH route handler.
-  server.route(HttpPatch, path, handler)
-
-proc patch*(server: HttpServer, path: string, bodyHandler: BodyHandler,
-            handler: Handler) =
-  ## Register a PATCH route handler with a streaming body handler.
-  server.route(HttpPatch, path, bodyHandler, handler)
-
-proc patch*(server: HttpServer, path: string, handler: Handler;
-            streamToFile: bool) =
-  ## Register a PATCH route that streams the raw body to a temp file.
-  server.route(HttpPatch, path, handler)
-  if streamToFile:
-    if HttpPatch notin server.streamToFileRoutes:
-      server.streamToFileRoutes[HttpPatch] = initTable[string, bool]()
-    server.streamToFileRoutes[HttpPatch][path] = true
-
-proc delete*(server: HttpServer, path: string, handler: Handler) =
-  ## Register a DELETE route handler.
-  server.route(HttpDelete, path, handler)
-
-proc delete*(server: HttpServer, path: string, bodyHandler: BodyHandler,
-             handler: Handler) =
-  ## Register a DELETE route handler with a streaming body handler.
-  server.route(HttpDelete, path, bodyHandler, handler)
-
-proc delete*(server: HttpServer, path: string, handler: Handler;
-             streamToFile: bool) =
-  ## Register a DELETE route that streams the raw body to a temp file.
-  server.route(HttpDelete, path, handler)
-  if streamToFile:
-    if HttpDelete notin server.streamToFileRoutes:
-      server.streamToFileRoutes[HttpDelete] = initTable[string, bool]()
-    server.streamToFileRoutes[HttpDelete][path] = true
-
-proc head*(server: HttpServer, path: string, handler: Handler) =
-  ## Register a HEAD route handler.
-  server.route(HttpHead, path, handler)
-
-proc options*(server: HttpServer, path: string, handler: Handler) =
-  ## Register an OPTIONS route handler.
-  server.route(HttpOptions, path, handler)
-
-proc notFound*(server: HttpServer, handler: Handler) =
-  ## Register a catch-all handler for unmatched routes.
-  server.fallback = handler
 
 # ── Listen ───────────────────────────────────────────────────────────────────
 

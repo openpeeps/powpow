@@ -21,15 +21,19 @@
 import ../src/powpow
 import std/[httpcore, strutils, times]
 
-let loop = newLoop()
-let server = newHttpServer(loop)
+let server = newHttpServer()
 
-# ── HTTP Routes ──────────────────────────────────────────────────────────────
+# ── Handler ──────────────────────────────────────────────────────────────────
 
-server.get("/") do (req: HttpRequest, res: Response):
-  res.status(Http200)
-     .header("Content-Type", "text/html; charset=utf-8")
-     .send("""<!DOCTYPE html>
+proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    let meth = req.getMethod()
+    let path = req.getPath()
+
+    if meth == HttpGet and path == "/":
+      res.status(Http200)
+         .header("Content-Type", "text/html; charset=utf-8")
+         .send("""<!DOCTYPE html>
 <html>
 <head><title>powpow WebSocket</title></head>
 <body>
@@ -51,51 +55,41 @@ server.get("/") do (req: HttpRequest, res: Response):
 </body>
 </html>""")
 
-server.get("/time") do (req: HttpRequest, res: Response):
-  res.status(Http200)
-     .header("Content-Type", "text/plain; charset=utf-8")
-     .send($now())
+    elif meth == HttpGet and path == "/time":
+      res.status(Http200)
+         .header("Content-Type", "text/plain; charset=utf-8")
+         .send($now())
 
-# ── WebSocket upgrade route ──────────────────────────────────────────────────
-#
-# When a GET /ws request arrives with WebSocket upgrade headers,
-# call websocketUpgrade() to take over the connection.
+    elif meth == HttpGet and path == "/ws":
+      websocketUpgrade(res, req, server,
+        onOpen = proc(ws: WsConnection) =
+          echo "⚡ WS client connected on /ws"
+          ws.sendText("Welcome to powpow WebSocket via HTTP upgrade!")
+        ,
+        onMessage = proc(ws: WsConnection, kind: WsFrameKind, data: openArray[byte]) =
+          if kind == wsText:
+            let msg = cast[string](@data)
+            echo "← ws text: ", msg
+            ws.sendText("echo: " & msg)
+          elif kind == wsBinary:
+            ws.sendBinary(data)
+        ,
+        onClose = proc(ws: WsConnection, code: int, reason: string) =
+          echo "⚡ WS client disconnected (code=", code, ")"
+        ,
+        onError = proc(ws: WsConnection, err: string) =
+          echo "⚠ WS error: ", err
+        ,
+      )
 
-server.get("/ws") do (req: HttpRequest, res: Response):
-  websocketUpgrade(res, req, server,
-    onOpen = proc(ws: WsConnection) =
-      echo "⚡ WS client connected on /ws"
-      ws.sendText("Welcome to powpow WebSocket via HTTP upgrade!")
-    ,
-    onMessage = proc(ws: WsConnection, kind: WsFrameKind, data: openArray[byte]) =
-      if kind == wsText:
-        let msg = cast[string](@data)
-        echo "← ws text: ", msg
-        ws.sendText("echo: " & msg)
-      elif kind == wsBinary:
-        ws.sendBinary(data)
-    ,
-    onClose = proc(ws: WsConnection, code: int, reason: string) =
-      echo "⚡ WS client disconnected (code=", code, ")"
-    ,
-    onError = proc(ws: WsConnection, err: string) =
-      echo "⚠ WS error: ", err
-    ,
-  )
-
-# Catch-all 404
-server.notFound do (req: HttpRequest, res: Response):
-  res.sendError(Http404,
-    "404 Not Found: " & $req.getMethod() & " " & req.getPath())
+    else:
+      res.sendError(Http404,
+        "404 Not Found: " & $meth & " " & path)
 
 # ── Start ────────────────────────────────────────────────────────────────────
 
-server.listen("0.0.0.0", 9000)
 echo "⚡ powpow HTTP + WS server listening on http://localhost:9000"
 echo "  HTTP:       curl http://localhost:9000/"
 echo "  WebSocket:  websocat ws://localhost:9000/ws"
 echo "  Press Ctrl+C to stop"
-
-loop.run()
-server.close()
-loop.close()
+server.start(handler, Port(9000))
