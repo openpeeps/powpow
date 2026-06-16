@@ -1,9 +1,9 @@
 nimTitle	httpserver	powpow/proto/httpserver.html	module powpow/proto/httpserver		0
-nim	Response	powpow/proto/httpserver.html#Response	type Response		33
-nim	Handler	powpow/proto/httpserver.html#Handler	type Handler		42
-nim	BodyHandler	powpow/proto/httpserver.html#BodyHandler	type BodyHandler		45
-nim	HttpServer	powpow/proto/httpserver.html#HttpServer	type HttpServer		61
-nim	DefaultKeepAliveMs	powpow/proto/httpserver.html#DefaultKeepAliveMs	const DefaultKeepAliveMs		75
+nim	Response	powpow/proto/httpserver.html#Response	type Response		34
+nim	Handler	powpow/proto/httpserver.html#Handler	type Handler		43
+nim	BodyHandler	powpow/proto/httpserver.html#BodyHandler	type BodyHandler		46
+nim	HttpServer	powpow/proto/httpserver.html#HttpServer	type HttpServer		62
+nim	DefaultKeepAliveMs	powpow/proto/httpserver.html#DefaultKeepAliveMs	const DefaultKeepAliveMs		76
 nim	getFileExt	powpow/proto/httpserver.html#getFileExt,string	proc getFileExt(path: string): string		82
 nim	parseRange	powpow/proto/httpserver.html#parseRange,string,int64	proc parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,\n    start, length: int64]		87
 nim	status	powpow/proto/httpserver.html#status,Response,HttpCode	proc status(res: Response; code: HttpCode): Response		158
@@ -14,41 +14,45 @@ nim	send	powpow/proto/httpserver.html#send,Response,seq[byte]	proc send(res: Res
 nim	writeDisposition	powpow/proto/httpserver.html#writeDisposition,ptr.UncheckedArray[byte],string,int	proc writeDisposition(buf: ptr UncheckedArray[byte]; name: string; p: var int)		353
 nim	sendFile	powpow/proto/httpserver.html#sendFile,Response,string,HttpRequest	proc sendFile(res: Response; path: string; req: HttpRequest = default(HttpRequest);\n         closeConn = true)		358
 nim	DefaultChunkSize	powpow/proto/httpserver.html#DefaultChunkSize	const DefaultChunkSize		478
-nim	streamFile	powpow/proto/httpserver.html#streamFile,Response,string,HttpRequest	proc streamFile(res: Response; path: string; req: HttpRequest;\n           chunkSize = DefaultChunkSize)		480
-nim	sendError	powpow/proto/httpserver.html#sendError,Response,HttpCode,string	proc sendError(res: Response; code: HttpCode; msg: string = "")		586
-nim	getConn	powpow/proto/httpserver.html#getConn,Response	proc getConn(res: Response): Connection		593
-nim	markSent	powpow/proto/httpserver.html#markSent,Response	proc markSent(res: Response)		598
-nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,Loop	proc newHttpServer(loop: Loop): HttpServer		625
-nim	setKeepAliveTimeout	powpow/proto/httpserver.html#setKeepAliveTimeout,HttpServer,int	proc setKeepAliveTimeout(server: HttpServer; ms: int)		652
-nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,int	proc removeSession(server: HttpServer; fd: int)		656
-nim	route	powpow/proto/httpserver.html#route,HttpServer,HttpMethod,string,Handler	proc route(server: HttpServer; meth: HttpMethod; path: string; handler: Handler)		819
-nim	route	powpow/proto/httpserver.html#route,HttpServer,HttpMethod,string,BodyHandler,Handler	proc route(server: HttpServer; meth: HttpMethod; path: string;\n      bodyHandler: BodyHandler; handler: Handler)		826
-nim	get	powpow/proto/httpserver.html#get,HttpServer,string,Handler	proc get(server: HttpServer; path: string; handler: Handler)		838
-nim	post	powpow/proto/httpserver.html#post,HttpServer,string,Handler	proc post(server: HttpServer; path: string; handler: Handler)		842
-nim	post	powpow/proto/httpserver.html#post,HttpServer,string,BodyHandler,Handler	proc post(server: HttpServer; path: string; bodyHandler: BodyHandler;\n     handler: Handler)		846
-nim	post	powpow/proto/httpserver.html#post,HttpServer,string,bool,Handler	proc post(server: HttpServer; path: string; streamToFile: bool; handler: Handler)		851
-nim	put	powpow/proto/httpserver.html#put,HttpServer,string,Handler	proc put(server: HttpServer; path: string; handler: Handler)		861
-nim	put	powpow/proto/httpserver.html#put,HttpServer,string,BodyHandler,Handler	proc put(server: HttpServer; path: string; bodyHandler: BodyHandler; handler: Handler)		865
-nim	put	powpow/proto/httpserver.html#put,HttpServer,string,bool,Handler	proc put(server: HttpServer; path: string; streamToFile: bool; handler: Handler)		870
-nim	patch	powpow/proto/httpserver.html#patch,HttpServer,string,Handler	proc patch(server: HttpServer; path: string; handler: Handler)		879
-nim	patch	powpow/proto/httpserver.html#patch,HttpServer,string,BodyHandler,Handler	proc patch(server: HttpServer; path: string; bodyHandler: BodyHandler;\n      handler: Handler)		883
-nim	patch	powpow/proto/httpserver.html#patch,HttpServer,string,Handler,bool	proc patch(server: HttpServer; path: string; handler: Handler; streamToFile: bool)		888
-nim	delete	powpow/proto/httpserver.html#delete,HttpServer,string,Handler	proc delete(server: HttpServer; path: string; handler: Handler)		897
-nim	delete	powpow/proto/httpserver.html#delete,HttpServer,string,BodyHandler,Handler	proc delete(server: HttpServer; path: string; bodyHandler: BodyHandler;\n       handler: Handler)		901
-nim	delete	powpow/proto/httpserver.html#delete,HttpServer,string,Handler,bool	proc delete(server: HttpServer; path: string; handler: Handler; streamToFile: bool)		906
-nim	head	powpow/proto/httpserver.html#head,HttpServer,string,Handler	proc head(server: HttpServer; path: string; handler: Handler)		915
-nim	options	powpow/proto/httpserver.html#options,HttpServer,string,Handler	proc options(server: HttpServer; path: string; handler: Handler)		919
-nim	notFound	powpow/proto/httpserver.html#notFound,HttpServer,Handler	proc notFound(server: HttpServer; handler: Handler)		923
-nim	listen	powpow/proto/httpserver.html#listen,HttpServer,string,int	proc listen(server: HttpServer; address: string; port: int)		929
-nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		946
-nim	close	powpow/proto/httpserver.html#close,HttpServer	proc close(server: HttpServer)		961
-nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		968
-nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		983
-nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		989
+nim	listen	powpow/proto/httpserver.html#listen,HttpServer,string,int	proc listen(server: HttpServer; address: string; port: int)		483
+nim	close	powpow/proto/httpserver.html#close,HttpServer	proc close(server: HttpServer)		484
+nim	streamFile	powpow/proto/httpserver.html#streamFile,Response,string,HttpRequest	proc streamFile(res: Response; path: string; req: HttpRequest;\n           chunkSize = DefaultChunkSize)		486
+nim	sendError	powpow/proto/httpserver.html#sendError,Response,HttpCode,string	proc sendError(res: Response; code: HttpCode; msg: string = "")		592
+nim	getConn	powpow/proto/httpserver.html#getConn,Response	proc getConn(res: Response): Connection		599
+nim	markSent	powpow/proto/httpserver.html#markSent,Response	proc markSent(res: Response)		604
+nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,Loop	proc newHttpServer(loop: Loop): HttpServer		631
+nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer	proc newHttpServer(): HttpServer		646
+nim	start	powpow/proto/httpserver.html#start,HttpServer,Port	proc start(server: HttpServer; port: Port)		651
+nim	stop	powpow/proto/httpserver.html#stop,HttpServer	proc stop(server: HttpServer)		656
+nim	setKeepAliveTimeout	powpow/proto/httpserver.html#setKeepAliveTimeout,HttpServer,int	proc setKeepAliveTimeout(server: HttpServer; ms: int)		673
+nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,int	proc removeSession(server: HttpServer; fd: int)		677
+nim	route	powpow/proto/httpserver.html#route,HttpServer,HttpMethod,string,Handler	proc route(server: HttpServer; meth: HttpMethod; path: string; handler: Handler)		840
+nim	route	powpow/proto/httpserver.html#route,HttpServer,HttpMethod,string,BodyHandler,Handler	proc route(server: HttpServer; meth: HttpMethod; path: string;\n      bodyHandler: BodyHandler; handler: Handler)		847
+nim	get	powpow/proto/httpserver.html#get,HttpServer,string,Handler	proc get(server: HttpServer; path: string; handler: Handler)		859
+nim	post	powpow/proto/httpserver.html#post,HttpServer,string,Handler	proc post(server: HttpServer; path: string; handler: Handler)		863
+nim	post	powpow/proto/httpserver.html#post,HttpServer,string,BodyHandler,Handler	proc post(server: HttpServer; path: string; bodyHandler: BodyHandler;\n     handler: Handler)		867
+nim	post	powpow/proto/httpserver.html#post,HttpServer,string,bool,Handler	proc post(server: HttpServer; path: string; streamToFile: bool; handler: Handler)		872
+nim	put	powpow/proto/httpserver.html#put,HttpServer,string,Handler	proc put(server: HttpServer; path: string; handler: Handler)		882
+nim	put	powpow/proto/httpserver.html#put,HttpServer,string,BodyHandler,Handler	proc put(server: HttpServer; path: string; bodyHandler: BodyHandler; handler: Handler)		886
+nim	put	powpow/proto/httpserver.html#put,HttpServer,string,bool,Handler	proc put(server: HttpServer; path: string; streamToFile: bool; handler: Handler)		891
+nim	patch	powpow/proto/httpserver.html#patch,HttpServer,string,Handler	proc patch(server: HttpServer; path: string; handler: Handler)		900
+nim	patch	powpow/proto/httpserver.html#patch,HttpServer,string,BodyHandler,Handler	proc patch(server: HttpServer; path: string; bodyHandler: BodyHandler;\n      handler: Handler)		904
+nim	patch	powpow/proto/httpserver.html#patch,HttpServer,string,Handler,bool	proc patch(server: HttpServer; path: string; handler: Handler; streamToFile: bool)		909
+nim	delete	powpow/proto/httpserver.html#delete,HttpServer,string,Handler	proc delete(server: HttpServer; path: string; handler: Handler)		918
+nim	delete	powpow/proto/httpserver.html#delete,HttpServer,string,BodyHandler,Handler	proc delete(server: HttpServer; path: string; bodyHandler: BodyHandler;\n       handler: Handler)		922
+nim	delete	powpow/proto/httpserver.html#delete,HttpServer,string,Handler,bool	proc delete(server: HttpServer; path: string; handler: Handler; streamToFile: bool)		927
+nim	head	powpow/proto/httpserver.html#head,HttpServer,string,Handler	proc head(server: HttpServer; path: string; handler: Handler)		936
+nim	options	powpow/proto/httpserver.html#options,HttpServer,string,Handler	proc options(server: HttpServer; path: string; handler: Handler)		940
+nim	notFound	powpow/proto/httpserver.html#notFound,HttpServer,Handler	proc notFound(server: HttpServer; handler: Handler)		944
+nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		967
+nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		989
+nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		1004
+nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		1010
 nimgrp	close	powpow/proto/httpserver.html#close-procs-all	proc		168
-nimgrp	route	powpow/proto/httpserver.html#route-procs-all	proc		819
-nimgrp	delete	powpow/proto/httpserver.html#delete-procs-all	proc		897
-nimgrp	post	powpow/proto/httpserver.html#post-procs-all	proc		842
+nimgrp	route	powpow/proto/httpserver.html#route-procs-all	proc		840
+nimgrp	delete	powpow/proto/httpserver.html#delete-procs-all	proc		918
+nimgrp	newhttpserver	powpow/proto/httpserver.html#newHttpServer-procs-all	proc		631
+nimgrp	post	powpow/proto/httpserver.html#post-procs-all	proc		863
 nimgrp	send	powpow/proto/httpserver.html#send-procs-all	proc		227
-nimgrp	put	powpow/proto/httpserver.html#put-procs-all	proc		861
-nimgrp	patch	powpow/proto/httpserver.html#patch-procs-all	proc		879
+nimgrp	put	powpow/proto/httpserver.html#put-procs-all	proc		882
+nimgrp	patch	powpow/proto/httpserver.html#patch-procs-all	proc		900

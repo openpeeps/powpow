@@ -141,7 +141,8 @@
 
 </ul>
 <ul class="simple nested-toc-section">newHttpServer
-  <li><a class="reference" href="#newHttpServer%2CLoop" title="newHttpServer(loop: Loop): HttpServer">newHttpServer(loop: Loop): HttpServer</a></li>
+  <li><a class="reference" href="#newHttpServer" title="newHttpServer(): HttpServer">newHttpServer(): HttpServer</a></li>
+<li><a class="reference" href="#newHttpServer%2CLoop" title="newHttpServer(loop: Loop): HttpServer">newHttpServer(loop: Loop): HttpServer</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">notFound
@@ -210,8 +211,16 @@
   <li><a class="reference" href="#setKeepAliveTimeout%2CHttpServer%2Cint" title="setKeepAliveTimeout(server: HttpServer; ms: int)">setKeepAliveTimeout(server: HttpServer; ms: int)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">start
+  <li><a class="reference" href="#start%2CHttpServer%2CPort" title="start(server: HttpServer; port: Port)">start(server: HttpServer; port: Port)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">status
   <li><a class="reference" href="#status%2CResponse%2CHttpCode" title="status(res: Response; code: HttpCode): Response">status(res: Response; code: HttpCode): Response</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">stop
+  <li><a class="reference" href="#stop%2CHttpServer" title="stop(server: HttpServer)">stop(server: HttpServer)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">streamFile
@@ -337,7 +346,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#close%2CHttpServer"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Shut down the server.
+    
     
   </dd>
 </div>
@@ -461,7 +470,7 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Bind and start accepting HTTP connections on a TCP port.
+    
     
   </dd>
 </div>
@@ -491,7 +500,16 @@
 
 </div>
 <div id="newHttpServer-procs-all">
-  <div id="newHttpServer,Loop">
+  <div id="newHttpServer">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                   <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create a new HTTP server with an internal event loop.
+    
+  </dd>
+</div>
+<div id="newHttpServer,Loop">
   <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer%2CLoop"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -719,6 +737,18 @@
 </div>
 
 </div>
+<div id="start-procs-all">
+  <div id="start,HttpServer,Port">
+  <dt><pre><span class="Keyword">proc</span> <a href="#start%2CHttpServer%2CPort"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">Port</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Start the HTTP server on the given port.
+    
+  </dd>
+</div>
+
+</div>
 <div id="status-procs-all">
   <div id="status,Response,HttpCode">
   <dt><pre><span class="Keyword">proc</span> <a href="#status%2CResponse%2CHttpCode"><span class="Identifier">status</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">)</span><span class="Other">:</span> <a href="#Response"><span class="Identifier">Response</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
@@ -726,6 +756,18 @@
   <dd>
     
     Set the HTTP status code.
+    
+  </dd>
+</div>
+
+</div>
+<div id="stop-procs-all">
+  <div id="stop,HttpServer">
+  <dt><pre><span class="Keyword">proc</span> <a href="#stop%2CHttpServer"><span class="Identifier">stop</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Stop the HTTP server and close all connections
     
   </dd>
 </div>
@@ -768,7 +810,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 14:03:06 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 15:26:39 UTC</small>
       </div>
     </div>
   </div>
