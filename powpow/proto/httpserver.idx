@@ -1,6 +1,7 @@
 nimTitle	httpserver	powpow/proto/httpserver.html	module powpow/proto/httpserver		0
 nim	HttpResponse	powpow/proto/httpserver.html#HttpResponse	type HttpResponse		37
 nim	OnRequestCallback	powpow/proto/httpserver.html#OnRequestCallback	type OnRequestCallback		46
+nim	ConnHttp	powpow/proto/httpserver.html#ConnHttp	type ConnHttp		50
 nim	HttpServer	powpow/proto/httpserver.html#HttpServer	type HttpServer		58
 nim	DefaultKeepAliveMs	powpow/proto/httpserver.html#DefaultKeepAliveMs	const DefaultKeepAliveMs		69
 nim	getFileExt	powpow/proto/httpserver.html#getFileExt,string	proc getFileExt(path: string): string		75
@@ -25,11 +26,11 @@ nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,bool	proc newHttpSe
 nim	start	powpow/proto/httpserver.html#start,HttpServer,OnRequestCallback,Port	proc start(server: HttpServer; handler: OnRequestCallback; port: Port)		669
 nim	stop	powpow/proto/httpserver.html#stop,HttpServer	proc stop(server: HttpServer)		674
 nim	setKeepAliveTimeout	powpow/proto/httpserver.html#setKeepAliveTimeout,HttpServer,int	proc setKeepAliveTimeout(server: HttpServer; ms: int)		691
-nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,int	proc removeSession(server: HttpServer; fd: int)		695
-nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		828
-nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		850
-nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		884
-nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		890
+nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,Connection	proc removeSession(server: HttpServer; conn: Connection)		695
+nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		816
+nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		833
+nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		862
+nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		868
 nimgrp	close	powpow/proto/httpserver.html#close-procs-all	proc		161
 nimgrp	newhttpserver	powpow/proto/httpserver.html#newHttpServer-procs-all	proc		650
 nimgrp	send	powpow/proto/httpserver.html#send-procs-all	proc		220

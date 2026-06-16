@@ -1,0 +1,13 @@
+nimTitle	fswatch	powpow/fswatch.html	module powpow/fswatch		0
+nim	fseModified	powpow/fswatch.html#fseModified	FileSystemEvent.fseModified		19
+nim	fseCreated	powpow/fswatch.html#fseCreated	FileSystemEvent.fseCreated		19
+nim	fseDeleted	powpow/fswatch.html#fseDeleted	FileSystemEvent.fseDeleted		19
+nim	fseRenamed	powpow/fswatch.html#fseRenamed	FileSystemEvent.fseRenamed		19
+nim	fseAttrib	powpow/fswatch.html#fseAttrib	FileSystemEvent.fseAttrib		19
+nim	fseLinkCount	powpow/fswatch.html#fseLinkCount	FileSystemEvent.fseLinkCount		19
+nim	fseRevoke	powpow/fswatch.html#fseRevoke	FileSystemEvent.fseRevoke		19
+nim	FileSystemEvent	powpow/fswatch.html#FileSystemEvent	enum FileSystemEvent		19
+nim	FileWatcherCb	powpow/fswatch.html#FileWatcherCb	type FileWatcherCb		28
+nim	FileWatcher	powpow/fswatch.html#FileWatcher	type FileWatcher		30
+nim	newFileWatcher	powpow/fswatch.html#newFileWatcher,Loop,string,FileWatcherCb	proc newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher		104
+nim	close	powpow/fswatch.html#close,FileWatcher	proc close(w: FileWatcher)		174

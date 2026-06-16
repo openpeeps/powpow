@@ -28,7 +28,7 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">Index</h1>
-      Modules: <a href="index.html">powpow</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/types.html">powpow/types</a>.<br/><p /><h2>API symbols</h2>
+      Modules: <a href="index.html">powpow</a>, <a href="powpow/fswatch.html">powpow/fswatch</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/types.html">powpow/types</a>.<br/><p /><h2>API symbols</h2>
 <dl><dt><a name="%60%3D%3D%60" href="#%60%3D%3D%60"><span>`==`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="types: proc `==`(a, b: TimerId): bool" href="powpow/types.html#%3D%3D%2CTimerId%2CTimerId">types: proc `==`(a, b: TimerId): bool</a></li>
@@ -81,6 +81,8 @@
           </ul></dd>
 <dt><a name="close" href="#close"><span>close:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="fswatch: proc close(w: FileWatcher)" href="powpow/fswatch.html#close%2CFileWatcher">fswatch: proc close(w: FileWatcher)</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="loop: proc close(loop: Loop)" href="powpow/loop.html#close%2CLoop">loop: proc close(loop: Loop)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="tcp: proc close(conn: Connection)" href="powpow/net/tcp.html#close%2CConnection">tcp: proc close(conn: Connection)</a></li>
@@ -150,6 +152,10 @@
 <dt><a name="connectUdp" href="#connectUdp"><span>connectUdp:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="udp: proc connectUdp(loop: Loop; address: string; port: int; onData: OnUdpData = nil): UdpSocket" href="powpow/net/udp.html#connectUdp%2CLoop%2Cstring%2Cint%2COnUdpData">udp: proc connectUdp(loop: Loop; address: string; port: int; onData: OnUdpData = nil): UdpSocket</a></li>
+          </ul></dd>
+<dt><a name="ConnHttp" href="#ConnHttp"><span>ConnHttp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: type ConnHttp" href="powpow/proto/httpserver.html#ConnHttp">httpserver: type ConnHttp</a></li>
           </ul></dd>
 <dt><a name="ConnState" href="#ConnState"><span>ConnState:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -221,6 +227,18 @@
           <li><a class="reference external"
           data-doc-search-tag="http: proc feed(p: HttpParser; data: string): ParsePhase" href="powpow/proto/http.html#feed%2CHttpParser%2Cstring">http: proc feed(p: HttpParser; data: string): ParsePhase</a></li>
           </ul></dd>
+<dt><a name="FileSystemEvent" href="#FileSystemEvent"><span>FileSystemEvent:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: enum FileSystemEvent" href="powpow/fswatch.html#FileSystemEvent">fswatch: enum FileSystemEvent</a></li>
+          </ul></dd>
+<dt><a name="FileWatcher" href="#FileWatcher"><span>FileWatcher:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: type FileWatcher" href="powpow/fswatch.html#FileWatcher">fswatch: type FileWatcher</a></li>
+          </ul></dd>
+<dt><a name="FileWatcherCb" href="#FileWatcherCb"><span>FileWatcherCb:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: type FileWatcherCb" href="powpow/fswatch.html#FileWatcherCb">fswatch: type FileWatcherCb</a></li>
+          </ul></dd>
 <dt><a name="findCRLF" href="#findCRLF"><span>findCRLF:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="simdscan: proc findCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int" href="powpow/proto/simdscan.html#findCRLF%2Cptr.UncheckedArray%5Bbyte%5D%2Cint%2Cint">simdscan: proc findCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int</a></li>
@@ -244,6 +262,34 @@
 <dt><a name="findDoubleCRLFSse2" href="#findDoubleCRLFSse2"><span>findDoubleCRLFSse2:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int" href="powpow/proto/simdscan.html#findDoubleCRLFSse2%2Cptr.UncheckedArray%5Bbyte%5D%2Cint%2Cint">simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int</a></li>
+          </ul></dd>
+<dt><a name="fseAttrib" href="#fseAttrib"><span>fseAttrib:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: FileSystemEvent.fseAttrib" href="powpow/fswatch.html#fseAttrib">fswatch: FileSystemEvent.fseAttrib</a></li>
+          </ul></dd>
+<dt><a name="fseCreated" href="#fseCreated"><span>fseCreated:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: FileSystemEvent.fseCreated" href="powpow/fswatch.html#fseCreated">fswatch: FileSystemEvent.fseCreated</a></li>
+          </ul></dd>
+<dt><a name="fseDeleted" href="#fseDeleted"><span>fseDeleted:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: FileSystemEvent.fseDeleted" href="powpow/fswatch.html#fseDeleted">fswatch: FileSystemEvent.fseDeleted</a></li>
+          </ul></dd>
+<dt><a name="fseLinkCount" href="#fseLinkCount"><span>fseLinkCount:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: FileSystemEvent.fseLinkCount" href="powpow/fswatch.html#fseLinkCount">fswatch: FileSystemEvent.fseLinkCount</a></li>
+          </ul></dd>
+<dt><a name="fseModified" href="#fseModified"><span>fseModified:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: FileSystemEvent.fseModified" href="powpow/fswatch.html#fseModified">fswatch: FileSystemEvent.fseModified</a></li>
+          </ul></dd>
+<dt><a name="fseRenamed" href="#fseRenamed"><span>fseRenamed:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: FileSystemEvent.fseRenamed" href="powpow/fswatch.html#fseRenamed">fswatch: FileSystemEvent.fseRenamed</a></li>
+          </ul></dd>
+<dt><a name="fseRevoke" href="#fseRevoke"><span>fseRevoke:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: FileSystemEvent.fseRevoke" href="powpow/fswatch.html#fseRevoke">fswatch: FileSystemEvent.fseRevoke</a></li>
           </ul></dd>
 <dt><a name="getBody" href="#getBody"><span>getBody:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -453,6 +499,10 @@
               readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection" href="powpow/net/tcp.html#newConnection%2CSocketHandle%2CLoop%2CTcpServer%2Cptr.UncheckedArray%5Bbyte%5D%2Cint">tcp: proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;
               readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection</a></li>
           </ul></dd>
+<dt><a name="newFileWatcher" href="#newFileWatcher"><span>newFileWatcher:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="fswatch: proc newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher" href="powpow/fswatch.html#newFileWatcher%2CLoop%2Cstring%2CFileWatcherCb">fswatch: proc newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher</a></li>
+          </ul></dd>
 <dt><a name="newHttpParser" href="#newHttpParser"><span>newHttpParser:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc newHttpParser(initialBufSize = 4096): HttpParser" href="powpow/proto/http.html#newHttpParser%2Cint">http: proc newHttpParser(initialBufSize = 4096): HttpParser</a></li>
@@ -635,7 +685,7 @@
           </ul></dd>
 <dt><a name="removeSession" href="#removeSession"><span>removeSession:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc removeSession(server: HttpServer; fd: int)" href="powpow/proto/httpserver.html#removeSession%2CHttpServer%2Cint">httpserver: proc removeSession(server: HttpServer; fd: int)</a></li>
+          data-doc-search-tag="httpserver: proc removeSession(server: HttpServer; conn: Connection)" href="powpow/proto/httpserver.html#removeSession%2CHttpServer%2CConnection">httpserver: proc removeSession(server: HttpServer; conn: Connection)</a></li>
           </ul></dd>
 <dt><a name="reset" href="#reset"><span>reset:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -947,7 +997,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 20:18:08 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 22:51:16 UTC</small>
       </div>
     </div>
   </div>

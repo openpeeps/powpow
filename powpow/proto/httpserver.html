@@ -62,7 +62,8 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
-      <li><a class="reference" href="#HttpResponse" title="HttpResponse = ref object">HttpResponse</a></li>
+      <li><a class="reference" href="#ConnHttp" title="ConnHttp = ref object">ConnHttp</a></li>
+<li><a class="reference" href="#HttpResponse" title="HttpResponse = ref object">HttpResponse</a></li>
 <li><a class="reference" href="#HttpServer" title="HttpServer = ref object
   handler*: OnRequestCallback">HttpServer</a></li>
 <li><a class="reference" href="#OnRequestCallback" title="OnRequestCallback = proc (req: HttpRequest; res: HttpResponse) {.gcsafe.}">OnRequestCallback</a></li>
@@ -141,7 +142,7 @@
 
 </ul>
 <ul class="simple nested-toc-section">removeSession
-  <li><a class="reference" href="#removeSession%2CHttpServer%2Cint" title="removeSession(server: HttpServer; fd: int)">removeSession(server: HttpServer; fd: int)</a></li>
+  <li><a class="reference" href="#removeSession%2CHttpServer%2CConnection" title="removeSession(server: HttpServer; conn: Connection)">removeSession(server: HttpServer; conn: Connection)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">send
@@ -200,13 +201,13 @@
     <p class="module-desc"><p>A non-blocking HTTP/1.1 server built on top of powpow's TCP primitives.</p>
 <p>Combines the TCP transport layer with the incremental HTTP parser. Higher-level frameworks implement routing via the <tt class="docutils literal"><span class="pre"><span class="Identifier">OnRequestCallback</span></span></tt>.</p>
 
-<h3><a class="toc-backref" id="usagecolon" href="#usagecolon">Usage:</a></h3><p><pre class="listing">  <span class="Keyword">let</span> <span class="Identifier">server</span> <span class="Operator">=</span> <span class="Identifier">newHttpServer</span><span class="Punctuation">(</span><span class="Punctuation">)</span>
-  <span class="Identifier">server</span><span class="Operator">.</span><span class="Identifier">start</span> <span class="Keyword">do</span> <span class="Punctuation">(</span><span class="Identifier">req</span><span class="Punctuation">:</span> <span class="Identifier">HttpRequest</span><span class="Punctuation">,</span> <span class="Identifier">res</span><span class="Punctuation">:</span> <span class="Identifier">HttpResponse</span><span class="Punctuation">)</span><span class="Punctuation">:</span>
-    <span class="Keyword">if</span> <span class="Identifier">req</span><span class="Operator">.</span><span class="Identifier">getPath</span><span class="Punctuation">(</span><span class="Punctuation">)</span> <span class="Operator">==</span> <span class="StringLit">&quot;/&quot;</span><span class="Punctuation">:</span>
-      <span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">status</span><span class="Punctuation">(</span><span class="Identifier">Http200</span><span class="Punctuation">)</span><span class="Operator">.</span><span class="Identifier">send</span><span class="Punctuation">(</span><span class="StringLit">&quot;Hello, World!&quot;</span><span class="Punctuation">)</span>
-    <span class="Keyword">else</span><span class="Punctuation">:</span>
-      <span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">sendError</span><span class="Punctuation">(</span><span class="Identifier">Http404</span><span class="Punctuation">,</span> <span class="StringLit">&quot;Not Found&quot;</span><span class="Punctuation">)</span>
-  <span class="Punctuation">,</span> <span class="Identifier">Port</span><span class="Punctuation">(</span><span class="DecNumber">9000</span><span class="Punctuation">)</span></pre></p>
+<h3><a class="toc-backref" id="usagecolon" href="#usagecolon">Usage:</a></h3><p><pre class="listing"><span class="Keyword">let</span> <span class="Identifier">server</span> <span class="Operator">=</span> <span class="Identifier">newHttpServer</span><span class="Punctuation">(</span><span class="Punctuation">)</span>
+<span class="Identifier">server</span><span class="Operator">.</span><span class="Identifier">start</span> <span class="Keyword">do</span> <span class="Punctuation">(</span><span class="Identifier">req</span><span class="Punctuation">:</span> <span class="Identifier">HttpRequest</span><span class="Punctuation">,</span> <span class="Identifier">res</span><span class="Punctuation">:</span> <span class="Identifier">HttpResponse</span><span class="Punctuation">)</span><span class="Punctuation">:</span>
+  <span class="Keyword">if</span> <span class="Identifier">req</span><span class="Operator">.</span><span class="Identifier">getPath</span><span class="Punctuation">(</span><span class="Punctuation">)</span> <span class="Operator">==</span> <span class="StringLit">&quot;/&quot;</span><span class="Punctuation">:</span>
+    <span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">status</span><span class="Punctuation">(</span><span class="Identifier">Http200</span><span class="Punctuation">)</span><span class="Operator">.</span><span class="Identifier">send</span><span class="Punctuation">(</span><span class="StringLit">&quot;Hello, World!&quot;</span><span class="Punctuation">)</span>
+  <span class="Keyword">else</span><span class="Punctuation">:</span>
+    <span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">sendError</span><span class="Punctuation">(</span><span class="Identifier">Http404</span><span class="Punctuation">,</span> <span class="StringLit">&quot;Not Found&quot;</span><span class="Punctuation">)</span>
+<span class="Punctuation">,</span> <span class="Identifier">Port</span><span class="Punctuation">(</span><span class="DecNumber">9000</span><span class="Punctuation">)</span></pre></p>
 </p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
@@ -217,7 +218,15 @@
 <div class="section" id="7">
   <h1><a class="toc-backref" href="#7">Types</a></h1>
   <dl class="item">
-    <div id="HttpResponse">
+    <div id="ConnHttp">
+  <dt><pre><a href="#ConnHttp"><span class="Identifier">ConnHttp</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="HttpResponse">
   <dt><pre><a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
   <dd>
     
@@ -307,7 +316,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#ensureTcpServer%2CHttpServer"><span class="Identifier">ensureTcpServer</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Lazily create the underlying TcpServer (for multi-thread use where listen() is called before routes are registered).
+    
     
   </dd>
 </div>
@@ -378,7 +387,7 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Bind and start accepting HTTP connections on a Unix domain socket.
+    
     
   </dd>
 </div>
@@ -441,12 +450,12 @@
 
 </div>
 <div id="removeSession-procs-all">
-  <div id="removeSession,HttpServer,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#removeSession%2CHttpServer%2Cint"><span class="Identifier">removeSession</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+  <div id="removeSession,HttpServer,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#removeSession%2CHttpServer%2CConnection"><span class="Identifier">removeSession</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Clean up a connection's session. Public so protocol upgrade handlers (e.g. WebSocket) can take over a connection.
+    
     
   </dd>
 </div>
@@ -583,7 +592,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 20:18:08 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 22:51:15 UTC</small>
       </div>
     </div>
   </div>
