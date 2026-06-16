@@ -64,6 +64,7 @@
       <li><a class="reference" href="#Connection" title="Connection = ref object
   fd*: SocketHandle
   loop*: Loop
+  server*: TcpServer
   state*: ConnState
   sendFileFd*: int
   sendFileOff*: int64
@@ -76,7 +77,18 @@
 <li><a class="reference" href="#TcpServer" title="TcpServer = ref object
   fd*: SocketHandle
   loop*: Loop
-  onClose*: OnClose">TcpServer</a></li>
+  onClose*: OnClose
+  connPool*: seq[Connection]">TcpServer</a></li>
+
+    </ul>
+  </details>
+</li>
+<li>
+  <details open>
+    <summary><a class="reference reference-toplevel" href="#10" id="60">Consts</a></summary>
+    <ul class="simple simple-toc-section">
+      <li><a class="reference" href="#MaxBufPoolSize" title="MaxBufPoolSize = 1024">MaxBufPoolSize</a></li>
+<li><a class="reference" href="#MaxConnPoolSize" title="MaxConnPoolSize = 1024">MaxConnPoolSize</a></li>
 
     </ul>
   </details>
@@ -120,6 +132,12 @@
 </ul>
 <ul class="simple nested-toc-section">listenUnix
   <li><a class="reference" href="#listenUnix%2CTcpServer%2Cstring%2Cint" title="listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)">listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">newConnection
+  <li><a class="reference" href="#newConnection%2CSocketHandle%2CLoop%2CTcpServer%2Cptr.UncheckedArray%5Bbyte%5D%2Cint" title="newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;
+              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection">newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;
+              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">newTcpServer
@@ -171,6 +189,7 @@
   <dt><pre><a href="#Connection"><span class="Identifier">Connection</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
   <span class="Identifier">fd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span>
   <span class="Identifier">loop</span><span class="Operator">*</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a>
+  <span class="Identifier">server</span><span class="Operator">*</span><span class="Other">:</span> <a href="#TcpServer"><span class="Identifier">TcpServer</span></a>
   <span class="Identifier">state</span><span class="Operator">*</span><span class="Other">:</span> <a href="#ConnState"><span class="Identifier">ConnState</span></a>
   <span class="Identifier">sendFileFd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">sendFileOff</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
@@ -218,7 +237,30 @@
   <dt><pre><a href="#TcpServer"><span class="Identifier">TcpServer</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
   <span class="Identifier">fd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span>
   <span class="Identifier">loop</span><span class="Operator">*</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a>
-  <span class="Identifier">onClose</span><span class="Operator">*</span><span class="Other">:</span> <a href="#OnClose"><span class="Identifier">OnClose</span></a></pre></dt>
+  <span class="Identifier">onClose</span><span class="Operator">*</span><span class="Other">:</span> <a href="#OnClose"><span class="Identifier">OnClose</span></a>
+  <span class="Identifier">connPool</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">]</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+  </dl>
+</div>
+<div class="section" id="10">
+  <h1><a class="toc-backref" href="#10">Consts</a></h1>
+  <dl class="item">
+    <div id="MaxBufPoolSize">
+  <dt><pre><a href="#MaxBufPoolSize"><span class="Identifier">MaxBufPoolSize</span></a> <span class="Other">=</span> <span class="DecNumber">1024</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="MaxConnPoolSize">
+  <dt><pre><a href="#MaxConnPoolSize"><span class="Identifier">MaxConnPoolSize</span></a> <span class="Other">=</span> <span class="DecNumber">1024</span></pre></dt>
   <dd>
     
     
@@ -336,6 +378,19 @@
 </div>
 
 </div>
+<div id="newConnection-procs-all">
+  <div id="newConnection,SocketHandle,Loop,TcpServer,ptr.UncheckedArray[byte],int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newConnection%2CSocketHandle%2CLoop%2CTcpServer%2Cptr.UncheckedArray%5Bbyte%5D%2Cint"><span class="Identifier">newConnection</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">;</span> <span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">server</span><span class="Other">:</span> <a href="#TcpServer"><span class="Identifier">TcpServer</span></a><span class="Other">;</span>
+                   <span class="Identifier">readBuf</span><span class="Other">:</span> <span class="Keyword">ptr</span> <span class="Identifier">UncheckedArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">readBufLen</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="newTcpServer-procs-all">
   <div id="newTcpServer,Loop,OnData,OnAccept,OnClose">
   <dt><pre><span class="Keyword">proc</span> <a href="#newTcpServer%2CLoop%2COnData%2COnAccept%2COnClose"><span class="Identifier">newTcpServer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">onData</span><span class="Other">:</span> <a href="#OnData"><span class="Identifier">OnData</span></a><span class="Other">;</span> <span class="Identifier">onAccept</span><span class="Other">:</span> <a href="#OnAccept"><span class="Identifier">OnAccept</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
@@ -404,7 +459,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 19:53:25 UTC</small>
       </div>
     </div>
   </div>

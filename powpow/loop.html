@@ -143,6 +143,10 @@
   <li><a class="reference" href="#unregister%2CLoop%2Cint" title="unregister(loop: Loop; fd: int)">unregister(loop: Loop; fd: int)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">unregisterFd
+  <li><a class="reference" href="#unregisterFd%2CLoop%2Cint" title="unregisterFd(loop: Loop; fd: int)">unregisterFd(loop: Loop; fd: int)</a></li>
+
+</ul>
 
     </ul>
   </details>
@@ -382,6 +386,18 @@
 </div>
 
 </div>
+<div id="unregisterFd-procs-all">
+  <div id="unregisterFd,Loop,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#unregisterFd%2CLoop%2Cint"><span class="Identifier">unregisterFd</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Remove fd watcher without platform syscall. The fd was already closed by the caller, and the OS removes it from epoll/kqueue automatically. Only cleans up in-memory state.
+    
+  </dd>
+</div>
+
+</div>
 
   </dl>
 </div>
@@ -398,7 +414,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 19:53:25 UTC</small>
       </div>
     </div>
   </div>

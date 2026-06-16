@@ -126,14 +126,18 @@
 
 </ul>
 <ul class="simple nested-toc-section">newHttpServer
-  <li><a class="reference" href="#newHttpServer" title="newHttpServer(): HttpServer">newHttpServer(): HttpServer</a></li>
-<li><a class="reference" href="#newHttpServer%2CLoop" title="newHttpServer(loop: Loop): HttpServer">newHttpServer(loop: Loop): HttpServer</a></li>
+  <li><a class="reference" href="#newHttpServer%2CLoop%2Cbool" title="newHttpServer(loop: Loop; populate: bool = false): HttpServer">newHttpServer(loop: Loop; populate: bool = false): HttpServer</a></li>
+<li><a class="reference" href="#newHttpServer%2Cbool" title="newHttpServer(populate: bool = false): HttpServer">newHttpServer(populate: bool = false): HttpServer</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">parseRange
   <li><a class="reference" href="#parseRange%2Cstring%2Cint64" title="parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,
     start, length: int64]">parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,
     start, length: int64]</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">populatePools
+  <li><a class="reference" href="#populatePools%2CHttpServer%2Cint" title="populatePools(server: HttpServer; poolSize = 256)">populatePools(server: HttpServer; poolSize = 256)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">removeSession
@@ -392,17 +396,18 @@
 
 </div>
 <div id="newHttpServer-procs-all">
-  <div id="newHttpServer">
-  <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span>
-                                   <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="newHttpServer,Loop,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer%2CLoop%2Cbool"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">populate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
     
   </dd>
 </div>
-<div id="newHttpServer,Loop">
-  <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer%2CLoop"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+<div id="newHttpServer,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer%2Cbool"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Identifier">populate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -418,6 +423,18 @@
   <dd>
     
     Parse an HTTP Range header (single range, <tt class="docutils literal"><span class="pre"><span class="Identifier">bytes</span><span class="Operator">=</span><span class="Identifier">start</span><span class="Operator">-</span><span class="Keyword">end</span></span></tt>). Supports explicit ranges (<tt class="docutils literal"><span class="pre"><span class="DecNumber">0</span><span class="Operator">-</span><span class="DecNumber">1023</span></span></tt>), open-ended ranges (<tt class="docutils literal"><span class="pre"><span class="DecNumber">1024</span><span class="Operator">-</span></span></tt>), and suffix ranges (<tt class="docutils literal"><span class="pre"><span class="Operator">-</span><span class="DecNumber">500</span></span></tt>). Clamps rangeEnd to fileSize - 1. Returns (true, startByte, length) on success, (false, 0, 0) on failure.
+    
+  </dd>
+</div>
+
+</div>
+<div id="populatePools-procs-all">
+  <div id="populatePools,HttpServer,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#populatePools%2CHttpServer%2Cint"><span class="Identifier">populatePools</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">poolSize</span> <span class="Other">=</span> <span class="DecNumber">256</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
     
   </dd>
 </div>
@@ -441,7 +458,7 @@
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Send the response with a raw byte body. Uses scatter-write (writev) to send headers + body with zero intermediate string allocations.
+    
     
   </dd>
 </div>
@@ -450,7 +467,7 @@
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Send the response with a string body. Uses scatter-write (writev) to send headers + body with zero intermediate string allocations.
+    
     
   </dd>
 </div>
@@ -566,7 +583,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 19:53:26 UTC</small>
       </div>
     </div>
   </div>

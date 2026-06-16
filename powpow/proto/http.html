@@ -67,10 +67,18 @@
   connectionClose*: bool     ## Connection: close seen
   onBodyData*: HttpBodyCallback ## Called as body bytes arrive (nil = buffered mode)
   bodyStreamed*: int64       ## Bytes streamed via callback so far
-  streamingBody*: bool       ## true when body is being streamed to callback">HttpParser</a></li>
+  streamingBody*: bool       ## true when body is being streamed to callback
+  methodCache*: HttpMethod">HttpParser</a></li>
 <li><a class="reference" href="#HttpRequest" title="HttpRequest = ref object
-  streamer*: MultipartStreamerRef ## Multipart streamer (nil if not multipart)
-  streamPath*: string        ## Temp file path for streamToFile routes">HttpRequest</a></li>
+  parser*: HttpParser
+  httpMethod*: HttpMethod
+  streamer*: MultipartStreamerRef
+  streamPath*: string
+  urlVal*: string
+  headersVal*: HttpHeaders
+  headersReady*: bool
+  bodyVal*: seq[byte]
+  bodyReady*: bool">HttpRequest</a></li>
 <li><a class="reference" href="#ParsePhase" title="ParsePhase = enum
   PhaseRequestLine,         ## Parsing the request line
   PhaseHeaders,             ## Parsing header lines
@@ -151,11 +159,11 @@
 
 </ul>
 <ul class="simple nested-toc-section">getPath
-  <li><a class="reference" href="#getPath%2CHttpRequest" title="getPath(req: HttpRequest): string">getPath(req: HttpRequest): string</a></li>
+  <li><a class="reference" href="#getPath%2CHttpRequest" title="getPath(req: HttpRequest): lent string">getPath(req: HttpRequest): lent string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getQuery
-  <li><a class="reference" href="#getQuery%2CHttpRequest" title="getQuery(req: HttpRequest): string">getQuery(req: HttpRequest): string</a></li>
+  <li><a class="reference" href="#getQuery%2CHttpRequest" title="getQuery(req: HttpRequest): lent string">getQuery(req: HttpRequest): lent string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getRemainingData
@@ -167,7 +175,7 @@
 
 </ul>
 <ul class="simple nested-toc-section">getUrl
-  <li><a class="reference" href="#getUrl%2CHttpRequest" title="getUrl(req: HttpRequest): string">getUrl(req: HttpRequest): string</a></li>
+  <li><a class="reference" href="#getUrl%2CHttpRequest" title="getUrl(req: HttpRequest): lent string">getUrl(req: HttpRequest): lent string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">headerBytes
@@ -197,7 +205,7 @@
 
 </ul>
 <ul class="simple nested-toc-section">peekContentType
-  <li><a class="reference" href="#peekContentType%2CHttpParser" title="peekContentType(p: HttpParser): string">peekContentType(p: HttpParser): string</a></li>
+  <li><a class="reference" href="#peekContentType%2CHttpParser" title="peekContentType(p: HttpParser): lent string">peekContentType(p: HttpParser): lent string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">peekMethod
@@ -205,7 +213,7 @@
 
 </ul>
 <ul class="simple nested-toc-section">peekPath
-  <li><a class="reference" href="#peekPath%2CHttpParser" title="peekPath(p: HttpParser): string">peekPath(p: HttpParser): string</a></li>
+  <li><a class="reference" href="#peekPath%2CHttpParser" title="peekPath(p: HttpParser): lent string">peekPath(p: HttpParser): lent string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">phase
@@ -287,7 +295,8 @@
   <span class="Identifier">connectionClose</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>     <span class="Comment">## Connection: close seen</span>
   <span class="Identifier">onBodyData</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HttpBodyCallback"><span class="Identifier">HttpBodyCallback</span></a> <span class="Comment">## Called as body bytes arrive (nil = buffered mode)</span>
   <span class="Identifier">bodyStreamed</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>       <span class="Comment">## Bytes streamed via callback so far</span>
-  <span class="Identifier">streamingBody</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>       <span class="Comment">## true when body is being streamed to callback</span></pre></dt>
+  <span class="Identifier">streamingBody</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>       <span class="Comment">## true when body is being streamed to callback</span>
+  <span class="Identifier">methodCache</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span></pre></dt>
   <dd>
     
     Incremental HTTP/1.1 request parser.
@@ -296,8 +305,15 @@
 </div>
 <div id="HttpRequest">
   <dt><pre><a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
-  <span class="Identifier">streamer</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">MultipartStreamerRef</span> <span class="Comment">## Multipart streamer (nil if not multipart)</span>
-  <span class="Identifier">streamPath</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>        <span class="Comment">## Temp file path for streamToFile routes</span></pre></dt>
+  <span class="Identifier">parser</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a>
+  <span class="Identifier">httpMethod</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span>
+  <span class="Identifier">streamer</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">MultipartStreamerRef</span>
+  <span class="Identifier">streamPath</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
+  <span class="Identifier">urlVal</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
+  <span class="Identifier">headersVal</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpHeaders</span>
+  <span class="Identifier">headersReady</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">bodyVal</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span>
+  <span class="Identifier">bodyReady</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span></pre></dt>
   <dd>
     
     A parsed HTTP request with lazy accessor methods.
@@ -510,7 +526,7 @@
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Get the HTTP method. Zero-copy — already resolved during parsing.
+    Get the HTTP method. Zero-alloc — already resolved during parse.
     
   </dd>
 </div>
@@ -536,10 +552,10 @@
 </div>
 <div id="getPath-procs-all">
   <div id="getPath,HttpRequest">
-  <dt><pre><span class="Keyword">proc</span> <a href="#getPath%2CHttpRequest"><span class="Identifier">getPath</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getPath%2CHttpRequest"><span class="Identifier">getPath</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Get the request path (e.g. &quot;/api/users&quot;). Materialized on first call.
+    
     
   </dd>
 </div>
@@ -547,10 +563,10 @@
 </div>
 <div id="getQuery-procs-all">
   <div id="getQuery,HttpRequest">
-  <dt><pre><span class="Keyword">proc</span> <a href="#getQuery%2CHttpRequest"><span class="Identifier">getQuery</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getQuery%2CHttpRequest"><span class="Identifier">getQuery</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Get the query string (e.g. &quot;foo=bar&amp;baz=1&quot;), or &quot;&quot; if none. Lazy.
+    
     
   </dd>
 </div>
@@ -581,10 +597,10 @@
 </div>
 <div id="getUrl-procs-all">
   <div id="getUrl,HttpRequest">
-  <dt><pre><span class="Keyword">proc</span> <a href="#getUrl%2CHttpRequest"><span class="Identifier">getUrl</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getUrl%2CHttpRequest"><span class="Identifier">getUrl</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Get the full URL path including query (e.g. &quot;/api/users?page=1&quot;). Lazy.
+    
     
   </dd>
 </div>
@@ -663,10 +679,11 @@
 </div>
 <div id="peekContentType-procs-all">
   <div id="peekContentType,HttpParser">
-  <dt><pre><span class="Keyword">proc</span> <a href="#peekContentType%2CHttpParser"><span class="Identifier">peekContentType</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#peekContentType%2CHttpParser"><span class="Identifier">peekContentType</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Quick-scan the header section for Content-Type value. Available after PhaseHeaders. Returns &quot;&quot; if not found. Used by the server to decide whether to set up streaming multipart.
+    
     
   </dd>
 </div>
@@ -678,7 +695,7 @@
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Get the HTTP method. Available after PhaseHeaders (no need to wait for body).
+    Get the HTTP method. Zero-alloc — already resolved during parse.
     
   </dd>
 </div>
@@ -686,10 +703,10 @@
 </div>
 <div id="peekPath-procs-all">
   <div id="peekPath,HttpParser">
-  <dt><pre><span class="Keyword">proc</span> <a href="#peekPath%2CHttpParser"><span class="Identifier">peekPath</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#peekPath%2CHttpParser"><span class="Identifier">peekPath</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Get the request path (e.g. &quot;/api/users&quot;). Available after PhaseHeaders.
+    
     
   </dd>
 </div>
@@ -794,7 +811,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 19:53:26 UTC</small>
       </div>
     </div>
   </div>

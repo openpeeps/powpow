@@ -299,11 +299,11 @@
           </ul></dd>
 <dt><a name="getPath" href="#getPath"><span>getPath:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="http: proc getPath(req: HttpRequest): string" href="powpow/proto/http.html#getPath%2CHttpRequest">http: proc getPath(req: HttpRequest): string</a></li>
+          data-doc-search-tag="http: proc getPath(req: HttpRequest): lent string" href="powpow/proto/http.html#getPath%2CHttpRequest">http: proc getPath(req: HttpRequest): lent string</a></li>
           </ul></dd>
 <dt><a name="getQuery" href="#getQuery"><span>getQuery:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="http: proc getQuery(req: HttpRequest): string" href="powpow/proto/http.html#getQuery%2CHttpRequest">http: proc getQuery(req: HttpRequest): string</a></li>
+          data-doc-search-tag="http: proc getQuery(req: HttpRequest): lent string" href="powpow/proto/http.html#getQuery%2CHttpRequest">http: proc getQuery(req: HttpRequest): lent string</a></li>
           </ul></dd>
 <dt><a name="getRemainingData" href="#getRemainingData"><span>getRemainingData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -319,7 +319,7 @@
           </ul></dd>
 <dt><a name="getUrl" href="#getUrl"><span>getUrl:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="http: proc getUrl(req: HttpRequest): string" href="powpow/proto/http.html#getUrl%2CHttpRequest">http: proc getUrl(req: HttpRequest): string</a></li>
+          data-doc-search-tag="http: proc getUrl(req: HttpRequest): lent string" href="powpow/proto/http.html#getUrl%2CHttpRequest">http: proc getUrl(req: HttpRequest): lent string</a></li>
           </ul></dd>
 <dt><a name="hasSse2" href="#hasSse2"><span>hasSse2:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -409,6 +409,14 @@
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc markSent(res: HttpResponse)" href="powpow/proto/httpserver.html#markSent%2CHttpResponse">httpserver: proc markSent(res: HttpResponse)</a></li>
           </ul></dd>
+<dt><a name="MaxBufPoolSize" href="#MaxBufPoolSize"><span>MaxBufPoolSize:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: const MaxBufPoolSize" href="powpow/net/tcp.html#MaxBufPoolSize">tcp: const MaxBufPoolSize</a></li>
+          </ul></dd>
+<dt><a name="MaxConnPoolSize" href="#MaxConnPoolSize"><span>MaxConnPoolSize:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: const MaxConnPoolSize" href="powpow/net/tcp.html#MaxConnPoolSize">tcp: const MaxConnPoolSize</a></li>
+          </ul></dd>
 <dt><a name="MaxHeaders" href="#MaxHeaders"><span>MaxHeaders:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: const MaxHeaders" href="powpow/proto/http.html#MaxHeaders">http: const MaxHeaders</a></li>
@@ -439,15 +447,21 @@
 <li><a class="reference external"
           data-doc-search-tag="common: object NetError" href="powpow/net/common.html#NetError">common: object NetError</a></li>
           </ul></dd>
+<dt><a name="newConnection" href="#newConnection"><span>newConnection:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;
+              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection" href="powpow/net/tcp.html#newConnection%2CSocketHandle%2CLoop%2CTcpServer%2Cptr.UncheckedArray%5Bbyte%5D%2Cint">tcp: proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;
+              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection</a></li>
+          </ul></dd>
 <dt><a name="newHttpParser" href="#newHttpParser"><span>newHttpParser:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc newHttpParser(initialBufSize = 4096): HttpParser" href="powpow/proto/http.html#newHttpParser%2Cint">http: proc newHttpParser(initialBufSize = 4096): HttpParser</a></li>
           </ul></dd>
 <dt><a name="newHttpServer" href="#newHttpServer"><span>newHttpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc newHttpServer(): HttpServer" href="powpow/proto/httpserver.html#newHttpServer">httpserver: proc newHttpServer(): HttpServer</a></li>
+          data-doc-search-tag="httpserver: proc newHttpServer(populate: bool = false): HttpServer" href="powpow/proto/httpserver.html#newHttpServer%2Cbool">httpserver: proc newHttpServer(populate: bool = false): HttpServer</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc newHttpServer(loop: Loop): HttpServer" href="powpow/proto/httpserver.html#newHttpServer%2CLoop">httpserver: proc newHttpServer(loop: Loop): HttpServer</a></li>
+          data-doc-search-tag="httpserver: proc newHttpServer(loop: Loop; populate: bool = false): HttpServer" href="powpow/proto/httpserver.html#newHttpServer%2CLoop%2Cbool">httpserver: proc newHttpServer(loop: Loop; populate: bool = false): HttpServer</a></li>
           </ul></dd>
 <dt><a name="newLoop" href="#newLoop"><span>newLoop:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -533,7 +547,7 @@
           </ul></dd>
 <dt><a name="peekContentType" href="#peekContentType"><span>peekContentType:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="http: proc peekContentType(p: HttpParser): string" href="powpow/proto/http.html#peekContentType%2CHttpParser">http: proc peekContentType(p: HttpParser): string</a></li>
+          data-doc-search-tag="http: proc peekContentType(p: HttpParser): lent string" href="powpow/proto/http.html#peekContentType%2CHttpParser">http: proc peekContentType(p: HttpParser): lent string</a></li>
           </ul></dd>
 <dt><a name="peekMethod" href="#peekMethod"><span>peekMethod:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -541,7 +555,7 @@
           </ul></dd>
 <dt><a name="peekPath" href="#peekPath"><span>peekPath:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="http: proc peekPath(p: HttpParser): string" href="powpow/proto/http.html#peekPath%2CHttpParser">http: proc peekPath(p: HttpParser): string</a></li>
+          data-doc-search-tag="http: proc peekPath(p: HttpParser): lent string" href="powpow/proto/http.html#peekPath%2CHttpParser">http: proc peekPath(p: HttpParser): lent string</a></li>
           </ul></dd>
 <dt><a name="phase" href="#phase"><span>phase:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -580,6 +594,10 @@
           data-doc-search-tag="loop: proc poll(loop: Loop; timeoutMs: int = -1)" href="powpow/loop.html#poll%2CLoop%2Cint">loop: proc poll(loop: Loop; timeoutMs: int = -1)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="epoll: proc poll(p: Platform; timeoutMs: int): int" href="powpow/platform/epoll.html#poll%2CPlatform%2Cint">epoll: proc poll(p: Platform; timeoutMs: int): int</a></li>
+          </ul></dd>
+<dt><a name="populatePools" href="#populatePools"><span>populatePools:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc populatePools(server: HttpServer; poolSize = 256)" href="powpow/proto/httpserver.html#populatePools%2CHttpServer%2Cint">httpserver: proc populatePools(server: HttpServer; poolSize = 256)</a></li>
           </ul></dd>
 <dt><a name="Read" href="#Read"><span>Read:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -839,6 +857,10 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc unregister(loop: Loop; fd: int)" href="powpow/loop.html#unregister%2CLoop%2Cint">loop: proc unregister(loop: Loop; fd: int)</a></li>
           </ul></dd>
+<dt><a name="unregisterFd" href="#unregisterFd"><span>unregisterFd:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: proc unregisterFd(loop: Loop; fd: int)" href="powpow/loop.html#unregisterFd%2CLoop%2Cint">loop: proc unregisterFd(loop: Loop; fd: int)</a></li>
+          </ul></dd>
 <dt><a name="wake" href="#wake"><span>wake:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="epoll: proc wake(p: Platform)" href="powpow/platform/epoll.html#wake%2CPlatform">epoll: proc wake(p: Platform)</a></li>
@@ -925,7 +947,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 16:13:58 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 19:53:26 UTC</small>
       </div>
     </div>
   </div>
