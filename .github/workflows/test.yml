@@ -24,4 +24,4 @@ jobs:
           nim-version: ${{ matrix.nim-version }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
-      - run: nimble test
+      - run: nimble test -d:release
