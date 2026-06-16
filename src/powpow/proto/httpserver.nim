@@ -622,8 +622,10 @@ proc releaseHttpResponse(server: HttpServer, res: HttpResponse) =
 
 # ── HttpServer lifecycle ─────────────────────────────────────────────────────
 
-proc newHttpServer*(loop: Loop): HttpServer =
-  HttpServer(
+proc populatePools*(server: HttpServer; poolSize = 256)
+
+proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
+  let srv = HttpServer(
     tcpServer: nil,
     loop:      loop,
     handler:   nil,
@@ -632,10 +634,13 @@ proc newHttpServer*(loop: Loop): HttpServer =
     resPool:   @[],
     keepAliveMs: DefaultKeepAliveMs
   )
+  if populate:
+    srv.populatePools()
+  srv
 
-proc newHttpServer*: HttpServer =
+proc newHttpServer*(populate: bool = false): HttpServer =
   var eventLoop = newLoop()
-  newHttpServer(eventLoop)
+  newHttpServer(eventLoop, populate)
 
 proc start*(server: HttpServer, handler: OnRequestCallback, port: Port) =
   server.handler = handler
@@ -827,6 +832,25 @@ proc ensureTcpServer*(server: HttpServer) =
     onClose = proc(conn: Connection) =
       server.removeSession(conn.fd.int)
   )
+
+proc populatePools*(server: HttpServer; poolSize = 256) =
+  ## Pre-allocate parsers, responses, connections, and buffers to
+  ## eliminate all allocations on the request hot path.
+  if server.tcpServer == nil:
+    server.ensureTcpServer()
+  for i in 0 ..< poolSize:
+    if server.parserPool.len < MaxParserPoolSize:
+      server.parserPool.add(newHttpParser())
+    if server.resPool.len < MaxResPoolSize:
+      server.resPool.add(HttpResponse(
+        conn: nil, sent: false, statusCode: Http200,
+        headers: @[], bodyBytes: @[], closeConn: false))
+    if server.tcpServer.connPool.len < MaxConnPoolSize:
+      var buf = cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
+      if server.loop.bufPool.len < MaxBufPoolSize:
+        server.loop.bufPool.add(buf)
+      server.tcpServer.connPool.add(newConnection(
+        SocketHandle(-1), server.loop, server.tcpServer, buf, DefaultBufSize))
 
 proc addConnection*(server: HttpServer, fd: SocketHandle) =
   ## Inject a pre-accepted client fd into this HTTP server's event loop.

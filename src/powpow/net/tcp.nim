@@ -9,6 +9,7 @@
 ## Built on top of the powpow event loop for zero-threading, high-throughput
 ## TCP networking. Platform-agnostic: IOCP (Windows) or epoll/kqueue (Unix).
 
+import std/tables
 import ../loop
 import ../types
 import common
@@ -16,8 +17,8 @@ when not defined(windows):
   import std/posix
 
 const
-  MaxBufPoolSize = 1024
-  MaxConnPoolSize = 1024
+  MaxBufPoolSize* = 1024
+  MaxConnPoolSize* = 1024
 
 proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] =
   if loop.bufPool.len > 0:
@@ -50,6 +51,7 @@ type
   Connection* = ref object
     fd*:              SocketHandle
     loop*:            Loop
+    server*:          TcpServer
     state*:           ConnState
     readBuf:          ptr UncheckedArray[byte]
     readBufLen:       int
@@ -57,7 +59,7 @@ type
     writePos:         int
     corked:           bool
     closeAfterFlush:  bool
-    sendFileFd*:      int           # -1 when idle; fd for in-progress zero-copy send
+    sendFileFd*:      int
     sendFileOff*:     int64
     sendFileRemain*:  int64
 
@@ -71,8 +73,17 @@ type
     onAccept:  OnAccept
     onData:    OnData
     onClose*:  OnClose
-    connPool:  seq[Connection]
-    unixPath:  string
+    connPool*:  seq[Connection]
+    fdConn:     Table[int, Connection]
+    sharedCb:   FdCallback
+    unixPath:   string
+
+proc newConnection*(fd: SocketHandle, loop: Loop, server: TcpServer,
+                     readBuf: ptr UncheckedArray[byte], readBufLen: int): Connection =
+  Connection(
+    fd: fd, loop: loop, server: server, state: Closed,
+    readBuf: readBuf, readBufLen: readBufLen,
+    sendFileFd: -1)
 
 proc shutWrVal(): cint {.inline.} =
   when defined(windows): 1 else: SHUT_WR
@@ -82,6 +93,8 @@ proc shutWrVal(): cint {.inline.} =
 proc close*(conn: Connection) =
   if conn.state == Closed: return
   conn.state = Closed
+  if conn.server != nil:
+    conn.server.fdConn.del(conn.fd.int)
   if conn.corked:
     setTcpCork(conn.fd, false)
     conn.corked = false
@@ -89,7 +102,7 @@ proc close*(conn: Connection) =
     closeFile(conn.sendFileFd)
     conn.sendFileFd = -1
   setLinger0(conn.fd)
-  conn.loop.unregister(conn.fd.int)
+  conn.loop.unregisterFd(conn.fd.int)
   sockClose(conn.fd)
   conn.writeBuf.setLen(0)
   conn.writePos = 0
@@ -295,11 +308,13 @@ proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
     result.fd = fd
     result.sendFileFd = -1
     result.loop = server.loop
+    result.server = server
     result.state = Connected
   else:
     result = Connection(
       fd:        fd,
       loop:      server.loop,
+      server:    server,
       state:     Connected,
       sendFileFd: -1,
       readBuf:   acquireBuf(server.loop),
@@ -366,9 +381,7 @@ proc acceptClients(server: TcpServer) =
         return
       server.loop.modify(server.fd.int, {Read})
       return
-
-    setTcpNoDelay(clientFd)
-
+    
     let conn = acquireConnection(server, clientFd)
 
     if server.onAccept != nil:
@@ -376,35 +389,9 @@ proc acceptClients(server: TcpServer) =
     if conn.state == Closed:
       continue
 
-    conn.loop.register(clientFd.int, {Read}, edgeTriggered = true, callback =
-      proc(fd: int, ev: set[EventType]) =
-        if Error in ev:
-          conn.close()
-          if server.onClose != nil: server.onClose(conn)
-          server.releaseConnection(conn)
-          return
-        if Write in ev:
-          if conn.sendFileFd >= 0:
-            if conn.continueSendFile():
-              if conn.state == Connected:
-                conn.loop.modify(fd, {Read})
-                conn.handleClientRead(server.onData, server.onClose)
-          elif conn.flushWriteBuffer():
-            if conn.closeAfterFlush:
-              conn.close()
-              if server.onClose != nil: server.onClose(conn)
-              server.releaseConnection(conn)
-              return
-            if conn.state == Connected:
-              conn.loop.modify(fd, {Read})
-        if (Read in ev or Hup in ev) and conn.sendFileFd < 0:
-          conn.handleClientRead(server.onData, server.onClose)
-        if Hup in ev and conn.state == Connected:
-          conn.close()
-          if server.onClose != nil: server.onClose(conn)
-        if conn.state == Closed:
-          server.releaseConnection(conn)
-    )
+    server.fdConn[clientFd.int] = conn
+    conn.loop.register(clientFd.int, {Read}, edgeTriggered = true,
+                       callback = server.sharedCb)
     conn.handleClientRead(server.onData, server.onClose)
     if conn.state == Closed:
       server.releaseConnection(conn)
@@ -497,44 +484,56 @@ proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
   if conn.state == Closed:
     return
 
-  conn.loop.register(clientFd.int, {Read}, edgeTriggered = true, callback =
-    proc(fd: int, ev: set[EventType]) =
-      if Error in ev:
-        conn.close()
-        if server.onClose != nil: server.onClose(conn)
-        server.releaseConnection(conn)
-        return
-      if Write in ev:
-        if conn.flushWriteBuffer():
-          if conn.closeAfterFlush:
-            conn.close()
-            if server.onClose != nil: server.onClose(conn)
-            server.releaseConnection(conn)
-            return
-          if conn.state == Connected:
-            conn.loop.modify(fd, {Read})
-      if Read in ev or Hup in ev:
-        conn.handleClientRead(server.onData, server.onClose)
-      if Hup in ev and conn.state == Connected:
-        conn.close()
-        if server.onClose != nil: server.onClose(conn)
-      if conn.state == Closed:
-        server.releaseConnection(conn)
-  )
+  server.fdConn[clientFd.int] = conn
+  conn.loop.register(clientFd.int, {Read}, edgeTriggered = true,
+                     callback = server.sharedCb)
 
 proc newTcpServer*(loop: Loop,
                    onData: OnData,
                    onAccept: OnAccept = nil,
                    onClose: OnClose = nil): TcpServer =
-  TcpServer(
+  let srv = TcpServer(
     fd:       SocketHandle(-1),
     loop:     loop,
     onAccept: onAccept,
     onData:   onData,
     onClose:  onClose,
     connPool: @[],
+    fdConn:   initTable[int, Connection](64),
+    sharedCb: nil,
     unixPath: "",
   )
+  # Create one shared callback for all connections — no closure allocation per accept
+  srv.sharedCb = proc(fd: int, ev: set[EventType]) {.closure.} =
+    let conn = srv.fdConn.getOrDefault(fd)
+    if conn == nil: return
+    if Error in ev:
+      conn.close()
+      if srv.onClose != nil: srv.onClose(conn)
+      srv.releaseConnection(conn)
+      return
+    if Write in ev:
+      if conn.sendFileFd >= 0:
+        if conn.continueSendFile():
+          if conn.state == Connected:
+            conn.loop.modify(fd, {Read})
+            conn.handleClientRead(srv.onData, srv.onClose)
+      elif conn.flushWriteBuffer():
+        if conn.closeAfterFlush:
+          conn.close()
+          if srv.onClose != nil: srv.onClose(conn)
+          srv.releaseConnection(conn)
+          return
+        if conn.state == Connected:
+          conn.loop.modify(fd, {Read})
+    if (Read in ev or Hup in ev) and conn.sendFileFd < 0:
+      conn.handleClientRead(srv.onData, srv.onClose)
+    if Hup in ev and conn.state == Connected:
+      conn.close()
+      if srv.onClose != nil: srv.onClose(conn)
+    if conn.state == Closed:
+      srv.releaseConnection(conn)
+  srv
 
 # ── Client connect ───────────────────────────────────────────────────────────
 

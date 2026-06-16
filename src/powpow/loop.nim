@@ -174,6 +174,18 @@ proc unregister*(loop: Loop, fd: int) =
     loop.retired.add(w)
     loop.platform.remove(fd)
 
+proc unregisterFd*(loop: Loop, fd: int) =
+  ## Remove fd watcher without platform syscall.
+  ## The fd was already closed by the caller, and the OS removes it
+  ## from epoll/kqueue automatically. Only cleans up in-memory state.
+  if fd in loop.fdWatchers:
+    let w = loop.fdWatchers[fd]
+    w.alive = false
+    w.callback = nil
+    inc loop.deadCount
+    loop.retired.add(w)
+    loop.fdWatchers.del(fd)
+
 proc modify*(loop: Loop, fd: int, events: set[EventType]) =
   if fd in loop.fdWatchers:
     let w = loop.fdWatchers[fd]

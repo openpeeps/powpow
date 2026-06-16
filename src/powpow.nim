@@ -53,7 +53,9 @@
 ## - Multipart form data support
 ##
 ## ### HTTP Server (`proto/httpserver.nim`)
-## - Route-based handler registration (get, post, put, patch, delete, head, options)
+## - Implement your-own-router — lower-level callback-based design
+## - `OnRequestCallback* = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.}`
+## - Higher-level frameworks implement routing on top of this callback
 ## - Streaming response body
 ## - Static file serving with MIME type detection
 ## - Conditional requests (If-Modified-Since, If-None-Match)
