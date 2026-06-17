@@ -148,7 +148,6 @@ proc buildHandshakeResponse*(acceptKey: string): string =
            "Upgrade: websocket\r\n" &
            "Connection: Upgrade\r\n" &
            "Sec-WebSocket-Accept: " & acceptKey & "\r\n" &
-           "Server: powpow/0.1.0\r\n" &
            "\r\n"
 
 proc sendHandshake*(conn: Connection, clientKey: string) =
@@ -272,6 +271,87 @@ proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
 
 # ── Frame parser (incremental, state-machine) ────────────────────────────────
 
+template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
+  let opcode = p.opcode
+  let plen = int(p.payloadLen)
+  p.phase = WsPhaseHeader
+  case opcode
+  of 0x0:
+    if not ws.assembling:
+      if not ws.onError.isNil:
+        ws.onError(ws, "Unexpected continuation frame")
+      ws.closeWs(1002, "Protocol error")
+      return
+    if ws.maxFrameSize > 0 and (ws.assembleBuf.len + plen) > ws.maxFrameSize:
+      ws.closeWs(1009, "Message too large")
+      return
+    if plen > 0:
+      ws.assembleBuf.add p.payload.toOpenArray(0, plen - 1)
+    if p.fin:
+      let finalOp = ws.fragOpcode
+      ws.assembling = false
+      if not ws.onMessage.isNil:
+        ws.onMessage(ws, WsFrameKind(finalOp), ws.assembleBuf)
+      ws.assembleBuf.setLen(0)
+  of 0x1, 0x2:
+    if ws.assembling:
+      ws.closeWs(1002, "Unexpected data frame during fragmentation")
+      return
+    if not p.fin and ws.maxFrameSize > 0 and plen > ws.maxFrameSize:
+      ws.closeWs(1009, "Message too large")
+      return
+    if p.fin:
+      if not ws.onMessage.isNil:
+        if plen > 0:
+          ws.onMessage(ws, WsFrameKind(opcode), p.payload.toOpenArray(0, plen - 1))
+        else:
+          ws.onMessage(ws, WsFrameKind(opcode), [])
+    else:
+      ws.assembling = true
+      ws.fragOpcode = opcode
+      ws.assembleBuf.setLen(0)
+      if plen > 0:
+        ws.assembleBuf.add p.payload.toOpenArray(0, plen - 1)
+  of 0x8:
+    if plen == 1:
+      ws.closeWs(1002, "Invalid close payload length")
+      return
+    var closeCode = 1000
+    var reason = ""
+    if plen >= 2:
+      closeCode = (int(p.payload[0]) shl 8) or int(p.payload[1])
+      if closeCode != 1000 and closeCode != 1001 and
+         closeCode != 1002 and closeCode != 1003 and
+         closeCode != 1007 and closeCode != 1008 and
+         closeCode != 1009 and closeCode != 1010 and
+         closeCode != 1011 and
+         not (closeCode in 3000..4999):
+        ws.closeWs(1002, "Invalid close code")
+        return
+    if plen > 2:
+      reason = newString(plen - 2)
+      copyMem(addr reason[0], unsafeAddr p.payload[2], plen - 2)
+    if plen > 0:
+      ws.conn.writeFrame(0x8, p.payload.toOpenArray(0, plen - 1))
+    else:
+      ws.conn.writeFrame(0x8, [])
+    if not ws.onClose.isNil:
+      ws.onClose(ws, closeCode, reason)
+    ws.conn.close()
+    return
+  of 0x9:
+    if plen > 0:
+      ws.conn.writeFrame(0xA, p.payload.toOpenArray(0, plen - 1))
+    else:
+      ws.conn.writeFrame(0xA, [])
+  of 0xA:
+    discard
+  else:
+    if not ws.onError.isNil:
+      ws.onError(ws, "Unsupported opcode: " & $opcode)
+    ws.closeWs(1003, "Unsupported opcode")
+    return
+
 proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
   ## Feed incoming TCP data into the WebSocket frame parser.
   ## Dispatches complete frames to the appropriate callbacks.
@@ -300,6 +380,13 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
       p.opcode = int(b0 and 0x0F)
       p.masked = (b1 shr 7) == 1
       let len7 = b1 and 0x7F
+
+      if not p.masked:
+        ws.closeWs(1002, "Mask required")
+        return
+      if p.opcode in {0x8, 0x9, 0xA} and len7 > MaxControlPayload:
+        ws.closeWs(1002, "Control frame too large")
+        return
 
       if len7 < 126:
         p.payloadLen = uint64(len7)
@@ -330,6 +417,9 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
         if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
           ws.closeWs(1009, "Frame too large")
           return
+        if p.opcode in {0x8, 0x9, 0xA} and p.payloadLen > MaxControlPayload:
+          ws.closeWs(1002, "Control frame too large")
+          return
         if p.masked:
           p.phase = WsPhaseMask
           p.maskIdx = 0
@@ -354,6 +444,9 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
         if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
           ws.closeWs(1009, "Frame too large")
           return
+        if p.opcode in {0x8, 0x9, 0xA} and p.payloadLen > MaxControlPayload:
+          ws.closeWs(1002, "Control frame too large")
+          return
         if p.masked:
           p.phase = WsPhaseMask
           p.maskIdx = 0
@@ -373,6 +466,9 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
       if p.maskIdx == 4:
         if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
           ws.closeWs(1009, "Frame too large")
+          return
+        if p.opcode in {0x8, 0x9, 0xA} and p.payloadLen > MaxControlPayload:
+          ws.closeWs(1002, "Control frame too large")
           return
         if p.payloadLen == 0:
           p.phase = WsPhaseReady
@@ -399,76 +495,11 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
         p.phase = WsPhaseReady
 
     of WsPhaseReady:
-      # Dispatch the complete frame
-      let opcode = p.opcode
-      let plen = int(p.payloadLen)
+      dispatchFrame(ws, p)
 
-      # Reset parser for next frame before dispatching (callbacks may feed more)
-      p.phase = WsPhaseHeader
-
-      case opcode
-      of 0x0: # Continuation
-        if not ws.assembling:
-          if not ws.onError.isNil:
-            ws.onError(ws, "Unexpected continuation frame")
-          ws.closeWs(1002, "Protocol error")
-          return
-        if plen > 0:
-          ws.assembleBuf.add p.payload.toOpenArray(0, plen - 1)
-        if p.fin:
-          let finalOp = ws.fragOpcode
-          ws.assembling = false
-          if not ws.onMessage.isNil:
-            ws.onMessage(ws, WsFrameKind(finalOp), ws.assembleBuf)
-          ws.assembleBuf.setLen(0)
-
-      of 0x1, 0x2: # Text or Binary
-        if p.fin:
-          if not ws.onMessage.isNil:
-            if plen > 0:
-              ws.onMessage(ws, WsFrameKind(opcode), p.payload.toOpenArray(0, plen - 1))
-            else:
-              ws.onMessage(ws, WsFrameKind(opcode), [])
-        else:
-          # Start fragmentation
-          ws.assembling = true
-          ws.fragOpcode = opcode
-          ws.assembleBuf.setLen(0)
-          if plen > 0:
-            ws.assembleBuf.add p.payload.toOpenArray(0, plen - 1)
-
-      of 0x8: # Close
-        var closeCode = 1000
-        var reason = ""
-        if plen >= 2:
-          closeCode = (int(p.payload[0]) shl 8) or int(p.payload[1])
-        if plen > 2:
-          reason = newString(plen - 2)
-          copyMem(addr reason[0], unsafeAddr p.payload[2], plen - 2)
-        # Echo the close frame back
-        if plen > 0:
-          ws.conn.writeFrame(0x8, p.payload.toOpenArray(0, plen - 1))
-        else:
-          ws.conn.writeFrame(0x8, [])
-        if not ws.onClose.isNil:
-          ws.onClose(ws, closeCode, reason)
-        ws.conn.close()
-        return
-
-      of 0x9: # Ping → auto Pong
-        if plen > 0:
-          ws.conn.writeFrame(0xA, p.payload.toOpenArray(0, plen - 1))
-        else:
-          ws.conn.writeFrame(0xA, [])
-
-      of 0xA: # Pong → ignore
-        discard
-
-      else:
-        if not ws.onError.isNil:
-          ws.onError(ws, "Unsupported opcode: " & $opcode)
-        ws.closeWs(1003, "Unsupported opcode")
-        return
+  if ws.parser.phase == WsPhaseReady:
+    # Frame ended exactly at data boundary — dispatch the pending frame
+    dispatchFrame(ws, ws.parser)
 
 # ── WsConnection lifecycle ───────────────────────────────────────────────────
 
@@ -547,7 +578,9 @@ proc listen*(wss: WsServer, address: string, port: int) =
 
         let clientKey = headerValue(headers, "Sec-WebSocket-Key")
         let upgradeHeader = headerValue(headers, "Upgrade")
-        if clientKey.len == 0 or upgradeHeader.toLowerAscii() != "websocket":
+        let wsVersion = headerValue(headers, "Sec-WebSocket-Version")
+        if clientKey.len == 0 or upgradeHeader.toLowerAscii() != "websocket" or
+           wsVersion != "13":
           discard conn.send("HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request")
           conn.close()
           handshakeSessions.del(fd)
@@ -670,8 +703,10 @@ proc websocketUpgrade*(
     let headers = req.getHeaders()
     let clientKey = headerValue(headers, "Sec-WebSocket-Key")
     let upgradeHeader = headerValue(headers, "Upgrade")
+    let wsVersion = headerValue(headers, "Sec-WebSocket-Version")
 
-    if clientKey.len == 0 or upgradeHeader.toLowerAscii() != "websocket":
+    if clientKey.len == 0 or upgradeHeader.toLowerAscii() != "websocket" or
+       wsVersion != "13":
       res.status(Http400)
         .send("Bad Request: missing WebSocket headers")
       return nil

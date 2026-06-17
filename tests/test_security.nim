@@ -328,11 +328,9 @@ test "test_ws_rejects_large_frame":
   let conn = makeWsTestConn(loop)
   let ws = newWsConnection(conn, maxFrameSize = 1024)
   assert ws.maxFrameSize == 1024
-  # Craft a binary frame with 16-bit extended length exceeding maxFrameSize
-  # Byte 0: FIN=1 + opcode 2 (binary)
-  # Byte 1: MASK=0 + len7=126 (16-bit extended)
-  # Bytes 2-3: extended length = 1025 (> 1024)
-  var frame: seq[byte] = @[0x82'u8, 126, 0x04, 0x01]
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  var frame = @[0x82'u8, 0xFE, 0x04, 0x01]
+  for m in mask: frame.add(m)
   ws.parseWsFrames(frame)
   assert ws.conn.state != Connected,
     "connection should be closed after oversized frame"
@@ -345,8 +343,10 @@ test "test_ws_accepts_normal_frame":
   let ws = newWsConnection(conn, maxFrameSize = 1024)
   ws.onMessage = proc(wsock: WsConnection, kind: WsFrameKind, data: openArray[byte]) =
     receivedData = @data
-  # Small binary frame with payload "hi"
-  var frame: seq[byte] = @[0x82'u8, 0x02, 'h'.byte, 'i'.byte]
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  var frame = @[0x82'u8, 0x82]
+  for m in mask: frame.add(m)
+  frame.add('h'.byte xor mask[0]); frame.add('i'.byte xor mask[1])
   ws.parseWsFrames(frame)
   assert ws.conn.state == Connected,
     "connection should remain open for small frame"
@@ -356,14 +356,85 @@ test "test_ws_rejects_64bit_large_frame":
   let loop = newLoop()
   let conn = makeWsTestConn(loop)
   let ws = newWsConnection(conn, maxFrameSize = 1024)
-  # 64-bit extended length frame with payload length exceeding maxFrameSize
-  # Byte 0: FIN=1 + opcode 2
-  # Byte 1: MASK=0 + len7=127 (64-bit extended)
-  # Bytes 2-9: 64-bit extended length = 2000
-  var frame: seq[byte] = @[0x82'u8, 127, 0, 0, 0, 0, 0, 0, 0x07, 0xD0]
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  var frame = @[0x82'u8, 0xFF, 0, 0, 0, 0, 0, 0, 0x07, 0xD0]
+  for m in mask: frame.add(m)
   ws.parseWsFrames(frame)
   assert ws.conn.state != Connected,
     "connection should be closed for 64-bit oversized frame"
+  loop.close()
+
+test "test_ws_rejects_unmasked_frame":
+  let loop = newLoop()
+  let conn = makeWsTestConn(loop)
+  let ws = newWsConnection(conn, maxFrameSize = 1024)
+  # Unmasked binary frame — RFC 6455 requires client-to-server masking
+  var frame: seq[byte] = @[0x82'u8, 0x02, 'h'.byte, 'i'.byte]
+  ws.parseWsFrames(frame)
+  assert ws.conn.state != Connected,
+    "unmasked frame should be rejected"
+  loop.close()
+
+test "test_ws_rejects_control_frame_too_large":
+  let loop = newLoop()
+  let conn = makeWsTestConn(loop)
+  let ws = newWsConnection(conn, maxFrameSize = 10 * 1024 * 1024)
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  # Ping frame with 126-byte payload (control frames max is 125)
+  var frame = @[0x89'u8, 0xFE, 0x00, 0x7E]
+  for m in mask: frame.add(m)
+  for i in 0..<126: frame.add(0)
+  ws.parseWsFrames(frame)
+  assert ws.conn.state != Connected,
+    "control frame over 125 bytes should be rejected"
+  loop.close()
+
+test "test_ws_rejects_invalid_close_code":
+  let loop = newLoop()
+  let conn = makeWsTestConn(loop)
+  let ws = newWsConnection(conn, maxFrameSize = 1024)
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  # Close frame with reserved code 1004
+  var frame = @[0x88'u8, 0x82, 0x03, 0xEC]  # close code 1004
+  for m in mask: frame.add(m)
+  frame.add(0x03 xor mask[0]); frame.add(0xEC xor mask[1])
+  ws.parseWsFrames(frame)
+  assert ws.conn.state != Connected,
+    "invalid close code should be rejected"
+  loop.close()
+
+test "test_ws_rejects_one_byte_close":
+  let loop = newLoop()
+  let conn = makeWsTestConn(loop)
+  let ws = newWsConnection(conn, maxFrameSize = 1024)
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  # Close frame with 1-byte payload (invalid per RFC)
+  var frame = @[0x88'u8, 0x81]
+  for m in mask: frame.add(m)
+  frame.add(0x00 xor mask[0])
+  ws.parseWsFrames(frame)
+  assert ws.conn.state != Connected,
+    "close frame with 1-byte payload should be rejected"
+  loop.close()
+
+test "test_ws_rejects_data_frame_during_fragmentation":
+  let loop = newLoop()
+  let conn = makeWsTestConn(loop)
+  let ws = newWsConnection(conn, maxFrameSize = 1024)
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  # First fragment: non-fin text frame
+  var frag = @[0x01'u8, 0x81]    # FIN=0, opcode=1
+  for m in mask: frag.add(m)
+  frag.add(0x41 xor mask[0])     # "A"
+  ws.parseWsFrames(frag)
+  assert ws.conn.state == Connected, "first fragment should be accepted"
+  # Second frame: new text frame without finishing (should error)
+  var frame = @[0x81'u8, 0x81]
+  for m in mask: frame.add(m)
+  frame.add(0x42 xor mask[0])    # "B"
+  ws.parseWsFrames(frame)
+  assert ws.conn.state != Connected,
+    "data frame during fragmentation should be rejected"
   loop.close()
 
 # ══════════════════════════════════════════════════════════════════════
