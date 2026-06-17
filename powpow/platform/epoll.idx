@@ -5,7 +5,7 @@ nim	init	powpow/platform/epoll.html#init,typedesc[Platform]	proc init(T: typedes
 nim	close	powpow/platform/epoll.html#close,Platform	proc close(p: Platform)		64
 nim	ensureCapacity	powpow/platform/epoll.html#ensureCapacity,Platform,int	proc ensureCapacity(p: Platform; fdCount: int)		74
 nim	add	powpow/platform/epoll.html#add,Platform,int,set[EventType],pointer	proc add(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;\n    udata: pointer = nil)		82
-nim	remove	powpow/platform/epoll.html#remove,Platform,int	proc remove(p: Platform; fd: int)		95
-nim	modify	powpow/platform/epoll.html#modify,Platform,int,set[EventType],pointer	proc modify(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;\n       udata: pointer = nil)		99
-nim	wake	powpow/platform/epoll.html#wake,Platform	proc wake(p: Platform)		114
-nim	poll	powpow/platform/epoll.html#poll,Platform,int	proc poll(p: Platform; timeoutMs: int): int		120
+nim	remove	powpow/platform/epoll.html#remove,Platform,int	proc remove(p: Platform; fd: int)		101
+nim	modify	powpow/platform/epoll.html#modify,Platform,int,set[EventType],pointer	proc modify(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;\n       udata: pointer = nil)		105
+nim	wake	powpow/platform/epoll.html#wake,Platform	proc wake(p: Platform)		120
+nim	poll	powpow/platform/epoll.html#poll,Platform,int	proc poll(p: Platform; timeoutMs: int): int		126
