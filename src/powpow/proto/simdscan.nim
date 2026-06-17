@@ -67,8 +67,9 @@ when hasSse2:
         return i + countTrailingZeroBits(mask)
       i += 16
 
-    # Scalar tail
-    findCRLFScalar(buf, i, limit)
+    # Scalar tail: start one byte back to catch \r\n that spans the SSE2 boundary
+    let scStart = if i > start: i - 1 else: i
+    findCRLFScalar(buf, scStart, limit)
 
   proc findDoubleCRLFSse2*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
     ## SSE2-accelerated \r\n\r\n scanner.

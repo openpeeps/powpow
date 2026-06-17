@@ -194,13 +194,16 @@ suite "bench_event_loop":
       pipes[i] = createPipe()
     let loop = newLoop()
     let t0 = monoUs()
+    var fired = 0
     for round in 0 ..< Rounds:
-      var fired = 0
+      fired = 0
+      proc cb(fd: int, ev: set[EventType]) {.closure.} =
+        var buf: array[64, byte]
+        discard read(fd.cint, addr buf[0], 64)
+        inc fired
+      # Use edge-triggered to avoid kqueue level-triggered re-fire on macOS
       for i in 0 ..< N:
-        loop.register(pipes[i][0].int, {Read}) do (fd: int, ev: set[EventType]):
-          var buf: array[64, byte]
-          discard read(fd.cint, addr buf[0], 64)
-          inc fired
+        loop.register(pipes[i][0].int, {Read}, cb, edgeTriggered = true)
       for i in 0 ..< N:
         var b = "x"
         discard write(pipes[i][1], addr b[0], 1)

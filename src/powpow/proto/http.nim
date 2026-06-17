@@ -54,6 +54,7 @@ type
     ## Incremental HTTP/1.1 request parser.
     buf:       seq[byte]       ## Accumulation buffer
     bufLen:    int              ## Current buffer length
+    maxBodySize*: int64         ## Max body size (0 = unlimited)
 
     # Request line fields (byte offsets into buf)
     methodStr:  array[10, char] ## Raw method bytes (fast path)
@@ -153,6 +154,7 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     bodyStart:     0,
     bodyLen:       0,
     chunkBodyLen:  0,
+    maxBodySize:   0,
     methodCache:   HttpGet,
     pathCache:     "",
     queryCache:    "",
@@ -370,17 +372,25 @@ proc scanHeaders(p: HttpParser): bool =
                 if ch != clKey[j] and ch != (char(ord(clKey[j]) xor 32)):
                   isCL = false
                   break
-              if isCL:
-                # Parse the numeric value
-                var valStart = lineStart + clKey.len
-                while valStart < i and char(buf[valStart]) == ' ':
-                  inc valStart
-                var num = 0
-                var j = valStart
-                while j < i and char(buf[j]) in '0'..'9':
-                  num = num * 10 + (ord(char(buf[j])) - ord('0'))
-                  inc j
-                p.contentLength = num
+                if isCL:
+                  # Parse the numeric value
+                  var valStart = lineStart + clKey.len
+                  while valStart < i and char(buf[valStart]) == ' ':
+                    inc valStart
+                  var num = 0
+                  var j = valStart
+                  while j < i and char(buf[j]) in '0'..'9':
+                    if num > high(int) div 10:
+                      p.phase = PhaseError
+                      p.errorCode = Http413
+                      return false
+                    num = num * 10 + (ord(char(buf[j])) - ord('0'))
+                    inc j
+                  if p.maxBodySize > 0 and num > p.maxBodySize:
+                    p.phase = PhaseError
+                    p.errorCode = Http413
+                    return false
+                  p.contentLength = num
 
         # Quick check for Transfer-Encoding
         if lineLen >= 19:
@@ -568,6 +578,11 @@ proc parseChunkedBody(p: HttpParser): bool =
         return false
       if chunkSize == -2:
         p.bodyStart = pos
+        return false
+
+      if p.maxBodySize > 0 and (p.chunkBodyLen + chunkSize) > p.maxBodySize:
+        p.phase = PhaseError
+        p.errorCode = Http413
         return false
 
       p.chunkSize = chunkSize

@@ -78,6 +78,7 @@ type
     fdConn:     Table[int, Connection]
     sharedCb:   FdCallback
     unixPath:   string
+    maxConnections*: int
 
 proc newConnection*(fd: SocketHandle, loop: Loop, server: TcpServer,
                      readBuf: ptr UncheckedArray[byte], readBufLen: int): Connection =
@@ -379,6 +380,10 @@ proc acceptClients(server: TcpServer) =
         return
       return
     
+    if server.maxConnections > 0 and server.fdConn.len >= server.maxConnections:
+      sockClose(clientFd)
+      return
+    
     let conn = acquireConnection(server, clientFd)
 
     if server.onAccept != nil:
@@ -499,6 +504,7 @@ proc newTcpServer*(loop: Loop,
     fdConn:   initTable[int, Connection](64),
     sharedCb: nil,
     unixPath: "",
+    maxConnections: 0,
   )
   # Create one shared callback for all connections — no closure allocation per accept
   srv.sharedCb = proc(fd: int, ev: set[EventType]) {.closure.} =

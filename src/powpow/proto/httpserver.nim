@@ -49,11 +49,8 @@ type
 
   ConnHttp* = ref object
     parser: HttpParser
-    streamer: MultipartStreamerRef
     sessionStreamFile: File
     sessionStreamPath: string
-    idleTimer: TimerId
-    idleMs:    int
 
   HttpServer* = ref object
     tcpServer: TcpServer
@@ -64,10 +61,13 @@ type
     reqPool:   seq[HttpRequest]
     resPool:   seq[HttpResponse]
     keepAliveMs: int
+    maxBodySize*: int64
+    maxConnections*: int
+    maxPipelineDepth*: int
+    readTimeoutMs*: int
 
 const
   DefaultKeepAliveMs* = 5_000
-  ServerHeader = "Server: powpow/0.1.0\r\n"
   MaxParserPoolSize = 2048
   MaxResPoolSize = 4048
 
@@ -240,8 +240,6 @@ proc send*(res: HttpResponse, body: string = "") =
   copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
-
   # Fast path: single write for tiny responses (≤512 bytes, no custom headers)
   let totalLen = p + 2 + body.len
   if totalLen <= 512 and res.headers.len == 0:
@@ -305,8 +303,6 @@ proc send*(res: HttpResponse, body: seq[byte]) =
   copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
-
   let totalLen = p + 2 + body.len
   if totalLen <= 512 and res.headers.len == 0:
     var buf: array[512, byte]
@@ -353,9 +349,10 @@ proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) 
 
 proc sendFile*(res: HttpResponse, path: string;
                req: HttpRequest = default(HttpRequest);
-               closeConn = true) =
+               closeConn = true,
+               contentDisposition = true) =
   ## Send a file for download using zero-copy when possible.
-  ## Adds `Content-Disposition: attachment; filename="..."`.
+  ## Adds `Content-Disposition: attachment; filename="..."` when `contentDisposition` is true.
   ## Supports HTTP Range requests when `req` is provided.
   ## `closeConn` controls connection lifetime: true (default) closes after
   ## the transfer; false keeps the connection alive.
@@ -416,14 +413,13 @@ proc sendFile*(res: HttpResponse, path: string;
     copyMem(addr hdrBuf[p], mimeType.cstring, mimeType.len); p += mimeType.len
     copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-    let (_, fileName, _) = path.splitFile()
-    writeDisposition(cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), fileName, p)
+    if contentDisposition:
+      let (_, fileName, _) = path.splitFile()
+      writeDisposition(cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), fileName, p)
 
     copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
     copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
     copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-    copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
 
     for (k, v) in res.headers:
       copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
@@ -541,8 +537,6 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
 
     copyMem(addr hdrBuf[p], "Connection: keep-alive\r\n".cstring, 24); p += 24
 
-    copyMem(addr hdrBuf[p], ServerHeader.cstring, ServerHeader.len); p += ServerHeader.len
-
     for (k, v) in res.headers:
       copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
       copyMem(addr hdrBuf[p], ": ".cstring, 2); p += 2
@@ -656,7 +650,11 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     parserPool: @[],
     reqPool:   @[],
     resPool:   @[],
-    keepAliveMs: DefaultKeepAliveMs
+    keepAliveMs: DefaultKeepAliveMs,
+    maxBodySize: 0,
+    maxConnections: 0,
+    maxPipelineDepth: 0,
+    readTimeoutMs: 0
   )
   if populate:
     srv.populatePools()
@@ -682,6 +680,7 @@ proc acquireParser(server: HttpServer): HttpParser =
     result.reset()
   else:
     result = newHttpParser()
+  result.maxBodySize = server.maxBodySize
 
 proc releaseParser(server: HttpServer, parser: HttpParser) =
   if server.parserPool.len < MaxParserPoolSize:
@@ -696,9 +695,6 @@ proc removeSession*(server: HttpServer, conn: Connection) =
   let ctx = cast[ConnHttp](conn.data)
   if ctx == nil: return
   server.connRoots.del(conn.fd.int)
-  if ctx.streamer != nil:
-    ctx.streamer[].cleanup()
-    ctx.streamer = nil
   if ctx.sessionStreamPath.len > 0:
     ctx.sessionStreamFile.close()
     removeFile(ctx.sessionStreamPath)
@@ -725,11 +721,8 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   ## Feed incoming bytes into the per-connection parser.
   ## Supports HTTP/1.1 pipelining: if multiple complete requests arrive
   ## in the same TCP read, all of them are processed in order.
-  ##
-  ## When multipart/form-data is detected in the Content-Type header,
-  ## a MultipartStreamer is auto-created and body data is streamed through it
-  ## via the lightweight fill→check→write→clear cycle.
-  ## Memory: ~68KB for any file size (4KB headers + 64KB write buffer).
+  ## Multipart/form-data is NOT auto-streamed — handlers must call
+  ## `req.getMultipart()` to process it explicitly.
   let ctx = if conn.data != nil: cast[ConnHttp](conn.data)
             else:
               let c = ConnHttp(parser: acquireParser(server))
@@ -737,42 +730,14 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
               server.connRoots[conn.fd.int] = c
               c
   let p = ctx.parser
-  let prevPhase = p.phase
   p.feed(data)
 
-  if prevPhase < PhaseBody and p.phase >= PhaseBody and not p.streamingBody:
-    let ct = p.peekContentType()
-    if ct.len >= 19:
-      var isMP = true
-      const mpKey = "multipart/form-data"
-      for i in 0 ..< mpKey.len:
-        if (char(ord(ct[i]) or 32)) != mpKey[i]:
-          isMP = false; break
-      if isMP:
-        var ms = newMultipartStreamerRef(ct)
-        let msRef = ms
-        ctx.streamer = ms
-        if p.phase == PhaseBody:
-          p.onBodyData = proc(chunk: openArray[byte]; done: bool) =
-            msRef[].feed(chunk)
-          p.feed(@[])
-        elif p.phase == PhaseComplete:
-          let (buf, totalLen) = p.getBodyView()
-          if totalLen > 0 and buf != nil:
-            const StreamChunk = 65536
-            var pos = 0
-            while pos < totalLen:
-              let chunkLen = min(StreamChunk, totalLen - pos)
-              let chunk = cast[ptr UncheckedArray[byte]](cast[int](buf) + pos)
-              msRef[].feed(chunk, chunkLen)
-              pos += chunkLen
-
+  var pipelineCount = 0
   while p.isComplete():
+    if server.maxPipelineDepth > 0 and pipelineCount >= server.maxPipelineDepth:
+      break
+    inc pipelineCount
     let req = server.acquireRequest(p)
-    if ctx.streamer != nil:
-      req.streamer = ctx.streamer
-      ctx.streamer = nil
-      p.onBodyData = nil
     if ctx.sessionStreamPath.len > 0:
       req.streamPath = ctx.sessionStreamPath
       ctx.sessionStreamPath = ""
@@ -786,9 +751,6 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
       break
 
   if p.isError():
-    if ctx.streamer != nil:
-      ctx.streamer[].cleanup()
-      ctx.streamer = nil
     if ctx.sessionStreamPath.len > 0:
       ctx.sessionStreamFile.close()
       removeFile(ctx.sessionStreamPath)
@@ -810,6 +772,7 @@ proc listen*(server: HttpServer, address: string, port: int) =
       server.removeSession(conn)
     ,
   )
+  server.tcpServer.maxConnections = server.maxConnections
   server.tcpServer.listen(address, port)
 
 when not defined(windows):
@@ -868,3 +831,30 @@ proc addConnection*(server: HttpServer, fd: SocketHandle) =
 proc getLoop*(server: HttpServer): Loop {.inline.} =
   ## Get the event loop associated with this server.
   server.loop
+
+proc serveStatic*(res: HttpResponse, req: HttpRequest,
+                  urlPrefix: string, fsRoot: string,
+                  indexFiles: seq[string] = @["index.html", "index.htm"]): bool =
+  ## Serve static files from `fsRoot` for requests whose path starts with `urlPrefix`.
+  ## Path traversal protection: rejects paths containing ".." or "~".
+  ## Returns true if the file was served, false if not found (caller should send 404).
+  ## Zero-copy: uses `sendFile` internally, no body buffering.
+  let path = req.getPath()
+  if not path.startsWith(urlPrefix):
+    return false
+  let relPath = path[urlPrefix.len .. ^1]
+  if relPath.contains("..") or relPath.contains("~") or relPath.len == 0 or relPath[0] == '/':
+    res.sendError(Http403, "Forbidden")
+    return true
+  let fullPath = fsRoot / relPath
+  if dirExists(fullPath):
+    for index in indexFiles:
+      let indexPath = fullPath / index
+      if fileExists(indexPath):
+        res.sendFile(indexPath, req, closeConn = false, contentDisposition = false)
+        return true
+    return false
+  if not fileExists(fullPath):
+    return false
+  res.sendFile(fullPath, req, closeConn = false, contentDisposition = false)
+  return true

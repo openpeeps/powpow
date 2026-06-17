@@ -28,7 +28,8 @@
 ##     websocketUpgrade(res, req, onOpen, onMessage, onClose)
 ##   ```
 
-import std/[httpcore, sha1, base64, tables, strutils, posix]
+import std/[httpcore, base64, tables, strutils, posix]
+import pkg/checksums/sha1
 
 import ../net/tcp
 import ../loop
@@ -40,8 +41,9 @@ import ../proto/httpserver
 
 const
   wsGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-  MaxControlPayload = 125      ## Max payload for control frames (RFC 6455 §5.5)
+  MaxControlPayload = 125       ## Max payload for control frames (RFC 6455 §5.5)
   DefaultWsBufSize  = 65536    ## Initial frame parser buffer
+  DefaultMaxFrameSize* = 10 * 1024 * 1024  ## Default max WebSocket frame size (10 MB)
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,10 +62,11 @@ type
     ## parsing, fragmentation reassembly, and control frame handling.
     conn*:       Connection       ## Underlying TCP connection
     parser:      WsFrameParser    ## Incremental frame parser
-    onMessage:   WsMessageCb
-    onClose:     WsCloseCb
-    onError:     WsErrorCb
-    onOpen:      WsOpenCb
+    onMessage*:  WsMessageCb
+    onClose*:    WsCloseCb
+    onError*:    WsErrorCb
+    onOpen*:     WsOpenCb
+    maxFrameSize*: int
     # Fragmentation reassembly
     assembling:  bool
     fragOpcode:  int
@@ -105,6 +108,7 @@ type
     tcpServer: TcpServer
     loop:      Loop
     conns:     Table[int, WsConnection]  ## fd → connection
+    maxFrameSize*: int
     # User callbacks (applied to all connections)
     defaultOpen:    WsOpenCb
     defaultMessage: WsMessageCb
@@ -268,7 +272,7 @@ proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
 
 # ── Frame parser (incremental, state-machine) ────────────────────────────────
 
-proc parseWsFrames(ws: WsConnection, data: openArray[byte]) =
+proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
   ## Feed incoming TCP data into the WebSocket frame parser.
   ## Dispatches complete frames to the appropriate callbacks.
   var i = 0
@@ -323,6 +327,9 @@ proc parseWsFrames(ws: WsConnection, data: openArray[byte]) =
         inc i
       if p.lengthIdx == 2:
         p.payloadLen = (uint64(p.lengthBuf[0]) shl 8) or uint64(p.lengthBuf[1])
+        if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
+          ws.closeWs(1009, "Frame too large")
+          return
         if p.masked:
           p.phase = WsPhaseMask
           p.maskIdx = 0
@@ -344,6 +351,9 @@ proc parseWsFrames(ws: WsConnection, data: openArray[byte]) =
         for j in 0 ..< 8:
           v = (v shl 8) or uint64(p.lengthBuf[j])
         p.payloadLen = v
+        if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
+          ws.closeWs(1009, "Frame too large")
+          return
         if p.masked:
           p.phase = WsPhaseMask
           p.maskIdx = 0
@@ -361,6 +371,9 @@ proc parseWsFrames(ws: WsConnection, data: openArray[byte]) =
         inc p.maskIdx
         inc i
       if p.maskIdx == 4:
+        if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
+          ws.closeWs(1009, "Frame too large")
+          return
         if p.payloadLen == 0:
           p.phase = WsPhaseReady
         else:
@@ -459,11 +472,12 @@ proc parseWsFrames(ws: WsConnection, data: openArray[byte]) =
 
 # ── WsConnection lifecycle ───────────────────────────────────────────────────
 
-proc newWsConnection(conn: Connection): WsConnection =
+proc newWsConnection*(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize): WsConnection =
   ## Create a new WebSocket connection wrapping a TCP connection.
   WsConnection(
     conn:       conn,
     parser:     newWsFrameParser(),
+    maxFrameSize: maxFrameSize,
     assembling: false,
     fragOpcode: 0,
     assembleBuf: @[],
@@ -478,12 +492,13 @@ proc headerValue(headers: HttpHeaders, key: string): string {.inline.} =
     if vals.len > 0: return vals
   return ""
 
-proc newWsServer*(loop: Loop): WsServer =
+proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer =
   ## Create a standalone WebSocket server. Register callbacks then call listen().
   WsServer(
     tcpServer: nil,
     loop:      loop,
     conns:     initTable[int, WsConnection](64),
+    maxFrameSize: maxFrameSize,
   )
 
 proc onOpen*(wss: WsServer, cb: WsOpenCb) =
@@ -548,7 +563,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
         conn.sendHandshake(clientKey)
 
         # Create the WebSocket connection
-        let ws = newWsConnection(conn)
+        let ws = newWsConnection(conn, wss.maxFrameSize)
         ws.onOpen    = wss.defaultOpen
         ws.onMessage = wss.defaultMessage
         ws.onClose   = wss.defaultClose
@@ -634,7 +649,8 @@ proc websocketUpgrade*(
     onOpen: WsOpenCb = nil,
     onMessage: WsMessageCb = nil,
     onClose: WsCloseCb = nil,
-    onError: WsErrorCb = nil
+    onError: WsErrorCb = nil,
+    maxFrameSize: int = DefaultMaxFrameSize
 ): WsConnection {.gcsafe, discardable.} =
   ## Upgrade an HTTP connection to WebSocket. Call this from an HTTP route handler.
   ##
@@ -672,7 +688,7 @@ proc websocketUpgrade*(
     conn.sendHandshake(clientKey)
 
     # Create WebSocket connection
-    let ws = newWsConnection(conn)
+    let ws = newWsConnection(conn, maxFrameSize)
     ws.onOpen    = onOpen
     ws.onMessage = onMessage
     ws.onClose   = onClose
