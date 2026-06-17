@@ -18,8 +18,8 @@ test "test_max_body_size_rejects_large_content_length":
   let parser = newHttpParser()
   parser.maxBodySize = 100
   parser.feed(raw)
-  doAssert parser.isError(), "should error when CL exceeds maxBodySize"
-  doAssert parser.error() == Http413
+  assert parser.isError(), "should error when CL exceeds maxBodySize"
+  assert parser.error() == Http413
 
 test "test_max_body_size_accepts_small_content_length":
   let body = repeat('X', 50)
@@ -27,9 +27,9 @@ test "test_max_body_size_accepts_small_content_length":
   let parser = newHttpParser()
   parser.maxBodySize = 100
   parser.feed(raw)
-  doAssert parser.isComplete(), "should accept body within limit"
+  assert parser.isComplete(), "should accept body within limit"
   let req = parser.getRequest()
-  doAssert req.getBody().len == 50
+  assert req.getBody().len == 50
 
 test "test_max_body_size_rejects_chunked_overflow":
   let raw = "POST /upload HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" &
@@ -39,8 +39,8 @@ test "test_max_body_size_rejects_chunked_overflow":
   let parser = newHttpParser()
   parser.maxBodySize = 75
   parser.feed(raw)
-  doAssert parser.isError(), "should error when chunked body exceeds maxBodySize"
-  doAssert parser.error() == Http413
+  assert parser.isError(), "should error when chunked body exceeds maxBodySize"
+  assert parser.error() == Http413
 
 test "test_max_body_size_chunked_at_limit":
   let raw = "POST /upload HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" &
@@ -49,24 +49,24 @@ test "test_max_body_size_chunked_at_limit":
   let parser = newHttpParser()
   parser.maxBodySize = 50
   parser.feed(raw)
-  doAssert parser.isComplete(), "should accept chunked body at limit"
+  assert parser.isComplete(), "should accept chunked body at limit"
 
 test "test_content_length_overflow_handled_safely":
   let raw = "POST /overflow HTTP/1.1\r\nHost: localhost\r\nContent-Length: 99999999999999999999\r\n\r\n"
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isError()
-  doAssert parser.error() == Http413
+  assert parser.isError()
+  assert parser.error() == Http413
 
 test "test_max_body_size_zero_is_unlimited":
   let body = repeat('X', 50000)
   let raw = "POST /large HTTP/1.1\r\nHost: localhost\r\nContent-Length: 50000\r\n\r\n" & body
   let parser = newHttpParser()
-  doAssert parser.maxBodySize == 0, "default maxBodySize should be 0 (unlimited)"
+  assert parser.maxBodySize == 0, "default maxBodySize should be 0 (unlimited)"
   parser.feed(raw)
-  doAssert parser.isComplete(), "should accept large body when unlimited"
+  assert parser.isComplete(), "should accept large body when unlimited"
   let req = parser.getRequest()
-  doAssert req.getBody().len == 50000
+  assert req.getBody().len == 50000
 
 test "test_max_headers_exceeded":
   var raw = "GET / HTTP/1.1\r\nHost: localhost\r\n"
@@ -75,8 +75,8 @@ test "test_max_headers_exceeded":
   raw.add("\r\n")
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isError()
-  doAssert parser.error() == Http431
+  assert parser.isError()
+  assert parser.error() == Http431
 
 test "test_max_header_size_exceeded":
   # Header section without closing \r\n\r\n exceeding MaxHeaderSize (8192)
@@ -84,16 +84,16 @@ test "test_max_header_size_exceeded":
   let raw = "GET / HTTP/1.1\r\nHost: localhost\r\nX-Big: " & bigVal
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isError()
-  doAssert parser.error() == Http431
+  assert parser.isError()
+  assert parser.error() == Http431
 
 test "test_max_request_line_exceeded":
   let bigPath = "/" & repeat("A", 9000)
   let raw = "GET " & bigPath & " HTTP/1.1\r\nHost: localhost\r\n\r\n"
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isError()
-  doAssert parser.error() == Http414
+  assert parser.isError()
+  assert parser.error() == Http414
 
 test "test_chunk_size_overflow_rejected":
   let raw = "POST /overflow HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" &
@@ -103,35 +103,35 @@ test "test_chunk_size_overflow_rejected":
   let parser = newHttpParser()
   parser.maxBodySize = 100
   parser.feed(raw)
-  doAssert parser.isError(), "chunk hex overflow should be rejected"
-  doAssert parser.error() == Http400
+  assert parser.isError(), "chunk hex overflow should be rejected"
+  assert parser.error() == Http400
 
 test "test_duplicate_content_length_different":
   let raw = "POST /dup HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nContent-Length: 10\r\n\r\nhello"
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isError(), "duplicate CL with different values should be rejected"
-  doAssert parser.error() == Http400
+  assert parser.isError(), "duplicate CL with different values should be rejected"
+  assert parser.error() == Http400
 
 test "test_duplicate_content_length_same":
   let raw = "POST /dup HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello"
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isComplete(), "duplicate CL with same value should be accepted"
+  assert parser.isComplete(), "duplicate CL with same value should be accepted"
 
 test "test_negative_content_length_rejected":
   let raw = "GET /neg HTTP/1.1\r\nHost: localhost\r\nContent-Length: -5\r\n\r\n"
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isError(), "negative CL should be rejected"
-  doAssert parser.error() == Http400
+  assert parser.isError(), "negative CL should be rejected"
+  assert parser.error() == Http400
 
 test "test_malformed_content_length_rejected":
   let raw = "GET /mal HTTP/1.1\r\nHost: localhost\r\nContent-Length: abc\r\n\r\n"
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isError(), "malformed CL should be rejected"
-  doAssert parser.error() == Http400
+  assert parser.isError(), "malformed CL should be rejected"
+  assert parser.error() == Http400
 
 # ══════════════════════════════════════════════════════════════════════
 # Section 2: HTTP Server Security
@@ -184,9 +184,9 @@ test "test_no_auto_multipart_streaming":
 
   loop.run()
   loop.close()
-  doAssert handlerRan, "handler should have been called"
-  doAssert streamerWasNil, "streamer should be nil until getMultipart() is called"
-  doAssert multipartWorked, "getMultipart() should work when called explicitly"
+  assert handlerRan, "handler should have been called"
+  assert streamerWasNil, "streamer should be nil until getMultipart() is called"
+  assert multipartWorked, "getMultipart() should work when called explicitly"
 
 test "test_no_server_header_in_response":
   var responseData: seq[byte] = @[]
@@ -220,79 +220,59 @@ test "test_no_server_header_in_response":
   loop.run()
   loop.close()
   let response = cast[string](responseData)
-  doAssert "Server:" notin response, "response should not contain Server header"
+  assert "Server:" notin response, "response should not contain Server header"
+
+proc testServeStaticRejects(port: int, path: string): string =
+  var responseData: seq[byte] = @[]
+  var clientConn: Connection = nil
+  let loop = newLoop()
+
+  let server = newHttpServer(loop)
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    {.gcsafe.}:
+      if not serveStatic(res, req, "/static", "/tmp"):
+        res.sendError(Http404, "Not Found")
+
+  server.listen("127.0.0.1", port)
+
+  discard loop.addTimer(50) do (id: int):
+    loop.connect("127.0.0.1", port,
+      onConnect = proc(conn: Connection) =
+        clientConn = conn
+        discard conn.send("GET " & path & " HTTP/1.1\r\nHost: localhost\r\n\r\n")
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        responseData.add(@data)
+      ,
+    )
+
+  discard loop.addTimer(3000) do (id: int):
+    if clientConn != nil: clientConn.close()
+    server.close()
+    loop.stop()
+
+  # Poll until we have response data or timeout
+  var polls = 0
+  while responseData.len == 0 and polls < 50000:
+    loop.poll(0)
+    inc polls
+  if responseData.len == 0:
+    result = ""
+  else:
+    result = cast[string](responseData)
+  if clientConn != nil: clientConn.close()
+  server.close()
+  loop.close()
 
 test "test_serve_static_rejects_path_traversal":
-  var responseData: seq[byte] = @[]
-  let loop = newLoop()
-
-  let server = newHttpServer(loop)
-  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
-    {.gcsafe.}:
-      if not serveStatic(res, req, "/static", "/tmp"):
-        res.sendError(Http404, "Not Found")
-
-  server.listen("127.0.0.1", 20093)
-
-  discard loop.addTimer(50) do (id: int):
-    loop.connect("127.0.0.1", 20093,
-      onConnect = proc(conn: Connection) =
-        discard conn.send("GET /static/../../../etc/passwd HTTP/1.1\r\nHost: localhost\r\n\r\n")
-      ,
-      onData = proc(conn: Connection, data: openArray[byte]) =
-        responseData = @data
-        conn.close()
-      ,
-      onClose = proc(conn: Connection) =
-        server.close()
-        loop.stop()
-    )
-
-  discard loop.addTimer(3000) do (id: int):
-    server.close()
-    loop.stop()
-
-  loop.run()
-  loop.close()
-  let resp = cast[string](responseData)
-  doAssert "403" in resp or "HTTP/1.1 403" in resp,
-    "path traversal should be rejected with 403, got: " & resp
+  let resp = testServeStaticRejects(20093, "/static/../../../etc/passwd")
+  assert "403" in resp or "Forbidden" in resp,
+    "path traversal should be rejected with 403, got: '" & resp & "'"
 
 test "test_serve_static_rejects_tilde":
-  var responseData: seq[byte] = @[]
-  let loop = newLoop()
-
-  let server = newHttpServer(loop)
-  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
-    {.gcsafe.}:
-      if not serveStatic(res, req, "/static", "/tmp"):
-        res.sendError(Http404, "Not Found")
-
-  server.listen("127.0.0.1", 20094)
-
-  discard loop.addTimer(50) do (id: int):
-    loop.connect("127.0.0.1", 20094,
-      onConnect = proc(conn: Connection) =
-        discard conn.send("GET /static/~user/file HTTP/1.1\r\nHost: localhost\r\n\r\n")
-      ,
-      onData = proc(conn: Connection, data: openArray[byte]) =
-        responseData = @data
-        conn.close()
-      ,
-      onClose = proc(conn: Connection) =
-        server.close()
-        loop.stop()
-    )
-
-  discard loop.addTimer(3000) do (id: int):
-    server.close()
-    loop.stop()
-
-  loop.run()
-  loop.close()
-  let resp = cast[string](responseData)
-  doAssert "403" in resp or "HTTP/1.1 403" in resp,
-    "tilde path should be rejected with 403, got: " & resp
+  let resp = testServeStaticRejects(20094, "/static/~user/file")
+  assert "403" in resp or "Forbidden" in resp,
+    "tilde path should be rejected with 403, got: '" & resp & "'"
 
 test "test_max_pipeline_depth_enforced":
   var requestCount = 0
@@ -331,7 +311,7 @@ test "test_max_pipeline_depth_enforced":
 
   loop.run()
   loop.close()
-  doAssert requestCount == 2,
+  assert requestCount == 2,
     "only 2 requests should be dispatched with maxPipelineDepth=2, got " & $requestCount
 
 # ══════════════════════════════════════════════════════════════════════
@@ -347,14 +327,14 @@ test "test_ws_rejects_large_frame":
   let loop = newLoop()
   let conn = makeWsTestConn(loop)
   let ws = newWsConnection(conn, maxFrameSize = 1024)
-  doAssert ws.maxFrameSize == 1024
+  assert ws.maxFrameSize == 1024
   # Craft a binary frame with 16-bit extended length exceeding maxFrameSize
   # Byte 0: FIN=1 + opcode 2 (binary)
   # Byte 1: MASK=0 + len7=126 (16-bit extended)
   # Bytes 2-3: extended length = 1025 (> 1024)
   var frame: seq[byte] = @[0x82'u8, 126, 0x04, 0x01]
   ws.parseWsFrames(frame)
-  doAssert ws.conn.state != Connected,
+  assert ws.conn.state != Connected,
     "connection should be closed after oversized frame"
   loop.close()
 
@@ -368,7 +348,7 @@ test "test_ws_accepts_normal_frame":
   # Small binary frame with payload "hi"
   var frame: seq[byte] = @[0x82'u8, 0x02, 'h'.byte, 'i'.byte]
   ws.parseWsFrames(frame)
-  doAssert ws.conn.state == Connected,
+  assert ws.conn.state == Connected,
     "connection should remain open for small frame"
   loop.close()
 
@@ -382,7 +362,7 @@ test "test_ws_rejects_64bit_large_frame":
   # Bytes 2-9: 64-bit extended length = 2000
   var frame: seq[byte] = @[0x82'u8, 127, 0, 0, 0, 0, 0, 0, 0x07, 0xD0]
   ws.parseWsFrames(frame)
-  doAssert ws.conn.state != Connected,
+  assert ws.conn.state != Connected,
     "connection should be closed for 64-bit oversized frame"
   loop.close()
 
@@ -396,9 +376,9 @@ test "test_slow_loris_headers":
   # Feed one byte at a time — simulate slow header attack
   for i in 0 ..< raw.len:
     discard parser.feed(raw[i .. i])
-  doAssert parser.isComplete(), "slow headers should parse correctly"
+  assert parser.isComplete(), "slow headers should parse correctly"
   let req = parser.getRequest()
-  doAssert req.getPath() == "/"
+  assert req.getPath() == "/"
 
 test "test_slow_loris_body":
   let body = "Hello, World!"
@@ -408,9 +388,9 @@ test "test_slow_loris_body":
   # Feed one byte at a time through the entire request
   for i in 0 ..< full.len:
     discard parser.feed(full[i .. i])
-  doAssert parser.isComplete(), "slow body should parse correctly"
+  assert parser.isComplete(), "slow body should parse correctly"
   let req = parser.getRequest()
-  doAssert req.getBodyString() == "Hello, World!"
+  assert req.getBodyString() == "Hello, World!"
 
 test "test_many_small_body_chunks":
   let data = repeat('X', 1000)
@@ -419,9 +399,9 @@ test "test_many_small_body_chunks":
   # Feed in 1-byte chunks
   for i in 0 ..< raw.len:
     discard parser.feed(raw[i .. i])
-  doAssert parser.isComplete(), "many small chunks should parse correctly"
+  assert parser.isComplete(), "many small chunks should parse correctly"
   let req = parser.getRequest()
-  doAssert req.getBody().len == 1000
+  assert req.getBody().len == 1000
 
 test "test_content_length_mismatch_handled":
   # Send Content-Length: 5 with actual body of 20 bytes
@@ -429,11 +409,11 @@ test "test_content_length_mismatch_handled":
   let request = "POST /mismatch HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\n" & body
   let parser = newHttpParser()
   parser.feed(request)
-  doAssert parser.isComplete(), "parser should complete with CL=5"
+  assert parser.isComplete(), "parser should complete with CL=5"
   let req = parser.getRequest()
-  doAssert req.getBodyString() == "Hello",
+  assert req.getBodyString() == "Hello",
     "body should be truncated to Content-Length"
-  doAssert req.parser.getRemainingData().len > 0,
+  assert req.parser.getRemainingData().len > 0,
     "extra body bytes should remain as remaining data"
 
 test "test_many_pipelined_requests":
@@ -442,14 +422,14 @@ test "test_many_pipelined_requests":
     raw.add("GET /" & $i & " HTTP/1.1\r\nHost: localhost\r\n\r\n")
   let parser = newHttpParser()
   parser.feed(raw)
-  doAssert parser.isComplete(), "pipelined requests should parse"
+  assert parser.isComplete(), "pipelined requests should parse"
   var count = 0
   while parser.isComplete():
     discard parser.getRequest()
     inc count
     parser.resetForNext()
     discard parser.feed(@[])
-  doAssert count == 50,
+  assert count == 50,
     "should parse all 50 pipelined requests, got " & $count
 
 test "test_rejects_body_exceeding_limit_without_allocation":
@@ -459,5 +439,5 @@ test "test_rejects_body_exceeding_limit_without_allocation":
   let parser = newHttpParser()
   parser.maxBodySize = 1_048_576  # 1MB
   parser.feed(headers)
-  doAssert parser.isError(), "should immediately error on oversized Content-Length"
-  doAssert parser.error() == Http413
+  assert parser.isError(), "should immediately error on oversized Content-Length"
+  assert parser.error() == Http413

@@ -844,7 +844,7 @@ proc serveStatic*(res: HttpResponse, req: HttpRequest,
     return false
   let relPath = path[urlPrefix.len .. ^1]
   if relPath.contains("..") or relPath.contains("~") or relPath.len == 0 or relPath[0] == '/':
-    res.sendError(Http403, "Forbidden")
+    res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
     return true
   let fullPath = fsRoot / relPath
   if dirExists(fullPath):
