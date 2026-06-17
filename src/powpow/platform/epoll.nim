@@ -88,9 +88,15 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   if edgeTriggered:   ev.events = ev.events or EPOLLET
   ev.data.ptr = udata
 
-  if epoll_ctl(p.epFd, EPOLL_CTL_ADD, fd.cint, addr ev) < 0:
-    raise newException(OSError,
-      "powpow: epoll_ctl ADD failed for fd " & $fd)
+  let ret = epoll_ctl(p.epFd, EPOLL_CTL_ADD, fd.cint, addr ev)
+  if ret < 0:
+    if errno == EEXIST:
+      if epoll_ctl(p.epFd, EPOLL_CTL_MOD, fd.cint, addr ev) < 0:
+        raise newException(OSError,
+          "powpow: epoll_ctl MOD failed for fd " & $fd)
+    else:
+      raise newException(OSError,
+        "powpow: epoll_ctl ADD failed for fd " & $fd)
 
 proc remove*(p: Platform, fd: int) =
   var ev: EpollEvent
