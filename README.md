@@ -26,6 +26,7 @@
 - Support for edge-triggered and level-triggered event notification
 - Support for multiple event loops and multi-threaded applications
 - Support for MIME type detection based on file extensions
+- FileSystem Monitoring via `inotify` (Linux) and `kqueue` (BSD, macOS) (Windows - not yet implemented)
 
 > [!NOTE]
 > 💥 PowPow is experimental and under active development. The API may change without deprecation. If you are looking for a more stable and mature library, consider using [supranim](https://github.com/supranim/supranim) instead (based on LibEvent). 💥
