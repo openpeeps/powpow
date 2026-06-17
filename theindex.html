@@ -181,6 +181,10 @@
 <li><a class="reference external"
           data-doc-search-tag="httpserver: const DefaultKeepAliveMs" href="powpow/proto/httpserver.html#DefaultKeepAliveMs">httpserver: const DefaultKeepAliveMs</a></li>
           </ul></dd>
+<dt><a name="DefaultMaxFrameSize" href="#DefaultMaxFrameSize"><span>DefaultMaxFrameSize:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: const DefaultMaxFrameSize" href="powpow/proto/ws.html#DefaultMaxFrameSize">ws: const DefaultMaxFrameSize</a></li>
+          </ul></dd>
 <dt><a name="DefaultSendFileChunk" href="#DefaultSendFileChunk"><span>DefaultSendFileChunk:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: const DefaultSendFileChunk" href="powpow/net/common.html#DefaultSendFileChunk">common: const DefaultSendFileChunk</a></li>
@@ -527,9 +531,13 @@
              onClose: OnClose = nil): TcpServer" href="powpow/net/tcp.html#newTcpServer%2CLoop%2COnData%2COnAccept%2COnClose">tcp: proc newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;
              onClose: OnClose = nil): TcpServer</a></li>
           </ul></dd>
+<dt><a name="newWsConnection" href="#newWsConnection"><span>newWsConnection:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: proc newWsConnection(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize): WsConnection" href="powpow/proto/ws.html#newWsConnection%2CConnection%2Cint">ws: proc newWsConnection(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize): WsConnection</a></li>
+          </ul></dd>
 <dt><a name="newWsServer" href="#newWsServer"><span>newWsServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="ws: proc newWsServer(loop: Loop): WsServer" href="powpow/proto/ws.html#newWsServer%2CLoop">ws: proc newWsServer(loop: Loop): WsServer</a></li>
+          data-doc-search-tag="ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer" href="powpow/proto/ws.html#newWsServer%2CLoop%2Cint">ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
           </ul></dd>
 <dt><a name="OnAccept" href="#OnAccept"><span>OnAccept:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -584,6 +592,10 @@
           data-doc-search-tag="httpserver: proc parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,
     start, length: int64]" href="powpow/proto/httpserver.html#parseRange%2Cstring%2Cint64">httpserver: proc parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,
     start, length: int64]</a></li>
+          </ul></dd>
+<dt><a name="parseWsFrames" href="#parseWsFrames"><span>parseWsFrames:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: proc parseWsFrames(ws: WsConnection; data: openArray[byte])" href="powpow/proto/ws.html#parseWsFrames%2CWsConnection%2CopenArray%5Bbyte%5D">ws: proc parseWsFrames(ws: WsConnection; data: openArray[byte])</a></li>
           </ul></dd>
 <dt><a name="peekAll" href="#peekAll"><span>peekAll:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -750,8 +762,10 @@
 <dt><a name="sendFile" href="#sendFile"><span>sendFile:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc sendFile(res: HttpResponse; path: string;
-         req: HttpRequest = default(HttpRequest); closeConn = true)" href="powpow/proto/httpserver.html#sendFile%2CHttpResponse%2Cstring%2CHttpRequest">httpserver: proc sendFile(res: HttpResponse; path: string;
-         req: HttpRequest = default(HttpRequest); closeConn = true)</a></li>
+         req: HttpRequest = default(HttpRequest); closeConn = true;
+         contentDisposition = true)" href="powpow/proto/httpserver.html#sendFile%2CHttpResponse%2Cstring%2CHttpRequest">httpserver: proc sendFile(res: HttpResponse; path: string;
+         req: HttpRequest = default(HttpRequest); closeConn = true;
+         contentDisposition = true)</a></li>
           </ul></dd>
 <dt><a name="sendFileChunk" href="#sendFileChunk"><span>sendFileChunk:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -790,6 +804,14 @@
           data-doc-search-tag="tcp: proc sendv(conn: Connection;
       parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int" href="powpow/net/tcp.html#sendv%2CConnection%2CopenArray%5Btuple%5Bptr.UncheckedArray%5Bbyte%5D%2Cint%5D%5D">tcp: proc sendv(conn: Connection;
       parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int</a></li>
+          </ul></dd>
+<dt><a name="serveStatic" href="#serveStatic"><span>serveStatic:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;
+            fsRoot: string;
+            indexFiles: seq[string] = @[&quot;index.html&quot;, &quot;index.htm&quot;]): bool" href="powpow/proto/httpserver.html#serveStatic%2CHttpResponse%2CHttpRequest%2Cstring%2Cstring%2Cseq%5Bstring%5D">httpserver: proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;
+            fsRoot: string;
+            indexFiles: seq[string] = @[&quot;index.html&quot;, &quot;index.htm&quot;]): bool</a></li>
           </ul></dd>
 <dt><a name="setKeepAliveTimeout" href="#setKeepAliveTimeout"><span>setKeepAliveTimeout:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -919,9 +941,11 @@
 <li><a class="reference external"
           data-doc-search-tag="ws: proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
-                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection" href="powpow/proto/ws.html#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb">ws: proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
+                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
+                 maxFrameSize: int = DefaultMaxFrameSize): WsConnection" href="powpow/proto/ws.html#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint">ws: proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
-                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil): WsConnection</a></li>
+                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
+                 maxFrameSize: int = DefaultMaxFrameSize): WsConnection</a></li>
           </ul></dd>
 <dt><a name="Write" href="#Write"><span>Write:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -997,7 +1021,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 22:51:16 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-17 11:37:36 UTC</small>
       </div>
     </div>
   </div>

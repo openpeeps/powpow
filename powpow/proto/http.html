@@ -64,6 +64,7 @@
       <li><a class="reference" href="#BodyStream" title="BodyStream = object">BodyStream</a></li>
 <li><a class="reference" href="#HttpBodyCallback" title="HttpBodyCallback = proc (data: openArray[byte]; done: bool) {.closure.}">HttpBodyCallback</a></li>
 <li><a class="reference" href="#HttpParser" title="HttpParser = ref object
+  maxBodySize*: int64        ## Max body size (0 = unlimited)
   connectionClose*: bool     ## Connection: close seen
   onBodyData*: HttpBodyCallback ## Called as body bytes arrive (nil = buffered mode)
   bodyStreamed*: int64       ## Bytes streamed via callback so far
@@ -292,6 +293,7 @@
 </div>
 <div id="HttpParser">
   <dt><pre><a href="#HttpParser"><span class="Identifier">HttpParser</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
+  <span class="Identifier">maxBodySize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>        <span class="Comment">## Max body size (0 = unlimited)</span>
   <span class="Identifier">connectionClose</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>     <span class="Comment">## Connection: close seen</span>
   <span class="Identifier">onBodyData</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HttpBodyCallback"><span class="Identifier">HttpBodyCallback</span></a> <span class="Comment">## Called as body bytes arrive (nil = buffered mode)</span>
   <span class="Identifier">bodyStreamed</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>       <span class="Comment">## Bytes streamed via callback so far</span>
@@ -811,7 +813,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-16 22:51:15 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-17 11:37:36 UTC</small>
       </div>
     </div>
   </div>
