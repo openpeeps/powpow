@@ -372,25 +372,37 @@ proc scanHeaders(p: HttpParser): bool =
                 if ch != clKey[j] and ch != (char(ord(clKey[j]) xor 32)):
                   isCL = false
                   break
-                if isCL:
-                  # Parse the numeric value
-                  var valStart = lineStart + clKey.len
-                  while valStart < i and char(buf[valStart]) == ' ':
-                    inc valStart
-                  var num = 0
-                  var j = valStart
-                  while j < i and char(buf[j]) in '0'..'9':
-                    if num > high(int) div 10:
-                      p.phase = PhaseError
-                      p.errorCode = Http413
-                      return false
-                    num = num * 10 + (ord(char(buf[j])) - ord('0'))
-                    inc j
-                  if p.maxBodySize > 0 and num > p.maxBodySize:
-                    p.phase = PhaseError
-                    p.errorCode = Http413
-                    return false
-                  p.contentLength = num
+            if isCL:
+              # Parse the numeric value
+              var valStart = lineStart + clKey.len
+              while valStart < i and char(buf[valStart]) == ' ':
+                inc valStart
+              if valStart < i and char(buf[valStart]) == '-':
+                p.phase = PhaseError
+                p.errorCode = Http400
+                return false
+              var num = 0
+              var j = valStart
+              while j < i and char(buf[j]) in '0'..'9':
+                if num > high(int) div 10:
+                  p.phase = PhaseError
+                  p.errorCode = Http413
+                  return false
+                num = num * 10 + (ord(char(buf[j])) - ord('0'))
+                inc j
+              if j == valStart:
+                p.phase = PhaseError
+                p.errorCode = Http400
+                return false
+              if p.maxBodySize > 0 and num > p.maxBodySize:
+                p.phase = PhaseError
+                p.errorCode = Http413
+                return false
+              if p.contentLength >= 0 and p.contentLength != num:
+                p.phase = PhaseError
+                p.errorCode = Http400
+                return false
+              p.contentLength = num
 
         # Quick check for Transfer-Encoding
         if lineLen >= 19:
@@ -495,12 +507,18 @@ proc parseChunkSize(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.in
   while i < maxLen:
     let c = char(buf[i])
     if c >= '0' and c <= '9':
+      if size > high(int) div 16:
+        return -1
       size = size * 16 + (ord(c) - ord('0'))
       foundDigit = true
     elif c >= 'a' and c <= 'f':
+      if size > high(int) div 16:
+        return -1
       size = size * 16 + (ord(c) - ord('a') + 10)
       foundDigit = true
     elif c >= 'A' and c <= 'F':
+      if size > high(int) div 16:
+        return -1
       size = size * 16 + (ord(c) - ord('A') + 10)
       foundDigit = true
     elif c == ';' or c == ' ':

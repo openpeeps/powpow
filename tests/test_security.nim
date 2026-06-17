@@ -95,6 +95,44 @@ test "test_max_request_line_exceeded":
   doAssert parser.isError()
   doAssert parser.error() == Http414
 
+test "test_chunk_size_overflow_rejected":
+  let raw = "POST /overflow HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "FFFFFFFFFFFFFFFF\r\n" &
+            "X".repeat(1) & "\r\n" &
+            "0\r\n\r\n"
+  let parser = newHttpParser()
+  parser.maxBodySize = 100
+  parser.feed(raw)
+  doAssert parser.isError(), "chunk hex overflow should be rejected"
+  doAssert parser.error() == Http400
+
+test "test_duplicate_content_length_different":
+  let raw = "POST /dup HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nContent-Length: 10\r\n\r\nhello"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isError(), "duplicate CL with different values should be rejected"
+  doAssert parser.error() == Http400
+
+test "test_duplicate_content_length_same":
+  let raw = "POST /dup HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isComplete(), "duplicate CL with same value should be accepted"
+
+test "test_negative_content_length_rejected":
+  let raw = "GET /neg HTTP/1.1\r\nHost: localhost\r\nContent-Length: -5\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isError(), "negative CL should be rejected"
+  doAssert parser.error() == Http400
+
+test "test_malformed_content_length_rejected":
+  let raw = "GET /mal HTTP/1.1\r\nHost: localhost\r\nContent-Length: abc\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isError(), "malformed CL should be rejected"
+  doAssert parser.error() == Http400
+
 # ══════════════════════════════════════════════════════════════════════
 # Section 2: HTTP Server Security
 # ══════════════════════════════════════════════════════════════════════
