@@ -763,9 +763,9 @@
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc sendFile(res: HttpResponse; path: string;
          req: HttpRequest = default(HttpRequest); closeConn = true;
-         contentDisposition = true)" href="powpow/proto/httpserver.html#sendFile%2CHttpResponse%2Cstring%2CHttpRequest">httpserver: proc sendFile(res: HttpResponse; path: string;
+         contentDisposition = true; skipRange = false)" href="powpow/proto/httpserver.html#sendFile%2CHttpResponse%2Cstring%2CHttpRequest">httpserver: proc sendFile(res: HttpResponse; path: string;
          req: HttpRequest = default(HttpRequest); closeConn = true;
-         contentDisposition = true)</a></li>
+         contentDisposition = true; skipRange = false)</a></li>
           </ul></dd>
 <dt><a name="sendFileChunk" href="#sendFileChunk"><span>sendFileChunk:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -804,6 +804,14 @@
           data-doc-search-tag="tcp: proc sendv(conn: Connection;
       parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int" href="powpow/net/tcp.html#sendv%2CConnection%2CopenArray%5Btuple%5Bptr.UncheckedArray%5Bbyte%5D%2Cint%5D%5D">tcp: proc sendv(conn: Connection;
       parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int</a></li>
+          </ul></dd>
+<dt><a name="serveFile" href="#serveFile"><span>serveFile:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc serveFile(res: HttpResponse; req: HttpRequest; path: string;
+          fsRoot: string = &quot;&quot;; contentType: string = &quot;&quot;; attach: bool = false;
+          etag: string = &quot;&quot;; lastModified: string = &quot;&quot;; chunkSize: int64 = 0): bool" href="powpow/proto/httpserver.html#serveFile%2CHttpResponse%2CHttpRequest%2Cstring%2Cstring%2Cstring%2Cbool%2Cstring%2Cstring%2Cint64">httpserver: proc serveFile(res: HttpResponse; req: HttpRequest; path: string;
+          fsRoot: string = &quot;&quot;; contentType: string = &quot;&quot;; attach: bool = false;
+          etag: string = &quot;&quot;; lastModified: string = &quot;&quot;; chunkSize: int64 = 0): bool</a></li>
           </ul></dd>
 <dt><a name="serveStatic" href="#serveStatic"><span>serveStatic:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1021,7 +1029,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-18 01:11:45 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-18 01:52:04 UTC</small>
       </div>
     </div>
   </div>
