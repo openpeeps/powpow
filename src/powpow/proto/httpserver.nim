@@ -20,7 +20,7 @@
 ##   , Port(9000)
 ##   ```
 
-import std/[httpcore, tables, options, net, strutils, os, posix]
+import std/[httpcore, tables, options, net, strutils, os, posix, times]
 
 import ../net/tcp
 import ../net/common
@@ -350,12 +350,15 @@ proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) 
 proc sendFile*(res: HttpResponse, path: string;
                req: HttpRequest = default(HttpRequest);
                closeConn = true,
-               contentDisposition = true) =
+               contentDisposition = true,
+               skipRange = false) =
   ## Send a file for download using zero-copy when possible.
   ## Adds `Content-Disposition: attachment; filename="..."` when `contentDisposition` is true.
   ## Supports HTTP Range requests when `req` is provided.
   ## `closeConn` controls connection lifetime: true (default) closes after
   ## the transfer; false keeps the connection alive.
+  ## `skipRange` bypasses Range header parsing (used when upper layer
+  ## already decided Range should not be honored via If-Range).
   {.gcsafe.}:
     if res.sent: return
 
@@ -374,7 +377,7 @@ proc sendFile*(res: HttpResponse, path: string;
     var rangeLen = fileSize
     var status = Http200
 
-    if req != default(HttpRequest):
+    if not skipRange and req != default(HttpRequest):
       let headers = req.getHeaders()
       if headers.hasKey("range"):
         let rangeVal = headers["range"].toLowerAscii()
@@ -858,3 +861,105 @@ proc serveStatic*(res: HttpResponse, req: HttpRequest,
     return false
   res.sendFile(fullPath, req, closeConn = false, contentDisposition = false)
   return true
+
+proc headerValue(headers: HttpHeaders, key: string): string =
+  if headers.hasKey(key):
+    result = $headers[key]
+  else:
+    result = ""
+
+proc serveFile*(res: HttpResponse, req: HttpRequest, path: string;
+                fsRoot: string = "";
+                contentType: string = "";
+                attach: bool = false;
+                etag: string = "";
+                lastModified: string = "";
+                chunkSize: int64 = 0): bool =
+  ## High-level static file serving with resume download support.
+  ## Handles Range, If-Range, If-None-Match, If-Modified-Since, and ETag.
+  ## Zero-copy: uses sendFile internally (sendfile syscall).
+  ## Returns true if the file was served, false if file not found.
+  ##
+  ## When `etag` is empty, a strong ETag is auto-computed from
+  ## file size and mtime. When `fsRoot` is set, path traversal
+  ## attempts are rejected with 403.
+  ## `chunkSize > 0` enables byte-limited streaming for media seeking.
+  {.gcsafe.}:
+    if res.sent: return true
+
+    if fsRoot.len > 0:
+      if path.contains("..") or path.contains("~"):
+        res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
+        return true
+      if not path.startsWith(fsRoot):
+        res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
+        return true
+
+    let fileFd = openFileRead(path)
+    if fileFd < 0:
+      return false
+    var fileSize = getFileSize(fileFd)
+    closeFile(fileFd)
+    if fileSize < 0:
+      return false
+
+    let mtime = getLastModificationTime(path)
+    let fileETag = if etag.len > 0: etag
+                   else: "\"" & $fileSize & "-" & $mtime.toUnix & "\""
+    let fileMTime = if lastModified.len > 0: lastModified
+                    else: format(mtime, "ddd, dd MMM yyyy HH:mm:ss") & " GMT"
+
+    let reqHeaders = req.getHeaders()
+    let ifNoneMatch = headerValue(reqHeaders, "If-None-Match")
+    let ifModifiedSince = headerValue(reqHeaders, "If-Modified-Since")
+    let ifRange = headerValue(reqHeaders, "If-Range")
+
+    if ifNoneMatch.len > 0:
+      if ifNoneMatch == "*" or ifNoneMatch == fileETag:
+        res.status(Http304)
+        res.header("ETag", fileETag)
+        res.header("Last-Modified", fileMTime)
+        res.header("Accept-Ranges", "bytes")
+        res.send()
+        return true
+
+    if ifModifiedSince.len > 0 and ifNoneMatch.len == 0:
+      try:
+        let since = parse(ifModifiedSince, "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+        if mtime <= since.toTime:
+          res.status(Http304)
+          res.header("ETag", fileETag)
+          res.header("Last-Modified", fileMTime)
+          res.header("Accept-Ranges", "bytes")
+          res.send()
+          return true
+      except:
+        discard
+
+    var honorRange = true
+    if ifRange.len > 0:
+      let matchesEtag = ifRange == fileETag
+      var matchesMtime = false
+      try:
+        let rangeDate = parse(ifRange, "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+        matchesMtime = mtime == rangeDate.toTime
+      except:
+        discard
+      if not matchesEtag and not matchesMtime:
+        honorRange = false
+
+    let ext = getFileExt(path)[1..^1]
+    let mimeType = if contentType.len > 0: contentType
+                   elif isExtension(ext): getMimeType(ext).get()
+                   else: "application/octet-stream"
+
+    res.header("ETag", fileETag)
+    res.header("Last-Modified", fileMTime)
+
+    if chunkSize > 0:
+      res.streamFile(path, req, chunkSize)
+    elif not honorRange:
+      res.sendFile(path, req, closeConn = false, contentDisposition = attach, skipRange = true)
+    else:
+      res.sendFile(path, req, closeConn = false, contentDisposition = attach)
+    return true

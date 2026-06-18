@@ -19,6 +19,13 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
     # optional Range support, configurable connection close
     res.sendFile("./Big_Buck_Bunny_4K.webm", req, closeConn = false)
 
+  elif path == "/resume":
+    # serveFile: high-level file serving with resume download support.
+    # Handles If-None-Match, If-Modified-Since, If-Range, and Range
+    # automatically. ETag is computed from file size + mtime.
+    # Returns 304 for unchanged files, 206 for partial content.
+    discard res.serveFile(req, "./Big_Buck_Bunny_4K.webm", attach = true)
+
   else:
     res.sendError(Http404, "Not Found")
 
