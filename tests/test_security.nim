@@ -512,3 +512,47 @@ test "test_rejects_body_exceeding_limit_without_allocation":
   parser.feed(headers)
   assert parser.isError(), "should immediately error on oversized Content-Length"
   assert parser.error() == Http413
+
+# ══════════════════════════════════════════════════════════════════════
+# Section 5: Rate Limiter Tests
+# ══════════════════════════════════════════════════════════════════════
+
+test "test_ratelimit_allows_within_window":
+  let loop = newLoop()
+  let rl = newRateLimiter(loop, maxRequests = 3, windowMs = 60_000)
+  assert rl.allow("1.2.3.4"), "first request should be allowed"
+  assert rl.allow("1.2.3.4"), "second request should be allowed"
+  assert rl.allow("1.2.3.4"), "third request should be allowed"
+  loop.close()
+
+test "test_ratelimit_denies_excess":
+  let loop = newLoop()
+  let rl = newRateLimiter(loop, maxRequests = 3, windowMs = 60_000)
+  assert rl.allow("1.2.3.4")
+  assert rl.allow("1.2.3.4")
+  assert rl.allow("1.2.3.4")
+  assert not rl.allow("1.2.3.4"), "4th request should be denied"
+  loop.close()
+
+test "test_ratelimit_separate_ips":
+  let loop = newLoop()
+  let rl = newRateLimiter(loop, maxRequests = 2, windowMs = 60_000)
+  assert rl.allow("1.2.3.4")
+  assert rl.allow("1.2.3.4")
+  assert not rl.allow("1.2.3.4")
+  assert rl.allow("5.6.7.8"), "different IP should be allowed independently"
+  loop.close()
+
+test "test_ratelimit_empty_ip_allowed":
+  let loop = newLoop()
+  let rl = newRateLimiter(loop, maxRequests = 1, windowMs = 60_000)
+  assert rl.allow(""), "empty IP should be allowed (not rate-limited)"
+  assert rl.allow(""), "empty IP should always be allowed"
+  loop.close()
+
+test "test_ratelimit_zero_max_disabled":
+  let loop = newLoop()
+  let rl = newRateLimiter(loop, maxRequests = 0, windowMs = 60_000)
+  assert rl.allow("1.2.3.4"), "maxRequests=0 means unlimited"
+  assert rl.allow("1.2.3.4")
+  loop.close()

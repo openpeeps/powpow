@@ -16,6 +16,19 @@ import common
 when not defined(windows):
   import std/posix
 
+when not defined(windows):
+  const NI_MAXHOST = 1025
+  const NI_NUMERICHOST = 1
+
+  proc formatIp(saAddr: Sockaddr_storage): string =
+    var host: array[NI_MAXHOST, char]
+    let sa = cast[ptr Sockaddr](unsafeAddr saAddr)
+    let salen = getSockLen(unsafeAddr saAddr)
+    if getnameinfo(sa, salen, addr host[0], host.len.SockLen, nil, 0, NI_NUMERICHOST) == 0:
+      result = $cstring(addr host[0])
+    else:
+      result = "unknown"
+
 const
   MaxBufPoolSize* = 1024
   MaxConnPoolSize* = 1024
@@ -53,6 +66,7 @@ type
     loop*:            Loop
     server*:          TcpServer
     state*:           ConnState
+    clientIp*:        string
     readBuf:          ptr UncheckedArray[byte]
     readBufLen:       int
     writeBuf:         seq[byte]
@@ -385,6 +399,8 @@ proc acceptClients(server: TcpServer) =
       return
     
     let conn = acquireConnection(server, clientFd)
+    when not defined(windows):
+      conn.clientIp = formatIp(clientAddr)
 
     if server.onAccept != nil:
       server.onAccept(conn)

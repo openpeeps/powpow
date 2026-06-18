@@ -596,6 +596,9 @@ proc getConn*(res: HttpResponse): Connection {.inline.} =
   ## handlers (e.g. WebSocket) that need direct access to the socket.
   res.conn
 
+proc getClientIp*(res: HttpResponse): string =
+  if res.conn != nil: res.conn.clientIp else: ""
+
 proc markSent*(res: HttpResponse) {.inline.} =
   ## Mark this response as sent without writing any bytes.
   ## Used by upgrade handlers that send the response manually.
@@ -709,6 +712,7 @@ proc removeSession*(server: HttpServer, conn: Connection) =
 
 proc dispatchRequest(server: HttpServer, conn: Connection,
                      req: HttpRequest) =
+  req.conn = conn
   let res = acquireHttpResponse(server, conn)
   if req.getConnectionClose():
     res.closeConn = true

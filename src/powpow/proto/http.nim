@@ -99,6 +99,7 @@ type
     ## A parsed HTTP request with lazy accessor methods.
     parser*:     HttpParser
     httpMethod*: HttpMethod
+    conn*:       Connection
     streamer*:   MultipartStreamerRef
     streamPath*: string
 
@@ -888,6 +889,10 @@ proc getContentLength*(req: HttpRequest): int {.inline.} =
 proc getConnectionClose*(req: HttpRequest): bool {.inline.} =
   ## Returns true if the client sent "Connection: close".
   req.parser.connectionClose
+
+proc getClientIp*(req: HttpRequest): string =
+  ## Get the client's IP address as a string, or "" if not available.
+  if req.conn != nil: req.conn.clientIp else: ""
 
 proc getBody*(req: HttpRequest): seq[byte] =
   ## Get the request body. Returns empty seq if no body.
