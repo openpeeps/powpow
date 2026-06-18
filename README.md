@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://github.com/openpeeps/powpow/blob/main/.github/powpow_logo.png" width="80px"><br>
-  PowPow 💥  A high-performance, event notification library for Nim
+  PowPow 💥  A high-performance event notification library for Nim
 </p>
 
 <p align="center">
