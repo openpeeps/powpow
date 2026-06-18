@@ -291,7 +291,7 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
       let finalOp = ws.fragOpcode
       ws.assembling = false
       if not ws.onMessage.isNil:
-        ws.onMessage(ws, WsFrameKind(finalOp), ws.assembleBuf)
+        ws.onMessage(ws, cast[WsFrameKind](finalOp), ws.assembleBuf)
       ws.assembleBuf.setLen(0)
   of 0x1, 0x2:
     if ws.assembling:
@@ -303,9 +303,9 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
     if p.fin:
       if not ws.onMessage.isNil:
         if plen > 0:
-          ws.onMessage(ws, WsFrameKind(opcode), p.payload.toOpenArray(0, plen - 1))
+          ws.onMessage(ws, cast[WsFrameKind](opcode), p.payload.toOpenArray(0, plen - 1))
         else:
-          ws.onMessage(ws, WsFrameKind(opcode), [])
+          ws.onMessage(ws, cast[WsFrameKind](opcode), [])
     else:
       ws.assembling = true
       ws.fragOpcode = opcode
