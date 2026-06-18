@@ -73,6 +73,7 @@
 <li><a class="reference" href="#HttpRequest" title="HttpRequest = ref object
   parser*: HttpParser
   httpMethod*: HttpMethod
+  conn*: Connection
   streamer*: MultipartStreamerRef
   streamPath*: string
   urlVal*: string
@@ -137,6 +138,10 @@
 </ul>
 <ul class="simple nested-toc-section">getBodyView
   <li><a class="reference" href="#getBodyView%2CHttpParser" title="getBodyView(p: HttpParser): tuple[data: ptr UncheckedArray[byte], len: int]">getBodyView(p: HttpParser): tuple[data: ptr UncheckedArray[byte], len: int]</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">getClientIp
+  <li><a class="reference" href="#getClientIp%2CHttpRequest" title="getClientIp(req: HttpRequest): string">getClientIp(req: HttpRequest): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getConnectionClose
@@ -309,6 +314,7 @@
   <dt><pre><a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
   <span class="Identifier">parser</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a>
   <span class="Identifier">httpMethod</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span>
+  <span class="Identifier">conn</span><span class="Operator">*</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a>
   <span class="Identifier">streamer</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">MultipartStreamerRef</span>
   <span class="Identifier">streamPath</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
   <span class="Identifier">urlVal</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
@@ -481,6 +487,17 @@
     <p>Zero-copy pointer into the parser buffer for the entire body. No allocation. The pointer is valid until <tt class="docutils literal"><span class="pre"><span class="Identifier">feed</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> is called again.</p>
 <p>For Content-Length bodies: points to p.buf<a class="reference internal" href="#p.headerEnd">p.headerEnd</a>, len = contentLength. For chunked bodies: points to decoded data in p.buf<a class="reference internal" href="#p.headerEnd">p.headerEnd</a>, len = chunkBodyLen. Returns (nil, 0) if no body is present.</p>
 
+    
+  </dd>
+</div>
+
+</div>
+<div id="getClientIp-procs-all">
+  <div id="getClientIp,HttpRequest">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getClientIp%2CHttpRequest"><span class="Identifier">getClientIp</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Get the client's IP address as a string, or &quot;&quot; if not available.
     
   </dd>
 </div>
@@ -813,7 +830,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-18 01:52:04 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-18 03:22:55 UTC</small>
       </div>
     </div>
   </div>

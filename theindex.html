@@ -28,7 +28,7 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">Index</h1>
-      Modules: <a href="index.html">powpow</a>, <a href="powpow/fswatch.html">powpow/fswatch</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/types.html">powpow/types</a>.<br/><p /><h2>API symbols</h2>
+      Modules: <a href="index.html">powpow</a>, <a href="powpow/fswatch.html">powpow/fswatch</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/ratelimit.html">powpow/proto/ratelimit</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/types.html">powpow/types</a>.<br/><p /><h2>API symbols</h2>
 <dl><dt><a name="%60%3D%3D%60" href="#%60%3D%3D%60"><span>`==`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="types: proc `==`(a, b: TimerId): bool" href="powpow/types.html#%3D%3D%2CTimerId%2CTimerId">types: proc `==`(a, b: TimerId): bool</a></li>
@@ -55,6 +55,10 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId" href="powpow/loop.html#addTimer%2CLoop%2Cint%2CTimerCallback">loop: proc addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId</a></li>
           </ul></dd>
+<dt><a name="allow" href="#allow"><span>allow:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ratelimit: proc allow(rl: RateLimiter; ip: string): bool" href="powpow/proto/ratelimit.html#allow%2CRateLimiter%2Cstring">ratelimit: proc allow(rl: RateLimiter; ip: string): bool</a></li>
+          </ul></dd>
 <dt><a name="bindUdp" href="#bindUdp"><span>bindUdp:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="udp: proc bindUdp(loop: Loop; address: string; port: int; onData: OnUdpData): UdpSocket" href="powpow/net/udp.html#bindUdp%2CLoop%2Cstring%2Cint%2COnUdpData">udp: proc bindUdp(loop: Loop; address: string; port: int; onData: OnUdpData): UdpSocket</a></li>
@@ -78,6 +82,10 @@
 <dt><a name="cancelTimer" href="#cancelTimer"><span>cancelTimer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="loop: proc cancelTimer(loop: Loop; id: TimerId)" href="powpow/loop.html#cancelTimer%2CLoop%2CTimerId">loop: proc cancelTimer(loop: Loop; id: TimerId)</a></li>
+          </ul></dd>
+<dt><a name="check" href="#check"><span>check:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ratelimit: proc check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool" href="powpow/proto/ratelimit.html#check%2CRateLimiter%2CHttpRequest%2CHttpResponse">ratelimit: proc check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool</a></li>
           </ul></dd>
 <dt><a name="close" href="#close"><span>close:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -311,6 +319,12 @@
 <li><a class="reference external"
           data-doc-search-tag="http: proc getBodyView(p: HttpParser): tuple[data: ptr UncheckedArray[byte], len: int]" href="powpow/proto/http.html#getBodyView%2CHttpParser">http: proc getBodyView(p: HttpParser): tuple[data: ptr UncheckedArray[byte], len: int]</a></li>
           </ul></dd>
+<dt><a name="getClientIp" href="#getClientIp"><span>getClientIp:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc getClientIp(req: HttpRequest): string" href="powpow/proto/http.html#getClientIp%2CHttpRequest">http: proc getClientIp(req: HttpRequest): string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc getClientIp(res: HttpResponse): string" href="powpow/proto/httpserver.html#getClientIp%2CHttpResponse">httpserver: proc getClientIp(res: HttpResponse): string</a></li>
+          </ul></dd>
 <dt><a name="getConn" href="#getConn"><span>getConn:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc getConn(res: HttpResponse): Connection" href="powpow/proto/httpserver.html#getConn%2CHttpResponse">httpserver: proc getConn(res: HttpResponse): Connection</a></li>
@@ -525,6 +539,10 @@
 <li><a class="reference external"
           data-doc-search-tag="multithread: proc newMultiThreadHttpServer(numThreads: int = 0): MultiThreadHttpServer" href="powpow/proto/multithread.html#newMultiThreadHttpServer%2Cint">multithread: proc newMultiThreadHttpServer(numThreads: int = 0): MultiThreadHttpServer</a></li>
           </ul></dd>
+<dt><a name="newRateLimiter" href="#newRateLimiter"><span>newRateLimiter:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ratelimit: proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter" href="powpow/proto/ratelimit.html#newRateLimiter%2CLoop%2Cint%2Cint">ratelimit: proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter</a></li>
+          </ul></dd>
 <dt><a name="newTcpServer" href="#newTcpServer"><span>newTcpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: proc newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;
@@ -660,6 +678,10 @@
 <dt><a name="populatePools" href="#populatePools"><span>populatePools:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc populatePools(server: HttpServer; poolSize = 256)" href="powpow/proto/httpserver.html#populatePools%2CHttpServer%2Cint">httpserver: proc populatePools(server: HttpServer; poolSize = 256)</a></li>
+          </ul></dd>
+<dt><a name="RateLimiter" href="#RateLimiter"><span>RateLimiter:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ratelimit: type RateLimiter" href="powpow/proto/ratelimit.html#RateLimiter">ratelimit: type RateLimiter</a></li>
           </ul></dd>
 <dt><a name="Read" href="#Read"><span>Read:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1029,7 +1051,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-18 01:52:04 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-18 03:22:56 UTC</small>
       </div>
     </div>
   </div>

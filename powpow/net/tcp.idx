@@ -1,30 +1,30 @@
 nimTitle	tcp	powpow/net/tcp.html	module powpow/net/tcp		0
-nim	MaxBufPoolSize	powpow/net/tcp.html#MaxBufPoolSize	const MaxBufPoolSize		20
-nim	MaxConnPoolSize	powpow/net/tcp.html#MaxConnPoolSize	const MaxConnPoolSize		21
-nim	Connecting	powpow/net/tcp.html#Connecting	ConnState.Connecting		48
-nim	Connected	powpow/net/tcp.html#Connected	ConnState.Connected		48
-nim	Closing	powpow/net/tcp.html#Closing	ConnState.Closing		48
-nim	Closed	powpow/net/tcp.html#Closed	ConnState.Closed		48
-nim	ConnState	powpow/net/tcp.html#ConnState	enum ConnState		48
-nim	Connection	powpow/net/tcp.html#Connection	type Connection		51
-nim	OnAccept	powpow/net/tcp.html#OnAccept	type OnAccept		67
-nim	OnData	powpow/net/tcp.html#OnData	type OnData		68
-nim	OnClose	powpow/net/tcp.html#OnClose	type OnClose		69
-nim	TcpServer	powpow/net/tcp.html#TcpServer	type TcpServer		71
-nim	newConnection	powpow/net/tcp.html#newConnection,SocketHandle,Loop,TcpServer,ptr.UncheckedArray[byte],int	proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;\n              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection		83
-nim	close	powpow/net/tcp.html#close,Connection	proc close(conn: Connection)		95
-nim	send	powpow/net/tcp.html#send,Connection,openArray[byte]	proc send(conn: Connection; data: openArray[byte]): int		129
-nim	send	powpow/net/tcp.html#send,Connection,string	proc send(conn: Connection; data: string): int		164
-nim	sendv	powpow/net/tcp.html#sendv,Connection,openArray[tuple[ptr.UncheckedArray[byte],int]]	proc sendv(conn: Connection;\n      parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int		167
-nim	shutdown	powpow/net/tcp.html#shutdown,Connection	proc shutdown(conn: Connection)		250
-nim	closeAfterDrain	powpow/net/tcp.html#closeAfterDrain,Connection	proc closeAfterDrain(conn: Connection)		261
-nim	closeAndRelease	powpow/net/tcp.html#closeAndRelease,Connection	proc closeAndRelease(conn: Connection)		268
-nim	continueSendFile	powpow/net/tcp.html#continueSendFile,Connection	proc continueSendFile(conn: Connection): bool		274
-nim	listen	powpow/net/tcp.html#listen,TcpServer,string,int	proc listen(server: TcpServer; address: string; port: int)		402
-nim	listenUnix	powpow/net/tcp.html#listenUnix,TcpServer,string,int	proc listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)		428
-nim	close	powpow/net/tcp.html#close,TcpServer	proc close(server: TcpServer)		465
-nim	injectFd	powpow/net/tcp.html#injectFd,TcpServer,SocketHandle	proc injectFd(server: TcpServer; clientFd: SocketHandle)		481
-nim	newTcpServer	powpow/net/tcp.html#newTcpServer,Loop,OnData,OnAccept,OnClose	proc newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;\n             onClose: OnClose = nil): TcpServer		493
-nim	connect	powpow/net/tcp.html#connect,Loop,string,int,proc(Connection),OnData,OnClose	proc connect(loop: Loop; address: string; port: int;\n        onConnect: proc (conn: Connection) {.closure.}; onData: OnData;\n        onClose: OnClose = nil)		543
-nimgrp	close	powpow/net/tcp.html#close-procs-all	proc		95
-nimgrp	send	powpow/net/tcp.html#send-procs-all	proc		129
+nim	MaxBufPoolSize	powpow/net/tcp.html#MaxBufPoolSize	const MaxBufPoolSize		33
+nim	MaxConnPoolSize	powpow/net/tcp.html#MaxConnPoolSize	const MaxConnPoolSize		34
+nim	Connecting	powpow/net/tcp.html#Connecting	ConnState.Connecting		61
+nim	Connected	powpow/net/tcp.html#Connected	ConnState.Connected		61
+nim	Closing	powpow/net/tcp.html#Closing	ConnState.Closing		61
+nim	Closed	powpow/net/tcp.html#Closed	ConnState.Closed		61
+nim	ConnState	powpow/net/tcp.html#ConnState	enum ConnState		61
+nim	Connection	powpow/net/tcp.html#Connection	type Connection		64
+nim	OnAccept	powpow/net/tcp.html#OnAccept	type OnAccept		81
+nim	OnData	powpow/net/tcp.html#OnData	type OnData		82
+nim	OnClose	powpow/net/tcp.html#OnClose	type OnClose		83
+nim	TcpServer	powpow/net/tcp.html#TcpServer	type TcpServer		85
+nim	newConnection	powpow/net/tcp.html#newConnection,SocketHandle,Loop,TcpServer,ptr.UncheckedArray[byte],int	proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;\n              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection		97
+nim	close	powpow/net/tcp.html#close,Connection	proc close(conn: Connection)		109
+nim	send	powpow/net/tcp.html#send,Connection,openArray[byte]	proc send(conn: Connection; data: openArray[byte]): int		143
+nim	send	powpow/net/tcp.html#send,Connection,string	proc send(conn: Connection; data: string): int		178
+nim	sendv	powpow/net/tcp.html#sendv,Connection,openArray[tuple[ptr.UncheckedArray[byte],int]]	proc sendv(conn: Connection;\n      parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int		181
+nim	shutdown	powpow/net/tcp.html#shutdown,Connection	proc shutdown(conn: Connection)		264
+nim	closeAfterDrain	powpow/net/tcp.html#closeAfterDrain,Connection	proc closeAfterDrain(conn: Connection)		275
+nim	closeAndRelease	powpow/net/tcp.html#closeAndRelease,Connection	proc closeAndRelease(conn: Connection)		282
+nim	continueSendFile	powpow/net/tcp.html#continueSendFile,Connection	proc continueSendFile(conn: Connection): bool		288
+nim	listen	powpow/net/tcp.html#listen,TcpServer,string,int	proc listen(server: TcpServer; address: string; port: int)		418
+nim	listenUnix	powpow/net/tcp.html#listenUnix,TcpServer,string,int	proc listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)		444
+nim	close	powpow/net/tcp.html#close,TcpServer	proc close(server: TcpServer)		481
+nim	injectFd	powpow/net/tcp.html#injectFd,TcpServer,SocketHandle	proc injectFd(server: TcpServer; clientFd: SocketHandle)		497
+nim	newTcpServer	powpow/net/tcp.html#newTcpServer,Loop,OnData,OnAccept,OnClose	proc newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;\n             onClose: OnClose = nil): TcpServer		509
+nim	connect	powpow/net/tcp.html#connect,Loop,string,int,proc(Connection),OnData,OnClose	proc connect(loop: Loop; address: string; port: int;\n        onConnect: proc (conn: Connection) {.closure.}; onData: OnData;\n        onClose: OnClose = nil)		559
+nimgrp	close	powpow/net/tcp.html#close-procs-all	proc		109
+nimgrp	send	powpow/net/tcp.html#send-procs-all	proc		143
