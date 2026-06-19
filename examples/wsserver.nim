@@ -20,8 +20,7 @@ import std/[httpcore, posix]
 # A dedicated WebSocket server that handles the HTTP upgrade
 # handshake internally. No HTTP routes — pure WebSocket.
 
-let loop = newLoop()
-let wss = newWsServer(loop)
+let wss = newWsServer()
 
 var clientCount = 0
 
@@ -60,6 +59,4 @@ wss.listen("0.0.0.0", 9001)
 echo "⚡ Standalone WS server on ws://localhost:9001"
 echo "  Press Ctrl+C to stop"
 
-loop.run()
-wss.close()
-loop.close()
+wss.start()

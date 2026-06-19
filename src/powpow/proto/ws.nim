@@ -532,6 +532,14 @@ proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer
     maxFrameSize: maxFrameSize,
   )
 
+proc newWsServer*(maxFrameSize: int = DefaultMaxFrameSize): WsServer =
+  ## Create a standalone WebSocket server with its own event loop.
+  newWsServer(newLoop(), maxFrameSize)
+
+proc start*(wss: WsServer) =
+  ## Start the server's event loop. Blocks until the loop is stopped.
+  wss.loop.run()
+
 proc onOpen*(wss: WsServer, cb: WsOpenCb) =
   ## Set the callback for new WebSocket connections.
   wss.defaultOpen = cb
