@@ -121,6 +121,7 @@
 </ul>
 <ul class="simple nested-toc-section">newWsServer
   <li><a class="reference" href="#newWsServer%2CLoop%2Cint" title="newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer">newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
+<li><a class="reference" href="#newWsServer%2Cint" title="newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer">newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">onClose
@@ -165,6 +166,10 @@
 </ul>
 <ul class="simple nested-toc-section">sendText
   <li><a class="reference" href="#sendText%2CWsConnection%2Cstring" title="sendText(ws: WsConnection; s: string)">sendText(ws: WsConnection; s: string)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">start
+  <li><a class="reference" href="#start%2CWsServer" title="start(wss: WsServer)">start(wss: WsServer)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">websocketUpgrade
@@ -392,6 +397,15 @@
     
   </dd>
 </div>
+<div id="newWsServer,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newWsServer%2Cint"><span class="Identifier">newWsServer</span></a><span class="Other">(</span><span class="Identifier">maxFrameSize</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultMaxFrameSize</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create a standalone WebSocket server with its own event loop.
+    
+  </dd>
+</div>
 
 </div>
 <div id="onClose-procs-all">
@@ -522,6 +536,18 @@
 </div>
 
 </div>
+<div id="start-procs-all">
+  <div id="start,WsServer">
+  <dt><pre><span class="Keyword">proc</span> <a href="#start%2CWsServer"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">wss</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+                            <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Start the server's event loop. Blocks until the loop is stopped.
+    
+  </dd>
+</div>
+
+</div>
 <div id="websocketUpgrade-procs-all">
   <div id="websocketUpgrade,HttpResponse,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint"><span class="Identifier">websocketUpgrade</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span>
@@ -582,7 +608,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-19 02:58:48 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-19 03:18:18 UTC</small>
       </div>
     </div>
   </div>
