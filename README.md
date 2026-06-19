@@ -39,7 +39,7 @@ Check examples in the `examples/` directory, or see the [API reference](https://
 
 
 ## Dummy Benchmarks
-Here you can find some wrk-based benchmarks I manually ran via Github Actions (see [latest results here](https://github.com/openpeeps/powpow/actions/runs/27644007710/job/81751133711)).
+**Pow Pow is the #1 fastest HTTP server** from [Web Framework Benchmarks](https://web-frameworks-benchmark.netlify.app/result). Here you can find some wrk-based benchmarks I manually ran via Github Actions (see [latest results here](https://github.com/openpeeps/powpow/actions/runs/27644007710/job/81751133711))
 
 - Single-threaded (keep-alive)
 ```
