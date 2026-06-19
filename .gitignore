@@ -9,3 +9,4 @@ testresults/
 /examples/*
 !/examples/*.nim
 !/examples/*.nims
+!/examples/*.html

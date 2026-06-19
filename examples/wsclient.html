@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WebSocket Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2rem auto; padding: 0 1rem; }
+    #log { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 6px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 13px; }
+    #log .sent { color: #6a9955; }
+    #log .received { color: #569cd6; }
+    #log .info { color: #808080; }
+    #log .error { color: #f44747; }
+    input, button { padding: 0.5rem; font-size: 14px; }
+    input { flex: 1; }
+    .row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Pow Pow 💥 WebSocket</h1>
+  <div id="log"></div>
+  <div class="row">
+    <input id="msgInput" type="text" placeholder="Type a message…" disabled />
+    <button id="sendBtn" disabled>Send</button>
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+  </div>
+
+  <script>
+    const log = document.getElementById('log');
+    const input = document.getElementById('msgInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+
+    function append(msg, cls = 'info') {
+      const line = document.createElement('div');
+      line.className = cls;
+      const ts = new Date().toLocaleTimeString();
+      line.textContent = `[${ts}] ${msg}`;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    let ws = null;
+
+    function connect() {
+      if (ws) return;
+      append('Connecting to ws://localhost:9001 …');
+      ws = new WebSocket('ws://localhost:9001');
+
+      ws.onopen = () => {
+        append('✅ Connected', 'received');
+        input.disabled = false;
+        sendBtn.disabled = false;
+        connectBtn.disabled = true;
+        disconnectBtn.disabled = false;
+        input.focus();
+      };
+
+      ws.onmessage = (e) => {
+        append(`← ${e.data}`, 'received');
+      };
+
+      ws.onclose = (e) => {
+        append(`❌ Disconnected (code=${e.code}, reason="${e.reason}")`, 'error');
+        cleanup();
+      };
+
+      ws.onerror = () => {
+        append('⚠️ WebSocket error', 'error');
+      };
+    }
+
+    function disconnect() {
+      if (ws) {
+        ws.close();
+        append('Closing connection …');
+      }
+    }
+
+    function cleanup() {
+      ws = null;
+      input.disabled = true;
+      sendBtn.disabled = true;
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+    }
+
+    function send() {
+      const msg = input.value.trim();
+      if (!msg || !ws || ws.readyState !== WebSocket.OPEN) return;
+      append(`→ ${msg}`, 'sent');
+      ws.send(msg);
+      input.value = '';
+      input.focus();
+    }
+
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', disconnect);
+    sendBtn.addEventListener('click', send);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  </script>
+</body>
+</html>
