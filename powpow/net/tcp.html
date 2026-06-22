@@ -70,7 +70,8 @@
   sendFileFd*: int
   sendFileOff*: int64
   sendFileRemain*: int64
-  data*: pointer">Connection</a></li>
+  data*: pointer
+  when not defined(windows):">Connection</a></li>
 <li><a class="reference" href="#ConnState" title="ConnState = enum
   Connecting, Connected, Closing, Closed">ConnState</a></li>
 <li><a class="reference" href="#OnAccept" title="OnAccept = proc (conn: Connection) {.closure.}">OnAccept</a></li>
@@ -123,6 +124,10 @@
 </ul>
 <ul class="simple nested-toc-section">continueSendFile
   <li><a class="reference" href="#continueSendFile%2CConnection" title="continueSendFile(conn: Connection): bool">continueSendFile(conn: Connection): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">getClientIp
+  <li><a class="reference" href="#getClientIp%2CConnection" title="getClientIp(conn: Connection): string">getClientIp(conn: Connection): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">injectFd
@@ -198,7 +203,8 @@
   <span class="Identifier">sendFileFd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">sendFileOff</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
   <span class="Identifier">sendFileRemain</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
-  <span class="Identifier">data</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">pointer</span></pre></dt>
+  <span class="Identifier">data</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">pointer</span>
+  <span class="Keyword">when</span> <span class="Keyword">not</span> <span class="Identifier">defined</span><span class="Other">(</span><span class="Identifier">windows</span><span class="Other">)</span><span class="Other">:</span></pre></dt>
   <dd>
     
     
@@ -348,6 +354,17 @@
 </div>
 
 </div>
+<div id="getClientIp-procs-all">
+  <div id="getClientIp,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getClientIp%2CConnection"><span class="Identifier">getClientIp</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="injectFd-procs-all">
   <div id="injectFd,TcpServer,SocketHandle">
   <dt><pre><span class="Keyword">proc</span> <a href="#injectFd%2CTcpServer%2CSocketHandle"><span class="Identifier">injectFd</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#TcpServer"><span class="Identifier">TcpServer</span></a><span class="Other">;</span> <span class="Identifier">clientFd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.
@@ -465,7 +482,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-19 14:15:36 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 01:36:13 UTC</small>
       </div>
     </div>
   </div>

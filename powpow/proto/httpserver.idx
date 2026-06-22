@@ -5,36 +5,36 @@ nim	ConnHttp	powpow/proto/httpserver.html#ConnHttp	type ConnHttp		50
 nim	HttpServer	powpow/proto/httpserver.html#HttpServer	type HttpServer		55
 nim	DefaultKeepAliveMs	powpow/proto/httpserver.html#DefaultKeepAliveMs	const DefaultKeepAliveMs		70
 nim	getFileExt	powpow/proto/httpserver.html#getFileExt,string	proc getFileExt(path: string): string		75
-nim	parseRange	powpow/proto/httpserver.html#parseRange,string,int64	proc parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,\n    start, length: int64]		80
-nim	status	powpow/proto/httpserver.html#status,HttpResponse,HttpCode	proc status(res: HttpResponse; code: HttpCode): HttpResponse		151
-nim	header	powpow/proto/httpserver.html#header,HttpResponse,string,string	proc header(res: HttpResponse; key, value: string): HttpResponse		156
-nim	close	powpow/proto/httpserver.html#close,HttpResponse	proc close(res: HttpResponse): HttpResponse		161
-nim	send	powpow/proto/httpserver.html#send,HttpResponse,string	proc send(res: HttpResponse; body: string = "")		220
-nim	send	powpow/proto/httpserver.html#send,HttpResponse,seq[byte]	proc send(res: HttpResponse; body: seq[byte])		283
-nim	writeDisposition	powpow/proto/httpserver.html#writeDisposition,ptr.UncheckedArray[byte],string,int	proc writeDisposition(buf: ptr UncheckedArray[byte]; name: string; p: var int)		345
-nim	sendFile	powpow/proto/httpserver.html#sendFile,HttpResponse,string,HttpRequest	proc sendFile(res: HttpResponse; path: string;\n         req: HttpRequest = default(HttpRequest); closeConn = true;\n         contentDisposition = true; skipRange = false)		350
-nim	DefaultChunkSize	powpow/proto/httpserver.html#DefaultChunkSize	const DefaultChunkSize		474
-nim	listen	powpow/proto/httpserver.html#listen,HttpServer,string,int	proc listen(server: HttpServer; address: string; port: int)		479
-nim	close	powpow/proto/httpserver.html#close,HttpServer	proc close(server: HttpServer)		480
-nim	streamFile	powpow/proto/httpserver.html#streamFile,HttpResponse,string,HttpRequest	proc streamFile(res: HttpResponse; path: string; req: HttpRequest;\n           chunkSize = DefaultChunkSize)		482
-nim	sendError	powpow/proto/httpserver.html#sendError,HttpResponse,HttpCode,string	proc sendError(res: HttpResponse; code: HttpCode; msg: string = "")		587
-nim	getConn	powpow/proto/httpserver.html#getConn,HttpResponse	proc getConn(res: HttpResponse): Connection		594
-nim	getClientIp	powpow/proto/httpserver.html#getClientIp,HttpResponse	proc getClientIp(res: HttpResponse): string		599
-nim	markSent	powpow/proto/httpserver.html#markSent,HttpResponse	proc markSent(res: HttpResponse)		602
-nim	populatePools	powpow/proto/httpserver.html#populatePools,HttpServer,int	proc populatePools(server: HttpServer; poolSize = 256)		648
-nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,Loop,bool	proc newHttpServer(loop: Loop; populate: bool = false): HttpServer		650
-nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,bool	proc newHttpServer(populate: bool = false): HttpServer		669
-nim	start	powpow/proto/httpserver.html#start,HttpServer,OnRequestCallback,Port	proc start(server: HttpServer; handler: OnRequestCallback; port: Port)		673
-nim	stop	powpow/proto/httpserver.html#stop,HttpServer	proc stop(server: HttpServer)		678
-nim	setKeepAliveTimeout	powpow/proto/httpserver.html#setKeepAliveTimeout,HttpServer,int	proc setKeepAliveTimeout(server: HttpServer; ms: int)		696
-nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,Connection	proc removeSession(server: HttpServer; conn: Connection)		700
-nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		786
-nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		803
-nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		832
-nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		838
-nim	serveStatic	powpow/proto/httpserver.html#serveStatic,HttpResponse,HttpRequest,string,string,seq[string]	proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;\n            fsRoot: string;\n            indexFiles: seq[string] = @["index.html", "index.htm"]): bool		842
-nim	serveFile	powpow/proto/httpserver.html#serveFile,HttpResponse,HttpRequest,string,string,string,bool,string,string,int64	proc serveFile(res: HttpResponse; req: HttpRequest; path: string;\n          fsRoot: string = ""; contentType: string = ""; attach: bool = false;\n          etag: string = ""; lastModified: string = ""; chunkSize: int64 = 0): bool		875
-nimgrp	close	powpow/proto/httpserver.html#close-procs-all	proc		161
-nimgrp	newhttpserver	powpow/proto/httpserver.html#newHttpServer-procs-all	proc		650
-nimgrp	send	powpow/proto/httpserver.html#send-procs-all	proc		220
+nim	parseRange	powpow/proto/httpserver.html#parseRange,string,int64	proc parseRange(rangeHeader: string; fileSize: int64): tuple[ok: bool,\n    start, length: int64]		79
+nim	status	powpow/proto/httpserver.html#status,HttpResponse,HttpCode	proc status(res: HttpResponse; code: HttpCode): HttpResponse		150
+nim	header	powpow/proto/httpserver.html#header,HttpResponse,string,string	proc header(res: HttpResponse; key, value: string): HttpResponse		155
+nim	close	powpow/proto/httpserver.html#close,HttpResponse	proc close(res: HttpResponse): HttpResponse		160
+nim	send	powpow/proto/httpserver.html#send,HttpResponse,string	proc send(res: HttpResponse; body: string = "")		219
+nim	send	powpow/proto/httpserver.html#send,HttpResponse,seq[byte]	proc send(res: HttpResponse; body: seq[byte])		282
+nim	writeDisposition	powpow/proto/httpserver.html#writeDisposition,ptr.UncheckedArray[byte],string,int	proc writeDisposition(buf: ptr UncheckedArray[byte]; name: string; p: var int)		344
+nim	sendFile	powpow/proto/httpserver.html#sendFile,HttpResponse,string,HttpRequest	proc sendFile(res: HttpResponse; path: string;\n         req: HttpRequest = default(HttpRequest); closeConn = true;\n         contentDisposition = true; skipRange = false)		349
+nim	DefaultChunkSize	powpow/proto/httpserver.html#DefaultChunkSize	const DefaultChunkSize		473
+nim	listen	powpow/proto/httpserver.html#listen,HttpServer,string,int	proc listen(server: HttpServer; address: string; port: int)		478
+nim	close	powpow/proto/httpserver.html#close,HttpServer	proc close(server: HttpServer)		479
+nim	streamFile	powpow/proto/httpserver.html#streamFile,HttpResponse,string,HttpRequest	proc streamFile(res: HttpResponse; path: string; req: HttpRequest;\n           chunkSize = DefaultChunkSize)		481
+nim	sendError	powpow/proto/httpserver.html#sendError,HttpResponse,HttpCode,string	proc sendError(res: HttpResponse; code: HttpCode; msg: string = "")		586
+nim	getConn	powpow/proto/httpserver.html#getConn,HttpResponse	proc getConn(res: HttpResponse): Connection		593
+nim	getClientIp	powpow/proto/httpserver.html#getClientIp,HttpResponse	proc getClientIp(res: HttpResponse): string		598
+nim	markSent	powpow/proto/httpserver.html#markSent,HttpResponse	proc markSent(res: HttpResponse)		601
+nim	populatePools	powpow/proto/httpserver.html#populatePools,HttpServer,int	proc populatePools(server: HttpServer; poolSize = 256)		647
+nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,Loop,bool	proc newHttpServer(loop: Loop; populate: bool = false): HttpServer		649
+nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,bool	proc newHttpServer(populate: bool = false): HttpServer		668
+nim	start	powpow/proto/httpserver.html#start,HttpServer,OnRequestCallback,Port	proc start(server: HttpServer; handler: OnRequestCallback; port: Port)		672
+nim	stop	powpow/proto/httpserver.html#stop,HttpServer	proc stop(server: HttpServer)		677
+nim	setKeepAliveTimeout	powpow/proto/httpserver.html#setKeepAliveTimeout,HttpServer,int	proc setKeepAliveTimeout(server: HttpServer; ms: int)		695
+nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,Connection	proc removeSession(server: HttpServer; conn: Connection)		699
+nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		785
+nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		802
+nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		831
+nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		837
+nim	serveStatic	powpow/proto/httpserver.html#serveStatic,HttpResponse,HttpRequest,string,string,seq[string]	proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;\n            fsRoot: string;\n            indexFiles: seq[string] = @["index.html", "index.htm"]): bool		841
+nim	serveFile	powpow/proto/httpserver.html#serveFile,HttpResponse,HttpRequest,string,string,string,bool,string,string,int64	proc serveFile(res: HttpResponse; req: HttpRequest; path: string;\n          fsRoot: string = ""; contentType: string = ""; attach: bool = false;\n          etag: string = ""; lastModified: string = ""; chunkSize: int64 = 0): bool		874
+nimgrp	close	powpow/proto/httpserver.html#close-procs-all	proc		160
+nimgrp	newhttpserver	powpow/proto/httpserver.html#newHttpServer-procs-all	proc		649
+nimgrp	send	powpow/proto/httpserver.html#send-procs-all	proc		219
 heading	Usage:	powpow/proto/httpserver.html#usagecolon	   Usage:		0

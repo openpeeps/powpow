@@ -7,24 +7,25 @@ nim	Closing	powpow/net/tcp.html#Closing	ConnState.Closing		61
 nim	Closed	powpow/net/tcp.html#Closed	ConnState.Closed		61
 nim	ConnState	powpow/net/tcp.html#ConnState	enum ConnState		61
 nim	Connection	powpow/net/tcp.html#Connection	type Connection		64
-nim	OnAccept	powpow/net/tcp.html#OnAccept	type OnAccept		81
-nim	OnData	powpow/net/tcp.html#OnData	type OnData		82
-nim	OnClose	powpow/net/tcp.html#OnClose	type OnClose		83
-nim	TcpServer	powpow/net/tcp.html#TcpServer	type TcpServer		85
-nim	newConnection	powpow/net/tcp.html#newConnection,SocketHandle,Loop,TcpServer,ptr.UncheckedArray[byte],int	proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;\n              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection		97
-nim	close	powpow/net/tcp.html#close,Connection	proc close(conn: Connection)		109
-nim	send	powpow/net/tcp.html#send,Connection,openArray[byte]	proc send(conn: Connection; data: openArray[byte]): int		143
-nim	send	powpow/net/tcp.html#send,Connection,string	proc send(conn: Connection; data: string): int		178
-nim	sendv	powpow/net/tcp.html#sendv,Connection,openArray[tuple[ptr.UncheckedArray[byte],int]]	proc sendv(conn: Connection;\n      parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int		181
-nim	shutdown	powpow/net/tcp.html#shutdown,Connection	proc shutdown(conn: Connection)		264
-nim	closeAfterDrain	powpow/net/tcp.html#closeAfterDrain,Connection	proc closeAfterDrain(conn: Connection)		275
-nim	closeAndRelease	powpow/net/tcp.html#closeAndRelease,Connection	proc closeAndRelease(conn: Connection)		282
-nim	continueSendFile	powpow/net/tcp.html#continueSendFile,Connection	proc continueSendFile(conn: Connection): bool		288
-nim	listen	powpow/net/tcp.html#listen,TcpServer,string,int	proc listen(server: TcpServer; address: string; port: int)		418
-nim	listenUnix	powpow/net/tcp.html#listenUnix,TcpServer,string,int	proc listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)		444
-nim	close	powpow/net/tcp.html#close,TcpServer	proc close(server: TcpServer)		481
-nim	injectFd	powpow/net/tcp.html#injectFd,TcpServer,SocketHandle	proc injectFd(server: TcpServer; clientFd: SocketHandle)		497
-nim	newTcpServer	powpow/net/tcp.html#newTcpServer,Loop,OnData,OnAccept,OnClose	proc newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;\n             onClose: OnClose = nil): TcpServer		509
-nim	connect	powpow/net/tcp.html#connect,Loop,string,int,proc(Connection),OnData,OnClose	proc connect(loop: Loop; address: string; port: int;\n        onConnect: proc (conn: Connection) {.closure.}; onData: OnData;\n        onClose: OnClose = nil)		559
-nimgrp	close	powpow/net/tcp.html#close-procs-all	proc		109
-nimgrp	send	powpow/net/tcp.html#send-procs-all	proc		143
+nim	OnAccept	powpow/net/tcp.html#OnAccept	type OnAccept		83
+nim	OnData	powpow/net/tcp.html#OnData	type OnData		84
+nim	OnClose	powpow/net/tcp.html#OnClose	type OnClose		85
+nim	TcpServer	powpow/net/tcp.html#TcpServer	type TcpServer		87
+nim	newConnection	powpow/net/tcp.html#newConnection,SocketHandle,Loop,TcpServer,ptr.UncheckedArray[byte],int	proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;\n              readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection		99
+nim	close	powpow/net/tcp.html#close,Connection	proc close(conn: Connection)		111
+nim	send	powpow/net/tcp.html#send,Connection,openArray[byte]	proc send(conn: Connection; data: openArray[byte]): int		145
+nim	send	powpow/net/tcp.html#send,Connection,string	proc send(conn: Connection; data: string): int		180
+nim	sendv	powpow/net/tcp.html#sendv,Connection,openArray[tuple[ptr.UncheckedArray[byte],int]]	proc sendv(conn: Connection;\n      parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int		183
+nim	shutdown	powpow/net/tcp.html#shutdown,Connection	proc shutdown(conn: Connection)		266
+nim	closeAfterDrain	powpow/net/tcp.html#closeAfterDrain,Connection	proc closeAfterDrain(conn: Connection)		277
+nim	closeAndRelease	powpow/net/tcp.html#closeAndRelease,Connection	proc closeAndRelease(conn: Connection)		284
+nim	continueSendFile	powpow/net/tcp.html#continueSendFile,Connection	proc continueSendFile(conn: Connection): bool		290
+nim	getClientIp	powpow/net/tcp.html#getClientIp,Connection	proc getClientIp(conn: Connection): string		339
+nim	listen	powpow/net/tcp.html#listen,TcpServer,string,int	proc listen(server: TcpServer; address: string; port: int)		427
+nim	listenUnix	powpow/net/tcp.html#listenUnix,TcpServer,string,int	proc listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)		453
+nim	close	powpow/net/tcp.html#close,TcpServer	proc close(server: TcpServer)		490
+nim	injectFd	powpow/net/tcp.html#injectFd,TcpServer,SocketHandle	proc injectFd(server: TcpServer; clientFd: SocketHandle)		506
+nim	newTcpServer	powpow/net/tcp.html#newTcpServer,Loop,OnData,OnAccept,OnClose	proc newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;\n             onClose: OnClose = nil): TcpServer		518
+nim	connect	powpow/net/tcp.html#connect,Loop,string,int,proc(Connection),OnData,OnClose	proc connect(loop: Loop; address: string; port: int;\n        onConnect: proc (conn: Connection) {.closure.}; onData: OnData;\n        onClose: OnClose = nil)		568
+nimgrp	close	powpow/net/tcp.html#close-procs-all	proc		111
+nimgrp	send	powpow/net/tcp.html#send-procs-all	proc		145
