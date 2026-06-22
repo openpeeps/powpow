@@ -147,19 +147,15 @@ proc newHttpResponse(conn: Connection): HttpResponse =
     closeConn:  false,
   )
 
-proc status*(res: HttpResponse, code: HttpCode): HttpResponse {.discardable.} =
-  ## Set the HTTP status code.
+proc status*(res: HttpResponse, code: HttpCode): HttpResponse {.inline, discardable.} =
   res.statusCode = code
   return res
 
-proc header*(res: HttpResponse, key, value: string): HttpResponse {.discardable.} =
-  ## Add a response header.
+proc header*(res: HttpResponse, key, value: string): HttpResponse {.inline, discardable.} =
   res.headers.add((key, value))
   return res
 
-proc close*(res: HttpResponse): HttpResponse {.discardable.} =
-  ## Mark this response to send "Connection: close" and shut down the
-  ## TCP connection after the response is sent.
+proc close*(res: HttpResponse): HttpResponse {.inline, discardable.} =
   res.closeConn = true
   return res
 
@@ -595,7 +591,7 @@ proc getConn*(res: HttpResponse): Connection {.inline.} =
   ## handlers (e.g. WebSocket) that need direct access to the socket.
   res.conn
 
-proc getClientIp*(res: HttpResponse): string =
+proc getClientIp*(res: HttpResponse): string {.inline.} =
   if res.conn != nil: res.conn.getClientIp() else: ""
 
 proc markSent*(res: HttpResponse) {.inline.} =
@@ -619,7 +615,7 @@ proc acquireHttpResponse(server: HttpServer, conn: Connection): HttpResponse =
       conn: conn, sent: false, statusCode: Http200,
       headers: @[], bodyBytes: @[], closeConn: false)
 
-proc releaseHttpResponse(server: HttpServer, res: HttpResponse) =
+proc releaseHttpResponse(server: HttpServer, res: HttpResponse) {.inline.} =
   if server.resPool.len < MaxResPoolSize:
     server.resPool.add(res)
 
@@ -687,7 +683,7 @@ proc acquireParser(server: HttpServer): HttpParser =
     result = newHttpParser()
   result.maxBodySize = server.maxBodySize
 
-proc releaseParser(server: HttpServer, parser: HttpParser) =
+proc releaseParser(server: HttpServer, parser: HttpParser) {.inline.} =
   if server.parserPool.len < MaxParserPoolSize:
     parser.reset()
     server.parserPool.add(parser)
@@ -783,6 +779,7 @@ proc listen*(server: HttpServer, address: string, port: int) =
 
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =
+    ## Listen on a Unix domain socket. `mode` is the file permission bits for the socket.
     server.tcpServer = newTcpServer(server.loop,
       onData = proc(conn: Connection, data: openArray[byte]) =
         server.handleConnectionData(conn, data)
@@ -794,12 +791,14 @@ when not defined(windows):
     server.tcpServer.listenUnix(path, mode)
 
 proc close*(server: HttpServer) =
+  ## Close the server and all active connections
   if server.tcpServer != nil:
     server.tcpServer.close()
   server.connRoots.clear()
   server.parserPool.setLen(0)
 
 proc ensureTcpServer*(server: HttpServer) =
+  ## Ensure the server has a TCP server instance
   if server.tcpServer != nil: return
   server.tcpServer = newTcpServer(server.loop,
     onData = proc(conn: Connection, data: openArray[byte]) =
@@ -828,9 +827,8 @@ proc populatePools*(server: HttpServer; poolSize = 256) =
       server.tcpServer.connPool.add(newConnection(
         SocketHandle(-1), server.loop, server.tcpServer, buf, DefaultBufSize))
 
-proc addConnection*(server: HttpServer, fd: SocketHandle) =
-  ## Inject a pre-accepted client fd into this HTTP server's event loop.
-  ## Used by multi-threaded acceptors that distribute connections to workers.
+proc addConnection*(server: HttpServer, fd: SocketHandle) {.inline.} =
+  ## Add an existing TCP connection to the server
   server.ensureTcpServer()
   server.tcpServer.injectFd(fd)
 

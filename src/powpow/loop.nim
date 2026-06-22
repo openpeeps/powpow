@@ -189,7 +189,7 @@ proc unregisterFd*(loop: Loop, fd: int) =
     loop.fdWatcherPool.add(w)
     loop.fdWatchers.del(fd)
 
-proc modify*(loop: Loop, fd: int, events: set[EventType]) =
+proc modify*(loop: Loop, fd: int, events: set[EventType]) {.inline.} =
   if fd in loop.fdWatchers:
     let w = loop.fdWatchers[fd]
     if w.alive:
@@ -198,7 +198,7 @@ proc modify*(loop: Loop, fd: int, events: set[EventType]) =
 
 # ── deferred calls ──────────────────────────────────────────────────────────
 
-proc deferCall*(loop: Loop, cb: Callback) =
+proc deferCall*(loop: Loop, cb: Callback) {.inline.} =
   loop.deferred.addLast(cb)
 
 # ── timers ───────────────────────────────────────────────────────────────────
@@ -228,17 +228,17 @@ proc addInterval*(loop: Loop, intervalMs: int,
   )
   addToWheel(loop, node)
 
-proc cancelTimer*(loop: Loop, id: TimerId) =
+proc cancelTimer*(loop: Loop, id: TimerId) {.inline.} =
   loop.cancelled.incl(id)
 
 # ── idle handlers ────────────────────────────────────────────────────────────
 
-proc addIdle*(loop: Loop, cb: Callback): int =
+proc addIdle*(loop: Loop, cb: Callback): int {.inline.} =
   inc loop.nextIdleId
   result = loop.nextIdleId
   loop.idleCbs[result] = cb
 
-proc removeIdle*(loop: Loop, id: int) =
+proc removeIdle*(loop: Loop, id: int) {.inline.} =
   loop.idleCbs.del(id)
 
 # ── control ──────────────────────────────────────────────────────────────────

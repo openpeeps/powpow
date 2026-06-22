@@ -24,7 +24,7 @@ const
 
 # ── Scalar fallbacks ─────────────────────────────────────────────────────────
 
-func findCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int =
+func findCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int {.inline.} =
   ## Find \r\n starting from `start`. Returns index of \r, or -1 if not found.
   var i = start
   while i < limit:
@@ -33,7 +33,7 @@ func findCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int =
     inc i
   return -1
 
-func findDoubleCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int =
+func findDoubleCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int {.inline.} =
   ## Find \r\n\r\n starting from `start`. Returns index past the final \n, or -1.
   var i = start
   while i <= limit:
@@ -88,7 +88,7 @@ when hasSse2:
 
 # ── Unified dispatch ─────────────────────────────────────────────────────────
 
-func findCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
+func findCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
   ## Find \r\n starting from `start`. Returns index of \r, or -1 if not found.
   if maxLen - start < 2:
     return -1  # Not enough data for CRLF
@@ -96,7 +96,7 @@ func findCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
   when hasSse2: findCRLFSse2(buf, start, limit)
   else:         findCRLFScalar(buf, start, limit)
 
-func findDoubleCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
+func findDoubleCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
   ## Find \r\n\r\n starting from `start`. Returns index past the final \n, or -1.
   when hasSse2: findDoubleCRLFSse2(buf, start, maxLen)
   else:

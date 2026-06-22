@@ -117,7 +117,7 @@ type
 
 # ── Frame parser ─────────────────────────────────────────────────────────────
 
-proc newWsFrameParser(): WsFrameParser =
+proc newWsFrameParser(): WsFrameParser {.inline.} =
   WsFrameParser(
     phase: WsPhaseHeader,
     payload: newSeq[byte](DefaultWsBufSize),
@@ -150,8 +150,7 @@ proc buildHandshakeResponse*(acceptKey: string): string =
            "Sec-WebSocket-Accept: " & acceptKey & "\r\n" &
            "\r\n"
 
-proc sendHandshake*(conn: Connection, clientKey: string) =
-  ## Send the HTTP 101 upgrade response directly on the connection.
+proc sendHandshake*(conn: Connection, clientKey: string) {.inline.} =
   let response = buildHandshakeResponse(computeAcceptKey(clientKey))
   discard conn.send(response)
 

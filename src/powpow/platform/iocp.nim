@@ -333,6 +333,5 @@ proc poll*(p: Platform, timeoutMs: int): int =
 
 # ── Wake support ─────────────────────────────────────────────────────────────
 
-proc wake*(p: Platform) =
-  ## Wake the event loop from another thread.
+proc wake*(p: Platform) {.inline.} =
   discard postQueuedCompletionStatus(p.iocp, 0, 0, nil)

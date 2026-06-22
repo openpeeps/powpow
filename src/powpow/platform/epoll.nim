@@ -98,7 +98,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
       raise newException(OSError,
         "powpow: epoll_ctl ADD failed for fd " & $fd)
 
-proc remove*(p: Platform, fd: int) =
+proc remove*(p: Platform, fd: int) {.inline.} =
   var ev: EpollEvent
   discard epoll_ctl(p.epFd, EPOLL_CTL_DEL, fd.cint, addr ev)
 
@@ -117,7 +117,7 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
 
 # ── Wake ─────────────────────────────────────────────────────────────────────
 
-proc wake*(p: Platform) =
+proc wake*(p: Platform) {.inline.} =
   var val: uint64 = 1
   discard posix.write(p.wakeFd, addr val, 8)
 

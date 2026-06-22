@@ -155,7 +155,7 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
 
 # ── Wake ─────────────────────────────────────────────────────────────────────
 
-proc wake*(p: Platform) =
+proc wake*(p: Platform) {.inline.} =
   var byte: byte = 0
   discard write(p.wakeWriteFd, addr byte, 1)
 

@@ -881,7 +881,7 @@ func getContentLength*(req: HttpRequest): int {.inline.} =
 func getConnectionClose*(req: HttpRequest): bool {.inline.} =
   req.parser.connectionClose
 
-proc getClientIp*(req: HttpRequest): string =
+proc getClientIp*(req: HttpRequest): string {.inline.} =
   if req.conn != nil: req.conn.getClientIp() else: ""
 
 proc getBody*(req: HttpRequest): seq[byte] =
@@ -959,8 +959,7 @@ proc peekChunk*(stream: var BodyStream; maxLen: Natural): tuple[data: ptr Unchec
   let toRead = min(available, maxLen)
   result = (cast[ptr UncheckedArray[byte]](addr p.buf[p.headerEnd + stream.readPos]), toRead)
 
-proc drainChunk*(stream: var BodyStream; len: Natural) =
-  ## Advances the read position by len bytes after processing a peeked chunk.
+proc drainChunk*(stream: var BodyStream; len: Natural) {.inline.} =
   let p = stream.parser
   let blen = p.bodyLen()
   let available = blen - stream.readPos

@@ -72,9 +72,7 @@ proc allow*(rl: RateLimiter; ip: string): bool =
   rl.buckets[ip] = bucket
   return true
 
-proc check*(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool =
-  ## Convenience: calls `allow` with `req.getClientIp()`. If denied,
-  ## sends HTTP 429 and returns false.
+proc check*(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool {.inline.} =
   if not rl.allow(req.getClientIp()):
     res.sendError(Http429, "Too Many Requests")
     return false

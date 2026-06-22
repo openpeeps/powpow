@@ -97,7 +97,7 @@ type
     maxConnections*: int
 
 proc newConnection*(fd: SocketHandle, loop: Loop, server: TcpServer,
-                     readBuf: ptr UncheckedArray[byte], readBufLen: int): Connection =
+                     readBuf: ptr UncheckedArray[byte], readBufLen: int): Connection {.inline.} =
   Connection(
     fd: fd, loop: loop, server: server, state: Closed,
     readBuf: readBuf, readBufLen: readBufLen,
@@ -274,14 +274,14 @@ proc shutdown*(conn: Connection) =
   conn.state = Closing
   sockShutdown(conn.fd, shutWrVal())
 
-proc closeAfterDrain*(conn: Connection) =
+proc closeAfterDrain*(conn: Connection) {.inline.} =
   if conn.state == Closed: return
   if conn.writeBuf.len == 0:
     conn.close()
   else:
     conn.closeAfterFlush = true
 
-proc closeAndRelease*(conn: Connection) =
+proc closeAndRelease*(conn: Connection) {.inline.} =
   conn.close()
   if conn.readBuf != nil:
     releaseBuf(conn.loop, conn.readBuf)
@@ -336,7 +336,7 @@ proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
       readBufLen: DefaultBufSize,
     )
 
-proc getClientIp*(conn: Connection): string =
+proc getClientIp*(conn: Connection): string {.inline.} =
   when not defined(windows):
     if conn.clientIp.len == 0 and conn.fd.int >= 0:
       conn.clientIp = formatIp(conn.clientAddr)
@@ -352,7 +352,7 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
   conn.sendFileRemain = 0
   conn.writeBuf.setLen(0)
   conn.writePos = 0
-  conn.clientIp.setLen(0)
+  conn.clientIp = ""
   if server.connPool.len < MaxConnPoolSize:
     server.connPool.add(conn)
   else:
