@@ -14,7 +14,7 @@
 ##
 ## Uses std/httpcore types: HttpMethod, HttpCode, HttpHeaders, HttpVersion.
 
-import std/[httpcore, strutils, tables, oids, os]
+import std/[httpcore, strutils, oids, os]
 import pkg/multipart
 
 import ./simdscan
@@ -121,7 +121,7 @@ type
 
 # ── Fast method parser ───────────────────────────────────────────────────────
 
-proc parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.} =
+func parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.} =
   # Parse HTTP method from raw bytes. Switch on first char for speed.
   if len == 0: return HttpGet  # default
   case char(buf[0])
@@ -191,8 +191,8 @@ proc reset*(p: HttpParser) =
   p.pathCache.setLen(0)
   p.queryCache.setLen(0)
   p.contentTypeVal.setLen(0)
-  if p.buf.len > 8192:  # shrink oversized buffers back to 4KB
-    p.buf = newSeq[byte](4096)
+  if p.buf.len > 8192:
+    p.buf.setLen(4096)
 
 proc resetForNext*(p: HttpParser) =
   ## Reset the parser for the next pipelined request, preserving any
@@ -211,8 +211,8 @@ proc resetForNext*(p: HttpParser) =
     copyMem(addr p.buf[0], addr p.buf[consumed], leftover)
 
   p.bufLen        = max(leftover, 0)
-  if p.buf.len > 8192:  # shrink oversized buffers back to 4KB
-    p.buf = newSeq[byte](4096)
+  if p.buf.len > 8192:
+    p.buf.setLen(4096)
   p.headerEnd     = -1
   p.methodLen     = 0
   p.pathStart     = -1
@@ -240,7 +240,7 @@ proc resetForNext*(p: HttpParser) =
   p.queryCache.setLen(0)
   p.contentTypeVal.setLen(0)
 
-proc phase*(p: HttpParser): ParsePhase {.inline.} = p.phase
+func phase*(p: HttpParser): ParsePhase {.inline.} = p.phase
 
 # ── Internal: parse request line ─────────────────────────────────────────────
 
@@ -490,7 +490,7 @@ proc scanHeaders(p: HttpParser): bool =
 
 # ── Feed bytes ───────────────────────────────────────────────────────────────
 
-proc ensureCapacity(p: HttpParser, needed: int) =
+proc ensureCapacity(p: HttpParser, needed: int) {.inline.} =
   if p.bufLen + needed > p.buf.len:
     let newCap = max(p.buf.len * 2, p.bufLen + needed)
     var newBuf = newSeq[byte](newCap)
@@ -507,46 +507,46 @@ proc parseChunkSize(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.in
 
   while i < maxLen:
     let c = char(buf[i])
-    if c >= '0' and c <= '9':
+    case c
+    of '0'..'9':
       if size > high(int) div 16:
         return -1
       size = size * 16 + (ord(c) - ord('0'))
       foundDigit = true
-    elif c >= 'a' and c <= 'f':
+    of 'a'..'f':
       if size > high(int) div 16:
         return -1
       size = size * 16 + (ord(c) - ord('a') + 10)
       foundDigit = true
-    elif c >= 'A' and c <= 'F':
+    of 'A'..'F':
       if size > high(int) div 16:
         return -1
       size = size * 16 + (ord(c) - ord('A') + 10)
       foundDigit = true
-    elif c == ';' or c == ' ':
+    of ';', ' ':
       # Chunk extension - skip until CRLF
-      # We need to find the CRLF to consider this valid
       while i < maxLen:
         if char(buf[i]) == '\r':
           if i + 1 < maxLen and char(buf[i + 1]) == '\n':
             if foundDigit:
               return size
-            return -1  # Empty chunk size
-          return -2  # Incomplete
+            return -1
+          return -2
         inc i
-      return -2  # Incomplete - didn't find CRLF
-    elif c == '\r':
+      return -2
+    of '\r':
       if i + 1 < maxLen and char(buf[i + 1]) == '\n':
         if foundDigit:
           return size
-        return -1  # Empty chunk size
-      return -2  # Incomplete
+        return -1
+      return -2
     else:
-      return -1  # Invalid character
+      return -1
     inc i
 
   if not foundDigit:
     return -1
-  return -2  # Incomplete - need more data
+  return -2
 
 proc parseChunkedBody(p: HttpParser): bool =
   ## Parse chunked transfer encoding. Returns true when complete.
@@ -787,27 +787,24 @@ proc feed*(p: HttpParser, data: string): ParsePhase {.inline, discardable.} =
   ## Convenience overload for feeding string data.
   p.feed(data.toOpenArrayByte(0, data.high))
 
-proc isComplete*(p: HttpParser): bool {.inline.} =
+func isComplete*(p: HttpParser): bool {.inline.} =
   p.phase == PhaseComplete
 
-proc isError*(p: HttpParser): bool {.inline.} =
+func isError*(p: HttpParser): bool {.inline.} =
   p.phase == PhaseError
 
-proc error*(p: HttpParser): HttpCode {.inline.} =
+func error*(p: HttpParser): HttpCode {.inline.} =
   p.errorCode
 
 # ── Peek accessors (available during PhaseBody) ────────────────────────────────
 
-proc peekMethod*(p: HttpParser): HttpMethod {.inline.} =
-  ## Get the HTTP method. Zero-alloc — already resolved during parse.
+func peekMethod*(p: HttpParser): HttpMethod {.inline.} =
   p.methodCache
 
-proc peekPath*(p: HttpParser): lent string =
-  ## Get the request path. Zero-alloc — already cached during parse.
+func peekPath*(p: HttpParser): lent string =
   p.pathCache
 
-proc peekContentType*(p: HttpParser): lent string =
-  ## Get the Content-Type header value. Zero-alloc — cached during header scan.
+func peekContentType*(p: HttpParser): lent string =
   p.contentTypeVal
 
 # ── HttpRequest: lazy accessors ──────────────────────────────────────────────
@@ -822,20 +819,16 @@ proc getRequest*(p: HttpParser): HttpRequest =
     bodyReady:  false,
   )
 
-proc getMethod*(req: HttpRequest): HttpMethod {.inline.} =
-  ## Get the HTTP method. Zero-alloc — already resolved during parse.
+func getMethod*(req: HttpRequest): HttpMethod {.inline.} =
   req.httpMethod
 
-proc getPath*(req: HttpRequest): lent string =
-  ## Get the request path. Zero-alloc — cached in parser during parse.
+func getPath*(req: HttpRequest): lent string =
   req.parser.pathCache
 
-proc getQuery*(req: HttpRequest): lent string =
-  ## Get the query string, or "" if none. Zero-alloc — cached in parser.
+func getQuery*(req: HttpRequest): lent string =
   req.parser.queryCache
 
-proc getUrl*(req: HttpRequest): lent string =
-  ## Get the full URL path including query. Cached on first call.
+func getUrl*(req: HttpRequest): lent string =
   if req.urlVal.len == 0:
     let path = req.parser.pathCache
     let query = req.parser.queryCache
@@ -882,17 +875,14 @@ proc getHeaders*(req: HttpRequest): HttpHeaders =
     req.headersReady = true
   return req.headersVal
 
-proc getContentLength*(req: HttpRequest): int {.inline.} =
-  ## Get the Content-Length value, or -1 if not present.
+func getContentLength*(req: HttpRequest): int {.inline.} =
   req.parser.contentLength
 
-proc getConnectionClose*(req: HttpRequest): bool {.inline.} =
-  ## Returns true if the client sent "Connection: close".
+func getConnectionClose*(req: HttpRequest): bool {.inline.} =
   req.parser.connectionClose
 
 proc getClientIp*(req: HttpRequest): string =
-  ## Get the client's IP address as a string, or "" if not available.
-  if req.conn != nil: req.conn.clientIp else: ""
+  if req.conn != nil: req.conn.getClientIp() else: ""
 
 proc getBody*(req: HttpRequest): seq[byte] =
   ## Get the request body. Returns empty seq if no body.
@@ -1097,8 +1087,7 @@ proc streamToFile*(req: HttpRequest; tmpDir = ""): string =
   req.streamPath = filePath
   return filePath
 
-proc headerBytes*(req: HttpRequest): int {.inline.} =
-  ## Total bytes consumed by the request line + headers + \r\n\r\n.
+func headerBytes*(req: HttpRequest): int {.inline.} =
   req.parser.headerEnd
 
 proc getRemainingData*(p: HttpParser): seq[byte] =

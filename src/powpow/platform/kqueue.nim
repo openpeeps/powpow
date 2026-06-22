@@ -78,7 +78,7 @@ proc close*(p: Platform) =
 
 # ── Capacity ─────────────────────────────────────────────────────────────────
 
-proc ensureCapacity*(p: Platform, fdCount: int) =
+proc ensureCapacity*(p: Platform, fdCount: int) {.inline.} =
   let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
   if target > p.events.len:
     p.events.setLen(target)
@@ -171,7 +171,7 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
 
 # ── Wake ─────────────────────────────────────────────────────────────────────
 
-proc wake*(p: Platform) =
+proc wake*(p: Platform) {.inline.} =
   var byte: byte = 0
   discard posix.write(p.wakeWriteFd, addr byte, 1)
 

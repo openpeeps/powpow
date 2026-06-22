@@ -136,7 +136,7 @@ proc reset*(p: WsFrameParser) =
 
 # ── WS handshake helpers ─────────────────────────────────────────────────────
 
-proc computeAcceptKey*(clientKey: string): string =
+func computeAcceptKey*(clientKey: string): string =
   ## Compute the Sec-WebSocket-Accept value from the client's key.
   let digest = sha1.secureHash(clientKey & wsGuid)
   let shaArray = cast[array[0..19, uint8]](digest)
@@ -169,7 +169,7 @@ proc writeFrame*(conn: Connection, opcode: int, payload: openArray[byte]) =
 
   let n = payload.len
   if n < 126:
-    header[1] = uint8(n)                         # no mask bit (server frames)
+    header[1] = uint8(n)
     hlen = 2
   elif n <= 0xFFFF:
     header[1] = 126
@@ -214,7 +214,6 @@ proc writeFrameMasked*(conn: Connection, opcode: int, payload: openArray[byte],
       v = v shr 8
     hlen = 10
 
-  # Copy mask key into header
   for i in 0 ..< 4:
     header[hlen + i] = mask[i]
   hlen += 4
@@ -229,29 +228,25 @@ proc writeFrameMasked*(conn: Connection, opcode: int, payload: openArray[byte],
 
 # ── WsConnection send helpers ────────────────────────────────────────────────
 
-proc sendText*(ws: WsConnection, s: string) =
-  ## Send a text message.
+proc sendText*(ws: WsConnection, s: string) {.inline.} =
   if s.len == 0:
     ws.conn.writeFrame(0x1, [])
   else:
     ws.conn.writeFrame(0x1, s.toOpenArrayByte(0, s.high))
 
-proc sendBinary*(ws: WsConnection, data: openArray[byte]) =
-  ## Send a binary message.
+proc sendBinary*(ws: WsConnection, data: openArray[byte]) {.inline.} =
   if data.len == 0:
     ws.conn.writeFrame(0x2, [])
   else:
     ws.conn.writeFrame(0x2, data)
 
-proc sendPing*(ws: WsConnection, data: openArray[byte] = []) =
-  ## Send a ping frame.
+proc sendPing*(ws: WsConnection, data: openArray[byte] = []) {.inline.} =
   if data.len == 0:
     ws.conn.writeFrame(0x9, [])
   else:
     ws.conn.writeFrame(0x9, data)
 
-proc sendPong*(ws: WsConnection, data: openArray[byte] = []) =
-  ## Send a pong frame (usually automatic, but exposed for manual use).
+proc sendPong*(ws: WsConnection, data: openArray[byte] = []) {.inline.} =
   if data.len == 0:
     ws.conn.writeFrame(0xA, [])
   else:
@@ -516,7 +511,7 @@ proc newWsConnection*(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize)
 
 # ── Standalone WsServer ──────────────────────────────────────────────────────
 
-proc headerValue(headers: HttpHeaders, key: string): string {.inline.} =
+func headerValue(headers: HttpHeaders, key: string): string {.inline.} =
   ## Get a header value or "" if not present.
   if headers.hasKey(key):
     let vals = headers[key]

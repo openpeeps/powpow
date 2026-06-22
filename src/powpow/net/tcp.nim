@@ -24,8 +24,8 @@ when not defined(windows):
     var host: array[NI_MAXHOST, char]
     let sa = cast[ptr Sockaddr](unsafeAddr saAddr)
     let salen = getSockLen(unsafeAddr saAddr)
-    if getnameinfo(sa, salen, addr host[0], host.len.SockLen, nil, 0, NI_NUMERICHOST) == 0:
-      result = $cstring(addr host[0])
+    if getnameinfo(sa, salen, cast[cstring](addr host[0]), host.len.SockLen, nil, 0, NI_NUMERICHOST) == 0:
+      result = $cast[cstring](addr host[0])
     else:
       result = "unknown"
 
@@ -33,20 +33,20 @@ const
   MaxBufPoolSize* = 1024
   MaxConnPoolSize* = 1024
 
-proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] =
+proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] {.inline.} =
   if loop.bufPool.len > 0:
     loop.bufPool.pop()
   else:
     cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
 
-proc releaseBuf(loop: Loop, buf: ptr UncheckedArray[byte]) =
+proc releaseBuf(loop: Loop, buf: ptr UncheckedArray[byte]) {.inline.} =
   if loop.bufPool.len < MaxBufPoolSize:
     loop.bufPool.add(buf)
   else:
     deallocShared(buf)
 
-proc setLinger0(fd: SocketHandle) =
-  var lin: TLinger
+proc setLinger0(fd: SocketHandle) {.inline.} =
+  var lin {.noInit.}: TLinger
   when defined(windows):
     lin.l_onoff = 1.cushort
     lin.l_linger = 0.cushort
@@ -77,6 +77,8 @@ type
     sendFileOff*:     int64
     sendFileRemain*:  int64
     data*:            pointer
+    when not defined(windows):
+      clientAddr:     Sockaddr_storage
 
   OnAccept*  = proc(conn: Connection) {.closure.}
   OnData*    = proc(conn: Connection, data: openArray[byte]) {.closure.}
@@ -334,6 +336,12 @@ proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
       readBufLen: DefaultBufSize,
     )
 
+proc getClientIp*(conn: Connection): string =
+  when not defined(windows):
+    if conn.clientIp.len == 0 and conn.fd.int >= 0:
+      conn.clientIp = formatIp(conn.clientAddr)
+  conn.clientIp
+
 proc releaseConnection(server: TcpServer, conn: Connection) =
   conn.state = Closed
   conn.fd = SocketHandle(-1)
@@ -344,6 +352,7 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
   conn.sendFileRemain = 0
   conn.writeBuf.setLen(0)
   conn.writePos = 0
+  conn.clientIp.setLen(0)
   if server.connPool.len < MaxConnPoolSize:
     server.connPool.add(conn)
   else:
@@ -381,7 +390,7 @@ proc handleClientRead(conn: Connection, onData: OnData, onClose: OnClose) =
 
 proc acceptClients(server: TcpServer) =
   while true:
-    var clientAddr: Sockaddr_storage
+    var clientAddr {.noInit.}: Sockaddr_storage
     var addrLen: SockLen = sizeof(clientAddr).SockLen
     let clientFd = accept(server.fd,
                           cast[ptr Sockaddr](addr clientAddr),
@@ -400,7 +409,7 @@ proc acceptClients(server: TcpServer) =
     
     let conn = acquireConnection(server, clientFd)
     when not defined(windows):
-      conn.clientIp = formatIp(clientAddr)
+      conn.clientAddr = clientAddr
 
     if server.onAccept != nil:
       server.onAccept(conn)

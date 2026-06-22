@@ -113,7 +113,7 @@ proc close*(loop: Loop) =
 
 # ── Timer wheel ──────────────────────────────────────────────────────────────
 
-proc addToWheel(loop: Loop; node: TimerNode) =
+proc addToWheel(loop: Loop; node: TimerNode) {.inline.} =
   let diff = node.deadline - loop.wheelBase
   if diff < 256:
     let slot = (node.deadline and 0xFF).int
@@ -133,7 +133,7 @@ proc addToWheel(loop: Loop; node: TimerNode) =
     loop.wheel[3][slot] = node
   inc loop.totalTimers
 
-proc cascade(loop: Loop; level: int) =
+proc cascade(loop: Loop; level: int) {.inline.} =
   let slot = ((loop.wheelBase shr (level * 8)) and 0xFF).int
   var node = loop.wheel[level][slot]
   if node == nil: return
@@ -327,14 +327,14 @@ proc timerTimeout(loop: Loop; now: int64): int =
 
 # ── internal: process deferred ───────────────────────────────────────────────
 
-proc processDeferred(loop: Loop) =
+proc processDeferred(loop: Loop) {.inline.} =
   while loop.deferred.len > 0:
     let cb = loop.deferred.popFirst()
     cb()
 
 # ── internal: sweep dead watchers ────────────────────────────────────────────
 
-proc sweepDead(loop: Loop) =
+proc sweepDead(loop: Loop) {.inline.} =
   if loop.deadCount > 64:
     var dead: seq[int]
     for fd, w in loop.fdWatchers:

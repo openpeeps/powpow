@@ -24,7 +24,7 @@ const
 
 # ── Scalar fallbacks ─────────────────────────────────────────────────────────
 
-proc findCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int {.inline.} =
+func findCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int =
   ## Find \r\n starting from `start`. Returns index of \r, or -1 if not found.
   var i = start
   while i < limit:
@@ -33,7 +33,7 @@ proc findCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int {.in
     inc i
   return -1
 
-proc findDoubleCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int {.inline.} =
+func findDoubleCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): int =
   ## Find \r\n\r\n starting from `start`. Returns index past the final \n, or -1.
   var i = start
   while i <= limit:
@@ -46,34 +46,28 @@ proc findDoubleCRLFScalar*(buf: ptr UncheckedArray[byte], start, limit: int): in
 # ── SSE2 paths (16 bytes / cycle) ────────────────────────────────────────────
 
 when hasSse2:
-  proc findCRLFSse2*(buf: ptr UncheckedArray[byte], start, limit: int): int =
+  func findCRLFSse2*(buf: ptr UncheckedArray[byte], start, limit: int): int =
     ## SSE2-accelerated \r\n scanner.
     let crVec = mm_set1_epi8(cast[int8](0x0D))  # \r
     let lfVec = mm_set1_epi8(cast[int8](0x0A))  # \n
     var i = start
 
-    # SIMD loop: process 16 bytes at a time
     while i + 16 <= limit:
       let chunk = mm_loadu_si128(cast[ptr M128i](unsafeAddr buf[i]))
       let crMask = mm_cmpeq_epi8(chunk, crVec)      # 0xFF at \r positions
       let lfMask = mm_cmpeq_epi8(chunk, lfVec)      # 0xFF at \n positions
-      # Shift lfMask RIGHT by 1 byte: \n at position i+1 aligns with \r at position i
-      # _mm_srli_si128 shifts the whole 128-bit value right by N bytes
       let lfShifted = mm_srli_si128(lfMask, 1)
-      # AND: positions where \r is followed by \n
       let combined = mm_and_si128(crMask, lfShifted)
       let mask = cast[uint16](mm_movemask_epi8(combined))
       if mask != 0:
         return i + countTrailingZeroBits(mask)
       i += 16
 
-    # Scalar tail: start one byte back to catch \r\n that spans the SSE2 boundary
     let scStart = if i > start: i - 1 else: i
     findCRLFScalar(buf, scStart, limit)
 
-  proc findDoubleCRLFSse2*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
+  func findDoubleCRLFSse2*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
     ## SSE2-accelerated \r\n\r\n scanner.
-    ## Strategy: find \r\n with SIMD, then verify next two bytes are also \r\n.
     let limit = maxLen - 3  # Need at least 4 bytes for \r\n\r\n
     var i = start
     while i <= limit:
@@ -94,7 +88,7 @@ when hasSse2:
 
 # ── Unified dispatch ─────────────────────────────────────────────────────────
 
-proc findCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
+func findCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
   ## Find \r\n starting from `start`. Returns index of \r, or -1 if not found.
   if maxLen - start < 2:
     return -1  # Not enough data for CRLF
@@ -102,7 +96,7 @@ proc findCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.
   when hasSse2: findCRLFSse2(buf, start, limit)
   else:         findCRLFScalar(buf, start, limit)
 
-proc findDoubleCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
+func findDoubleCRLF*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
   ## Find \r\n\r\n starting from `start`. Returns index past the final \n, or -1.
   when hasSse2: findDoubleCRLFSse2(buf, start, maxLen)
   else:

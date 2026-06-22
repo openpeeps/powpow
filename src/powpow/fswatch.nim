@@ -49,7 +49,7 @@ when defined(macosx) or defined(bsd):
     NOTE_RENAME = 0x0020
     NOTE_REVOKE = 0x0040
 
-  proc toFileEvents(fflags: uint32): set[FileSystemEvent] =
+  func toFileEvents(fflags: uint32): set[FileSystemEvent] =
     if (fflags and NOTE_DELETE) != 0: result.incl fseDeleted
     if (fflags and NOTE_WRITE) != 0:  result.incl fseModified
     if (fflags and NOTE_EXTEND) != 0: result.incl fseModified
@@ -90,7 +90,7 @@ elif defined(linux):
                       IN_MOVED_FROM or IN_MOVED_TO or
                       IN_ATTRIB or IN_DELETE_SELF or IN_MOVE_SELF
 
-  proc toFileEvents(mask: uint32): set[FileSystemEvent] =
+  func toFileEvents(mask: uint32): set[FileSystemEvent] =
     if (mask and IN_MODIFY) != 0:      result.incl fseModified
     if (mask and IN_CREATE) != 0:      result.incl fseCreated
     if (mask and IN_DELETE) != 0:      result.incl fseDeleted
@@ -157,7 +157,7 @@ proc newFileWatcher*(loop: Loop, path: string,
 
     loop.register(ifd.int, {Read}) do (fd: int, ev: set[EventType]):
       if Read notin ev: return
-      var buf: array[4096, byte]
+      var buf {.noInit.}: array[4096, byte]
       let n = posix.read(fd.cint, cast[pointer](addr buf[0]), 4096)
       if n <= 0: return
       var off = 0

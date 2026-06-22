@@ -132,10 +132,10 @@ type
     count*:     int
     extPool:    seq[OverlappedExtPtr]
 
-proc allocExt(): OverlappedExtPtr =
+proc allocExt(): OverlappedExtPtr {.inline.} =
   result = cast[OverlappedExtPtr](allocShared0(sizeof(OverlappedExt)))
 
-proc freeExt(ext: OverlappedExtPtr) =
+proc freeExt(ext: OverlappedExtPtr) {.inline.} =
   deallocShared(ext)
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ proc close*(p: Platform) =
 
 # ── Capacity ─────────────────────────────────────────────────────────────────
 
-proc ensureCapacity*(p: Platform, fdCount: int) =
+proc ensureCapacity*(p: Platform, fdCount: int) {.inline.} =
   let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
   if target > p.events.len:
     p.events.setLen(target)
@@ -282,7 +282,7 @@ proc poll*(p: Platform, timeoutMs: int): int =
     lpOverlapped: pointer
 
   const CqBufSize = 256
-  var cqBuf: array[CqBufSize, CqEntry]
+  var cqBuf {.noInit.}: array[CqBufSize, CqEntry]
 
   let ok = getQueuedCompletionStatusEx(
     p.iocp, addr cqBuf[0], CqBufSize.DWORD,

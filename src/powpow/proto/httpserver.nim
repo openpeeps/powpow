@@ -20,7 +20,7 @@
 ##   , Port(9000)
 ##   ```
 
-import std/[httpcore, tables, options, net, strutils, os, posix, times]
+import std/[httpcore, tables, options, net, strutils, os, times]
 
 import ../net/tcp
 import ../net/common
@@ -72,12 +72,11 @@ const
   MaxResPoolSize = 4048
 
 
-proc getFileExt*(path: string): string =
-  ## Extract the lowercase file extension from a path.
+func getFileExt*(path: string): string {.inline.} =
   let (_, _, ext) = path.splitFile()
   result = ext.toLowerAscii()
 
-proc parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, length: int64] =
+func parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, length: int64] =
   ## Parse an HTTP Range header (single range, `bytes=start-end`).
   ## Supports explicit ranges (`0-1023`), open-ended ranges (`1024-`),
   ## and suffix ranges (`-500`). Clamps rangeEnd to fileSize - 1.
@@ -164,7 +163,7 @@ proc close*(res: HttpResponse): HttpResponse {.discardable.} =
   res.closeConn = true
   return res
 
-proc statusText(code: HttpCode): string {.inline.} =
+func statusText(code: HttpCode): string {.inline.} =
   ## Return the HTTP reason phrase for a status code.
   ## Returns a string literal (no heap allocation).
   case code.int
@@ -342,7 +341,7 @@ proc send*(res: HttpResponse, body: seq[byte]) =
   if res.closeConn:
     res.conn.closeAfterDrain()
 
-proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) =
+proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) {.inline.} =
   copyMem(addr buf[p], "Content-Disposition: attachment; filename=\"".cstring, 43); p += 43
   copyMem(addr buf[p], name.cstring, name.len); p += name.len
   copyMem(addr buf[p], "\"\r\n".cstring, 3); p += 3
@@ -597,7 +596,7 @@ proc getConn*(res: HttpResponse): Connection {.inline.} =
   res.conn
 
 proc getClientIp*(res: HttpResponse): string =
-  if res.conn != nil: res.conn.clientIp else: ""
+  if res.conn != nil: res.conn.getClientIp() else: ""
 
 proc markSent*(res: HttpResponse) {.inline.} =
   ## Mark this response as sent without writing any bytes.
@@ -866,7 +865,7 @@ proc serveStatic*(res: HttpResponse, req: HttpRequest,
   res.sendFile(fullPath, req, closeConn = false, contentDisposition = false)
   return true
 
-proc headerValue(headers: HttpHeaders, key: string): string =
+func headerValue(headers: HttpHeaders, key: string): string {.inline.} =
   if headers.hasKey(key):
     result = $headers[key]
   else:

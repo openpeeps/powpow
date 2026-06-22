@@ -71,7 +71,7 @@ proc close*(p: Platform) =
 
 # ── Capacity ─────────────────────────────────────────────────────────────────
 
-proc ensureCapacity*(p: Platform, fdCount: int) =
+proc ensureCapacity*(p: Platform, fdCount: int) {.inline.} =
   let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
   if target > p.events.len:
     p.events.setLen(target)

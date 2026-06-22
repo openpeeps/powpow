@@ -250,7 +250,7 @@ proc resolveAddr*(address: string, port: int,
 
   copyMem(addr result, res.ai_addr, res.ai_addrlen)
 
-proc getSockLen*(addrBuf: ptr Sockaddr_storage): SockLen =
+proc getSockLen*(addrBuf: ptr Sockaddr_storage): SockLen {.inline.} =
   ## Return the correct socklen for the address family.
   let family = cast[ptr Sockaddr](addrBuf).sa_family
   if family == AF_INET.cushort:
