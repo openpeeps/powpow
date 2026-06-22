@@ -311,11 +311,11 @@
   <dl class="item">
     <div id="addConnection-procs-all">
   <div id="addConnection,HttpServer,SocketHandle">
-  <dt><pre><span class="Keyword">proc</span> <a href="#addConnection%2CHttpServer%2CSocketHandle"><span class="Identifier">addConnection</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.
+  <dt><pre><span class="Keyword">proc</span> <a href="#addConnection%2CHttpServer%2CSocketHandle"><span class="Identifier">addConnection</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Inject a pre-accepted client fd into this HTTP server's event loop. Used by multi-threaded acceptors that distribute connections to workers.
+    Add an existing TCP connection to the server
     
   </dd>
 </div>
@@ -323,11 +323,11 @@
 </div>
 <div id="close-procs-all">
   <div id="close,HttpResponse">
-  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CHttpResponse"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CHttpResponse"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span> <span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Mark this response to send &quot;Connection: close&quot; and shut down the TCP connection after the response is sent.
+    
     
   </dd>
 </div>
@@ -346,7 +346,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#ensureTcpServer%2CHttpServer"><span class="Identifier">ensureTcpServer</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    
+    Ensure the server has a TCP server instance
     
   </dd>
 </div>
@@ -354,7 +354,8 @@
 </div>
 <div id="getClientIp-procs-all">
   <div id="getClientIp,HttpResponse">
-  <dt><pre><span class="Keyword">proc</span> <a href="#getClientIp%2CHttpResponse"><span class="Identifier">getClientIp</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getClientIp%2CHttpResponse"><span class="Identifier">getClientIp</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -401,11 +402,11 @@
 </div>
 <div id="header-procs-all">
   <div id="header,HttpResponse,string,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#header%2CHttpResponse%2Cstring%2Cstring"><span class="Identifier">header</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">key</span><span class="Other">,</span> <span class="Identifier">value</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span>
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#header%2CHttpResponse%2Cstring%2Cstring"><span class="Identifier">header</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">key</span><span class="Other">,</span> <span class="Identifier">value</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span>
+    <span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Add a response header.
+    
     
   </dd>
 </div>
@@ -429,7 +430,7 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    
+    Listen on a Unix domain socket. <tt class="docutils literal"><span class="pre"><span class="Identifier">mode</span></span></tt> is the file permission bits for the socket.
     
   </dd>
 </div>
@@ -607,11 +608,11 @@
 </div>
 <div id="status-procs-all">
   <div id="status,HttpResponse,HttpCode">
-  <dt><pre><span class="Keyword">proc</span> <a href="#status%2CHttpResponse%2CHttpCode"><span class="Identifier">status</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">discardable</span><span class="Other">,</span>
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#status%2CHttpResponse%2CHttpCode"><span class="Identifier">status</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">)</span><span class="Other">:</span> <a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span>
+    <span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Set the HTTP status code.
+    
     
   </dd>
 </div>
@@ -666,7 +667,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 01:36:14 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:01 UTC</small>
       </div>
     </div>
   </div>

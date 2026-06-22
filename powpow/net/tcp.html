@@ -306,7 +306,7 @@
 </div>
 <div id="closeAfterDrain-procs-all">
   <div id="closeAfterDrain,Connection">
-  <dt><pre><span class="Keyword">proc</span> <a href="#closeAfterDrain%2CConnection"><span class="Identifier">closeAfterDrain</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#closeAfterDrain%2CConnection"><span class="Identifier">closeAfterDrain</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -318,7 +318,7 @@
 </div>
 <div id="closeAndRelease-procs-all">
   <div id="closeAndRelease,Connection">
-  <dt><pre><span class="Keyword">proc</span> <a href="#closeAndRelease%2CConnection"><span class="Identifier">closeAndRelease</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#closeAndRelease%2CConnection"><span class="Identifier">closeAndRelease</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -356,7 +356,8 @@
 </div>
 <div id="getClientIp-procs-all">
   <div id="getClientIp,Connection">
-  <dt><pre><span class="Keyword">proc</span> <a href="#getClientIp%2CConnection"><span class="Identifier">getClientIp</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getClientIp%2CConnection"><span class="Identifier">getClientIp</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -405,7 +406,7 @@
   <div id="newConnection,SocketHandle,Loop,TcpServer,ptr.UncheckedArray[byte],int">
   <dt><pre><span class="Keyword">proc</span> <a href="#newConnection%2CSocketHandle%2CLoop%2CTcpServer%2Cptr.UncheckedArray%5Bbyte%5D%2Cint"><span class="Identifier">newConnection</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">;</span> <span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">server</span><span class="Other">:</span> <a href="#TcpServer"><span class="Identifier">TcpServer</span></a><span class="Other">;</span>
                    <span class="Identifier">readBuf</span><span class="Other">:</span> <span class="Keyword">ptr</span> <span class="Identifier">UncheckedArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">readBufLen</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -482,7 +483,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 01:36:13 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:00 UTC</small>
       </div>
     </div>
   </div>

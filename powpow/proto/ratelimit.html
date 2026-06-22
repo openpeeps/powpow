@@ -136,11 +136,11 @@
 </div>
 <div id="check-procs-all">
   <div id="check,RateLimiter,HttpRequest,HttpResponse">
-  <dt><pre><span class="Keyword">proc</span> <a href="#check%2CRateLimiter%2CHttpRequest%2CHttpResponse"><span class="Identifier">check</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.
+  <dt><pre><span class="Keyword">proc</span> <a href="#check%2CRateLimiter%2CHttpRequest%2CHttpResponse"><span class="Identifier">check</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Convenience: calls <tt class="docutils literal"><span class="pre"><span class="Identifier">allow</span></span></tt> with <tt class="docutils literal"><span class="pre"><span class="Identifier">req</span><span class="Operator">.</span><span class="Identifier">getClientIp</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt>. If denied, sends HTTP 429 and returns false.
+    
     
   </dd>
 </div>
@@ -169,7 +169,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 01:36:14 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:01 UTC</small>
       </div>
     </div>
   </div>
