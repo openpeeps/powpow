@@ -68,23 +68,30 @@ when hasSse2:
 
   func findDoubleCRLFSse2*(buf: ptr UncheckedArray[byte], start, maxLen: int): int =
     ## SSE2-accelerated \r\n\r\n scanner.
-    let limit = maxLen - 3  # Need at least 4 bytes for \r\n\r\n
+    ##
+    ## Uses the same shift trick as findCRLFSse2, but applied twice:
+    ## 1. Find \r\n positions (crlfMask = crMask & lfShifted)
+    ## 2. Find \r\n\r\n positions (crlfMask & crlfShifted-by-2)
+    ##
+    ## This is a single SIMD pass, O(n/16), vs the old sliding-window approach.
+    let limit = maxLen - 3
+    let crVec = mm_set1_epi8(cast[int8](0x0D))
+    let lfVec = mm_set1_epi8(cast[int8](0x0A))
     var i = start
-    while i <= limit:
-      # Use SIMD to find \r\n in a window
-      let windowEnd = min(i + 18, maxLen)
-      let found = findCRLFSse2(buf, i, windowEnd)
-      if found < 0:
-        # No \r\n in this window, skip ahead
-        i = windowEnd
-        continue
-      # Check if next two bytes are also \r\n
-      if found + 3 < maxLen and
-         char(buf[found + 2]) == '\r' and char(buf[found + 3]) == '\n':
-        return found + 4  # past the \r\n\r\n
-      # Not double CRLF, continue from next byte
-      i = found + 1
-    return -1
+    while i + 16 <= limit:
+      let chunk = mm_loadu_si128(cast[ptr M128i](unsafeAddr buf[i]))
+      let crMask = mm_cmpeq_epi8(chunk, crVec)
+      let lfMask = mm_cmpeq_epi8(chunk, lfVec)
+      let lfShifted = mm_srli_si128(lfMask, 1)
+      let crlfMask = mm_and_si128(crMask, lfShifted)
+      let crlfShifted = mm_srli_si128(crlfMask, 2)
+      let doubleMask = mm_and_si128(crlfMask, crlfShifted)
+      let mask = cast[uint16](mm_movemask_epi8(doubleMask))
+      if mask != 0:
+        return i + countTrailingZeroBits(mask) + 4
+      i += 16
+    let scStart = if i > start: i - 3 else: i
+    findDoubleCRLFScalar(buf, scStart, limit)
 
 # ── Unified dispatch ─────────────────────────────────────────────────────────
 

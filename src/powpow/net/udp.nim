@@ -17,12 +17,7 @@ when not defined(windows):
 # ── Types ────────────────────────────────────────────────────────────────────
 
 type
-  UdpMessage* = object
-    data*:    seq[byte]
-    sender*:  Sockaddr_storage
-    senderLen*: SockLen
-
-  OnUdpData* = proc(msg: UdpMessage) {.closure.}
+  OnUdpData* = proc(sender: Sockaddr_storage; data: openArray[byte]) {.closure.}
 
   UdpSocket* = ref object
     fd*:    SocketHandle
@@ -82,13 +77,7 @@ proc handleRead(sock: UdpSocket) =
                      sock.readBufLen.cint, 0,
                      cast[ptr Sockaddr](addr sender), addr senderLen)
     if n > 0:
-      var msg = UdpMessage(
-        data:       newSeq[byte](n),
-        sender:     sender,
-        senderLen:  senderLen,
-      )
-      copyMem(addr msg.data[0], addr sock.readBuf[0], n)
-      sock.onData(msg)
+      sock.onData(sender, sock.readBuf.toOpenArray(0, n - 1))
     elif n == 0:
       return
     else:

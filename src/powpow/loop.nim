@@ -10,7 +10,7 @@
 ## The loop uses a hierarchical timer wheel for efficient timer management, and supports edge-triggered I/O events.
 ## The API is designed to be minimal and efficient, with a focus on low-latency event handling and minimal overhead.
 
-import std/[tables, deques, sets, monotimes]
+import std/[tables, deques, sets, monotimes, bitops]
 
 import ./platform, ./types
 export types
@@ -70,10 +70,13 @@ type
     idleCbs:       Table[int, Callback]
     nextIdleId:    int
     deadCount:     int
+    deadFds:       seq[int]
     fdWatcherPool: seq[FdWatcher]
     running:       bool
     stopFlag:      bool
     bufPool*:      seq[ptr UncheckedArray[byte]]
+    occBits:       array[4, array[4, uint64]]  # 256 bits per level for bitmap-accelerated lookup
+    nextDead:      int64                       # Earliest timer deadline across all levels
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -90,11 +93,15 @@ proc newLoop*(): Loop =
     idleCbs:     initTable[int, Callback](),
     nextIdleId:  0,
     deadCount:   0,
+    deadFds:     @[],
     fdWatcherPool: @[],
 
     running:     false,
     stopFlag:    false,
     bufPool:     @[],
+    occBits:     [default array[4, uint64], default array[4, uint64],
+                  default array[4, uint64], default array[4, uint64]],
+    nextDead:    int64.high,
   )
 
 proc close*(loop: Loop) =
@@ -115,29 +122,34 @@ proc close*(loop: Loop) =
 
 proc addToWheel(loop: Loop; node: TimerNode) {.inline.} =
   let diff = node.deadline - loop.wheelBase
+  var level, slot: int
   if diff < 256:
-    let slot = (node.deadline and 0xFF).int
-    node.next = loop.wheel[0][slot]
-    loop.wheel[0][slot] = node
+    level = 0
+    slot = (node.deadline and 0xFF).int
   elif diff < 65536:
-    let slot = ((node.deadline shr 8) and 0xFF).int
-    node.next = loop.wheel[1][slot]
-    loop.wheel[1][slot] = node
+    level = 1
+    slot = ((node.deadline shr 8) and 0xFF).int
   elif diff < 16777216:
-    let slot = ((node.deadline shr 16) and 0xFF).int
-    node.next = loop.wheel[2][slot]
-    loop.wheel[2][slot] = node
+    level = 2
+    slot = ((node.deadline shr 16) and 0xFF).int
   else:
-    let slot = ((node.deadline shr 24) and 0xFF).int
-    node.next = loop.wheel[3][slot]
-    loop.wheel[3][slot] = node
+    level = 3
+    slot = ((node.deadline shr 24) and 0xFF).int
+  node.next = loop.wheel[level][slot]
+  loop.wheel[level][slot] = node
   inc loop.totalTimers
+  let bitIdx = slot shr 6
+  let bitOff = slot and 63
+  loop.occBits[level][bitIdx] = loop.occBits[level][bitIdx] or (1.uint64 shl bitOff)
+  if node.deadline < loop.nextDead:
+    loop.nextDead = node.deadline
 
 proc cascade(loop: Loop; level: int) {.inline.} =
   let slot = ((loop.wheelBase shr (level * 8)) and 0xFF).int
   var node = loop.wheel[level][slot]
   if node == nil: return
   loop.wheel[level][slot] = nil
+  # Bit cleared lazily (dirty tracking): timerTimeout will clean stale bits
   while node != nil:
     let next = node.next
     node.next = nil
@@ -256,21 +268,27 @@ proc processTimers(loop: Loop; now: int64) =
   if loop.totalTimers == 0:
     loop.wheelBase = now
     return
-  # Advance wheelBase to now, cascading at boundaries along the way
+  # Advance wheelBase to now, cascading at level-1 boundaries (every 256ms).
+  # Jump directly to each boundary instead of stepping 1ms at a time,
+  # reducing O(idle_gap) to O(idle_gap / 256) iterations.
+  # Update wheelBase before cascade so the slot computation uses the correct
+  # boundary time (fixes stale-wheelBase cascade bug).
   var t = loop.wheelBase
   while t < now:
-    inc t
-    if (t and 0xFF) == 0:
+    let toBoundary = 256 - (t and 0xFF)
+    if t + toBoundary <= now:
+      t += toBoundary
+      loop.wheelBase = t
       cascade(loop, 1)
-    if (t and 0xFFFF) == 0:
-      cascade(loop, 2)
-    if (t and 0xFFFFFF) == 0:
-      cascade(loop, 3)
+      if (t and 0xFFFF) == 0:
+        cascade(loop, 2)
+      if (t and 0xFFFFFF) == 0:
+        cascade(loop, 3)
+    else:
+      t = now
   loop.wheelBase = now
 
   # Fire all expired Level-0 timers up to batch limit.
-  # Walk each slot's linked list and remove only expired nodes.
-  # Future nodes (e.g. re-added intervals) stay in place.
   var batch = 0
   for slot in 0 ..< 256:
     if batch >= MaxTimerBatch:
@@ -280,7 +298,6 @@ proc processTimers(loop: Loop; now: int64) =
     while node != nil and batch < MaxTimerBatch:
       let next = node.next
       if node.deadline <= now:
-        # Remove this expired node from the list
         if prev == nil:
           loop.wheel[0][slot] = next
         else:
@@ -303,6 +320,7 @@ proc processTimers(loop: Loop; now: int64) =
 
   if loop.cancelled.len > loop.totalTimers * 2 + 16:
     loop.cancelled.clear()
+  loop.nextDead = int64.high
 
 proc timerTimeout(loop: Loop; now: int64): int =
   if loop.totalTimers == 0:
@@ -310,15 +328,37 @@ proc timerTimeout(loop: Loop; now: int64): int =
   if loop.wheelBase < now:
     return 0
 
+  # Skip-ahead: only use cached nextDead when it hasn't been invalidated
+  if loop.nextDead != int64.high and now < loop.nextDead:
+    let wait = loop.nextDead - now
+    if wait > int64(high(int)):
+      return high(int)
+    return wait.int
+
+  # Bitmap-accelerated scan with lazy dirty-bit cleanup.
+  # Stale bits (set but slot empty after fire/cascade) are cleared on discovery.
   var earliest = int64.high
   for level in 0 ..< 4:
-    for i in 0 ..< 256:
-      let n = loop.wheel[level][i]
-      if n != nil and n.deadline < earliest:
-        earliest = n.deadline
+    if earliest != int64.high: break
+    for i in 0 ..< 4:
+      var bits = loop.occBits[level][i]
+      while bits != 0:
+        let bitPos = countTrailingZeroBits(bits)
+        let mask = 1.uint64 shl bitPos
+        bits = bits and not mask
+        let slot = i * 64 + bitPos
+        var node = loop.wheel[level][slot]
+        if node == nil:
+          loop.occBits[level][i] = loop.occBits[level][i] and not mask
+        else:
+          while node != nil:
+            if node.deadline < earliest:
+              earliest = node.deadline
+            node = node.next
 
   if earliest == int64.high:
     return -1
+  loop.nextDead = earliest
   let wait = earliest - now
   if wait <= 0: return 0
   if wait > int64(high(int)):
@@ -336,11 +376,11 @@ proc processDeferred(loop: Loop) {.inline.} =
 
 proc sweepDead(loop: Loop) {.inline.} =
   if loop.deadCount > 64:
-    var dead: seq[int]
+    loop.deadFds.setLen(0)
     for fd, w in loop.fdWatchers:
       if not w.alive:
-        dead.add(fd)
-    for fd in dead:
+        loop.deadFds.add(fd)
+    for fd in loop.deadFds:
       loop.fdWatchers.del(fd)
     loop.deadCount = 0
 

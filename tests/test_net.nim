@@ -107,8 +107,8 @@ test "test_udp":
   # Bind a UDP listener
   var server: UdpSocket
   server = loop.bindUdp("127.0.0.1", 19878,
-    onData = proc(msg: UdpMessage) =
-      recvData = msg.data
+    onData = proc(sender: Sockaddr_storage; data: openArray[byte]) =
+      recvData = @data
       gotMsg = true
       server.close()
       loop.stop()

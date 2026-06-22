@@ -73,63 +73,66 @@ const
 
 
 func getFileExt*(path: string): string {.inline.} =
-  let (_, _, ext) = path.splitFile()
-  result = ext.toLowerAscii()
+  let dotPos = path.rfind('.')
+  if dotPos < 0: return ""
+  result = newString(path.len - dotPos)
+  for i in dotPos ..< path.len:
+    let c = path[i]
+    result[i - dotPos] = if c >= 'A' and c <= 'Z': char(ord(c) + 32) else: c
 
 func parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, length: int64] =
-  ## Parse an HTTP Range header (single range, `bytes=start-end`).
-  ## Supports explicit ranges (`0-1023`), open-ended ranges (`1024-`),
-  ## and suffix ranges (`-500`). Clamps rangeEnd to fileSize - 1.
-  ## Returns (true, startByte, length) on success, (false, 0, 0) on failure.
-  if not rangeHeader.startsWith("bytes="):
-    return (false, 0, 0)
-  if fileSize <= 0:
-    return (false, 0, 0)
-  let range = rangeHeader[6..^1]
-  let parts = range.split('-')
-  if parts.len != 2:
-    return (false, 0, 0)
-  let startStr = parts[0].strip()
-  let endStr = parts[1].strip()
+  if not rangeHeader.startsWith("bytes="): return (false, 0, 0)
+  if fileSize <= 0: return (false, 0, 0)
+
+  var i = 6
+  let hlen = rangeHeader.len
+
+  var dashPos = i
+  while dashPos < hlen and rangeHeader[dashPos] != '-':
+    inc dashPos
+  if dashPos >= hlen: return (false, 0, 0)
 
   var rangeStart = 0i64
-  var rangeEnd = fileSize - 1
+  var hasStart = false
+  if dashPos > i:
+    hasStart = true
+    var j = i
+    while j < dashPos:
+      let c = rangeHeader[j]
+      if c < '0' or c > '9': return (false, 0, 0)
+      let digit = int64(ord(c) - ord('0'))
+      if rangeStart > high(int64) div 10: return (false, 0, 0)
+      rangeStart = rangeStart * 10 + digit
+      inc j
 
-  if startStr.len > 0 and endStr.len > 0:
-    # Explicit range: bytes=start-end
-    try:
-      rangeStart = parseInt(startStr).int64
-      rangeEnd = parseInt(endStr).int64
-    except ValueError:
-      return (false, 0, 0)
-    if rangeStart > rangeEnd or rangeStart < 0:
-      return (false, 0, 0)
-    if rangeStart >= fileSize:
-      return (false, 0, 0)
-    if rangeEnd >= fileSize:
-      rangeEnd = fileSize - 1
-  elif startStr.len > 0:
-    # Open-ended range: bytes=start-
-    try:
-      rangeStart = parseInt(startStr).int64
-    except ValueError:
-      return (false, 0, 0)
-    if rangeStart < 0 or rangeStart >= fileSize:
-      return (false, 0, 0)
+  var rangeEnd = fileSize - 1
+  var hasEnd = false
+  i = dashPos + 1
+  if i < hlen:
+    hasEnd = true
+    var num = 0i64
+    while i < hlen:
+      let c = rangeHeader[i]
+      if c < '0' or c > '9': break
+      let digit = int64(ord(c) - ord('0'))
+      if num > high(int64) div 10: return (false, 0, 0)
+      num = num * 10 + digit
+      inc i
+    rangeEnd = num
+
+  if hasStart and hasEnd:
+    if rangeStart > rangeEnd or rangeStart < 0: return (false, 0, 0)
+    if rangeStart >= fileSize: return (false, 0, 0)
+    if rangeEnd >= fileSize: rangeEnd = fileSize - 1
+  elif hasStart:
+    if rangeStart < 0 or rangeStart >= fileSize: return (false, 0, 0)
     rangeEnd = fileSize - 1
-  elif endStr.len > 0:
-    # Suffix range: bytes=-length (last N bytes)
-    try:
-      let suffixLen = parseInt(endStr).int64
-      if suffixLen <= 0:
-        return (false, 0, 0)
-      if suffixLen >= fileSize:
-        rangeStart = 0
-      else:
-        rangeStart = fileSize - suffixLen
-      rangeEnd = fileSize - 1
-    except ValueError:
-      return (false, 0, 0)
+  elif hasEnd:
+    let suffixLen = rangeEnd
+    if suffixLen <= 0: return (false, 0, 0)
+    if suffixLen >= fileSize: rangeStart = 0
+    else: rangeStart = fileSize - suffixLen
+    rangeEnd = fileSize - 1
   else:
     return (false, 0, 0)
 
@@ -748,7 +751,7 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     if conn.data == nil:
       return
     ctx.parser.resetForNext()
-    discard p.feed(@[])
+    p.tryAdvance()
     if conn.sendFileFd >= 0:
       break
 

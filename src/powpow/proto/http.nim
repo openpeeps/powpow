@@ -72,6 +72,8 @@ type
     contentLength: int          ## From Content-Length header (-1 if absent)
     transferChunked: bool       ## Transfer-Encoding: chunked
     connectionClose*: bool      ## Connection: close seen
+    contentTypeStart: int       ## -1 if no Content-Type (lazy materialization)
+    contentTypeLen: int
 
     # Chunked transfer encoding state
     chunkStart: int             ## Start of current chunk data
@@ -160,12 +162,13 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     pathCache:     "",
     queryCache:    "",
     contentTypeVal:"",
+    contentTypeStart: -1,
+    contentTypeLen: 0,
     phase:         PhaseRequestLine,
     errorCode:     Http200,
   )
 
 proc reset*(p: HttpParser) =
-  ## Reset the parser for a new request (keep-alive reuse).
   p.bufLen        = 0
   p.headerEnd     = -1
   p.methodLen     = 0
@@ -191,6 +194,8 @@ proc reset*(p: HttpParser) =
   p.pathCache.setLen(0)
   p.queryCache.setLen(0)
   p.contentTypeVal.setLen(0)
+  p.contentTypeStart = -1
+  p.contentTypeLen = 0
   if p.buf.len > 8192:
     p.buf.setLen(4096)
 
@@ -239,6 +244,8 @@ proc resetForNext*(p: HttpParser) =
   p.pathCache.setLen(0)
   p.queryCache.setLen(0)
   p.contentTypeVal.setLen(0)
+  p.contentTypeStart = -1
+  p.contentTypeLen = 0
 
 func phase*(p: HttpParser): ParsePhase {.inline.} = p.phase
 
@@ -287,17 +294,7 @@ proc parseRequestLine(p: HttpParser): bool =
   else:
     p.pathEnd = i
 
-  # Materialize cached values at parse time (zero-alloc on subsequent access)
-  let bufPtr = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-  p.methodCache = parseMethod(bufPtr, p.methodLen)
-  if p.pathEnd > p.pathStart:
-    let plen = p.pathEnd - p.pathStart
-    p.pathCache = newString(plen)
-    copyMem(addr p.pathCache[0], addr bufPtr[p.pathStart], plen)
-  if p.queryStart >= 0:
-    let qlen = p.queryEnd - p.queryStart
-    p.queryCache = newString(qlen)
-    copyMem(addr p.queryCache[0], addr bufPtr[p.queryStart], qlen)
+  p.methodCache = parseMethod(cast[ptr UncheckedArray[byte]](addr p.buf[0]), p.methodLen)
 
   if i >= crlf:
     p.phase = PhaseError
@@ -361,10 +358,10 @@ proc scanHeaders(p: HttpParser): bool =
           return false
 
         # Quick check for Content-Length (case-insensitive prefix match)
+        var matched = false
         if lineLen >= 15:
           let c = char(buf[lineStart])
           if c == 'C' or c == 'c':
-            # Check "content-length:"
             var isCL = true
             const clKey = "content-length:"
             if lineLen >= clKey.len:
@@ -374,7 +371,7 @@ proc scanHeaders(p: HttpParser): bool =
                   isCL = false
                   break
             if isCL:
-              # Parse the numeric value
+              matched = true
               var valStart = lineStart + clKey.len
               while valStart < i and char(buf[valStart]) == ' ':
                 inc valStart
@@ -406,7 +403,7 @@ proc scanHeaders(p: HttpParser): bool =
               p.contentLength = num
 
         # Quick check for Transfer-Encoding
-        if lineLen >= 19:
+        if not matched and lineLen >= 19:
           let c = char(buf[lineStart])
           if c == 'T' or c == 't':
             var isTE = true
@@ -418,7 +415,7 @@ proc scanHeaders(p: HttpParser): bool =
                   isTE = false
                   break
               if isTE:
-                # Check if "chunked"
+                matched = true
                 var valStart = lineStart + teKey.len
                 while valStart < i and char(buf[valStart]) == ' ':
                   inc valStart
@@ -426,7 +423,7 @@ proc scanHeaders(p: HttpParser): bool =
                   p.transferChunked = true
 
         # Quick check for Connection: close
-        if lineLen >= 12:
+        if not matched and lineLen >= 12:
           let c = char(buf[lineStart])
           if c == 'C' or c == 'c':
             var isCon = true
@@ -438,6 +435,7 @@ proc scanHeaders(p: HttpParser): bool =
                   isCon = false
                   break
               if isCon:
+                matched = true
                 var valStart = lineStart + conKey.len
                 while valStart < i and char(buf[valStart]) == ' ':
                   inc valStart
@@ -471,8 +469,8 @@ proc scanHeaders(p: HttpParser): bool =
                   inc valStart
                 let valLen = i - valStart
                 if valLen > 0:
-                  p.contentTypeVal = newString(valLen)
-                  copyMem(addr p.contentTypeVal[0], addr buf[valStart], valLen)
+                  p.contentTypeStart = valStart
+                  p.contentTypeLen = valLen
 
         inc i  # skip \r
       inc i  # skip \n
@@ -493,10 +491,7 @@ proc scanHeaders(p: HttpParser): bool =
 proc ensureCapacity(p: HttpParser, needed: int) {.inline.} =
   if p.bufLen + needed > p.buf.len:
     let newCap = max(p.buf.len * 2, p.bufLen + needed)
-    var newBuf = newSeq[byte](newCap)
-    if p.bufLen > 0:
-      copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
-    p.buf = newBuf
+    p.buf.setLen(newCap)
 
 proc parseChunkSize(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
   ## Parse hexadecimal chunk size. Returns -1 on error, -2 if incomplete.
@@ -787,6 +782,54 @@ proc feed*(p: HttpParser, data: string): ParsePhase {.inline, discardable.} =
   ## Convenience overload for feeding string data.
   p.feed(data.toOpenArrayByte(0, data.high))
 
+proc tryAdvance*(p: HttpParser) =
+  ## Advance the parser state machine using existing buffer data.
+  ## Equivalent to `feed(@[])` but without allocating an empty seq.
+  ## Used after `resetForNext()` to process pipelined request bytes.
+  if p.phase in {PhaseComplete, PhaseError}: return
+  if p.phase == PhaseRequestLine:
+    if not p.parseRequestLine(): return
+  if p.phase == PhaseHeaders:
+    if not p.scanHeaders(): return
+  if p.phase == PhaseBody:
+    if p.onBodyData != nil and not p.streamingBody:
+      p.streamingBody = true
+      let bodyStart = p.headerEnd
+      let bodyInBuf = p.bufLen - bodyStart
+      if bodyInBuf > 0:
+        let bytesToStream = if not p.transferChunked and p.contentLength > 0:
+                              min(bodyInBuf, p.contentLength)
+                            else:
+                              bodyInBuf
+        if bytesToStream > 0 and p.onBodyData != nil:
+          let doneAfter = not p.transferChunked and p.contentLength > 0 and p.bodyStreamed + bytesToStream >= p.contentLength
+          p.onBodyData(p.buf.toOpenArray(bodyStart, bodyStart + bytesToStream - 1), doneAfter)
+        p.bodyStreamed = bytesToStream
+        let leftoverStart = bodyStart + bytesToStream
+        let leftover = p.bufLen - leftoverStart
+        if leftover > 0:
+          copyMem(addr p.buf[0], addr p.buf[leftoverStart], leftover)
+          p.bufLen = leftover
+        else:
+          p.bufLen = 0
+      else:
+        p.bufLen = 0
+      if not p.transferChunked and p.contentLength > 0:
+        if p.bodyStreamed >= p.contentLength:
+          p.bodyLen = p.contentLength
+          p.phase = PhaseComplete
+      return
+    if p.transferChunked:
+      if p.bodyStart == 0:
+        p.bodyStart = p.headerEnd
+      if p.parseChunkedBody():
+        p.phase = PhaseComplete
+    elif p.contentLength > 0:
+      let expected = p.headerEnd + p.contentLength
+      if p.bufLen >= expected:
+        p.bodyLen = p.contentLength
+        p.phase = PhaseComplete
+
 func isComplete*(p: HttpParser): bool {.inline.} =
   p.phase == PhaseComplete
 
@@ -801,16 +844,24 @@ func error*(p: HttpParser): HttpCode {.inline.} =
 func peekMethod*(p: HttpParser): HttpMethod {.inline.} =
   p.methodCache
 
-func peekPath*(p: HttpParser): lent string =
+proc peekPath*(p: HttpParser): lent string {.inline.} =
+  if p.pathCache.len == 0 and p.pathEnd > p.pathStart:
+    let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+    let plen = p.pathEnd - p.pathStart
+    p.pathCache = newString(plen)
+    copyMem(addr p.pathCache[0], addr buf[p.pathStart], plen)
   p.pathCache
 
-func peekContentType*(p: HttpParser): lent string =
+proc peekContentType*(p: HttpParser): lent string {.inline.} =
+  if p.contentTypeVal.len == 0 and p.contentTypeStart >= 0:
+    let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+    p.contentTypeVal = newString(p.contentTypeLen)
+    copyMem(addr p.contentTypeVal[0], addr buf[p.contentTypeStart], p.contentTypeLen)
   p.contentTypeVal
 
 # ── HttpRequest: lazy accessors ──────────────────────────────────────────────
 
 proc getRequest*(p: HttpParser): HttpRequest =
-  ## Create a request view from the parser. Only valid when `isComplete()`.
   assert p.phase == PhaseComplete
   result = HttpRequest(
     parser:     p,
@@ -819,24 +870,35 @@ proc getRequest*(p: HttpParser): HttpRequest =
     bodyReady:  false,
   )
 
-func getMethod*(req: HttpRequest): HttpMethod {.inline.} =
+proc getMethod*(req: HttpRequest): HttpMethod {.inline.} =
   req.httpMethod
 
-func getPath*(req: HttpRequest): lent string =
-  req.parser.pathCache
+proc getPath*(req: HttpRequest): lent string =
+  let p = req.parser
+  if p.pathCache.len == 0 and p.pathEnd > p.pathStart:
+    let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+    let plen = p.pathEnd - p.pathStart
+    p.pathCache = newString(plen)
+    copyMem(addr p.pathCache[0], addr buf[p.pathStart], plen)
+  p.pathCache
 
-func getQuery*(req: HttpRequest): lent string =
-  req.parser.queryCache
+proc getQuery*(req: HttpRequest): lent string =
+  let p = req.parser
+  if p.queryCache.len == 0 and p.queryStart >= 0:
+    let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+    let qlen = p.queryEnd - p.queryStart
+    p.queryCache = newString(qlen)
+    copyMem(addr p.queryCache[0], addr buf[p.queryStart], qlen)
+  p.queryCache
 
-func getUrl*(req: HttpRequest): lent string =
+proc getUrl*(req: HttpRequest): lent string =
   if req.urlVal.len == 0:
-    let path = req.parser.pathCache
-    let query = req.parser.queryCache
+    let path = req.getPath()
+    let query = req.getQuery()
     req.urlVal = if query.len > 0: path & "?" & query else: path
   req.urlVal
 
 proc getHeaders*(req: HttpRequest): HttpHeaders =
-  ## Parse and return headers. Materialized on first call, then cached.
   if not req.headersReady:
     let p = req.parser
     let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
@@ -848,7 +910,7 @@ proc getHeaders*(req: HttpRequest): HttpHeaders =
         i += 2
         break
       inc i
-    # Parse headers
+    # Parse headers — scan for colon directly in buffer, avoid intermediate line string
     while i < p.headerEnd - 1:
       if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
         inc i, 2
@@ -858,17 +920,25 @@ proc getHeaders*(req: HttpRequest): HttpHeaders =
         if char(buf[i]) == '\r':
           break
         inc i
-      let line = newString(i - lineStart)
-      if line.len > 0:
-        copyMem(addr line[0], addr buf[lineStart], line.len)
-        let colonPos = line.find(':')
-        if colonPos > 0:
-          let key = line[0 ..< colonPos]
+      let lineLen = i - lineStart
+      if lineLen > 0:
+        var colonPos = lineStart
+        while colonPos < i and char(buf[colonPos]) != ':':
+          inc colonPos
+        if colonPos < i and colonPos > lineStart:
+          let keyLen = colonPos - lineStart
+          var key = newString(keyLen)
+          copyMem(addr key[0], addr buf[lineStart], keyLen)
           var valStart = colonPos + 1
-          while valStart < line.len and line[valStart] == ' ':
+          while valStart < i and char(buf[valStart]) == ' ':
             inc valStart
-          let value = line[valStart .. ^1]
-          req.headersVal.add(key, value)
+          let valLen = i - valStart
+          if valLen > 0:
+            var value = newString(valLen)
+            copyMem(addr value[0], addr buf[valStart], valLen)
+            req.headersVal.add(key, value)
+          else:
+            req.headersVal.add(key, "")
       if i < p.headerEnd - 1 and char(buf[i]) == '\r':
         inc i
       inc i

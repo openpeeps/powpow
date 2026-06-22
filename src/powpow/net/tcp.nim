@@ -154,7 +154,7 @@ proc send*(conn: Connection, data: openArray[byte]): int =
   let n = sockSend(conn.fd, unsafeAddr data[0], data.len)
   if n < 0:
     if sockWouldBlock():
-      conn.writeBuf = newSeq[byte](data.len)
+      conn.writeBuf.setLen(data.len)
       copyMem(addr conn.writeBuf[0], unsafeAddr data[0], data.len)
       conn.writePos = 0
       if not conn.corked:
@@ -167,7 +167,7 @@ proc send*(conn: Connection, data: openArray[byte]): int =
 
   if n < data.len:
     let remaining = data.len - n
-    conn.writeBuf = newSeq[byte](remaining)
+    conn.writeBuf.setLen(remaining)
     copyMem(addr conn.writeBuf[0], unsafeAddr data[n], remaining)
     conn.writePos = 0
     if not conn.corked:
@@ -225,7 +225,7 @@ proc sendv*(conn: Connection,
   let n = sockWritev(conn.fd, iovBuf, iovLen)
   if n < 0:
     if sockWouldBlock():
-      conn.writeBuf = newSeq[byte](totalLen)
+      conn.writeBuf.setLen(totalLen)
       var pos = 0
       for part in parts:
         copyMem(addr conn.writeBuf[pos], part.data, part.len)
@@ -241,7 +241,7 @@ proc sendv*(conn: Connection,
 
   if n < totalLen:
     var remaining = totalLen - n
-    conn.writeBuf = newSeq[byte](remaining)
+    conn.writeBuf.setLen(remaining)
     var pos = 0
     var skipped = 0
     for part in parts:

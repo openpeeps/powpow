@@ -21,7 +21,7 @@ import ../types
 import ./http
 import ./httpserver
 
-proc monoMs: int64 = getMonoTime().ticks div 1_000_000
+proc monoMs: int64 {.inline.} = getMonoTime().ticks div 1_000_000
 
 type
   Bucket = tuple[start: int64, count: int]
@@ -58,8 +58,6 @@ proc newRateLimiter*(loop: Loop; maxRequests: int; windowMs: int;
   result = rl
 
 proc allow*(rl: RateLimiter; ip: string): bool =
-  ## Check if a request from `ip` is allowed. Returns true if within
-  ## the rate limit, false if the limit has been exceeded.
   if ip.len == 0 or rl.maxRequests <= 0:
     return true
   let now = monoMs()

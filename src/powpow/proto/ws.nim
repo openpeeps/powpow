@@ -183,9 +183,11 @@ proc writeFrame*(conn: Connection, opcode: int, payload: openArray[byte]) =
       v = v shr 8
     hlen = 10
 
-  discard conn.send(header.toOpenArray(0, hlen - 1))
+  let hdrPtr = cast[ptr UncheckedArray[byte]](addr header[0])
   if n > 0:
-    discard conn.send(payload)
+    discard conn.sendv([(hdrPtr, hlen), (cast[ptr UncheckedArray[byte]](unsafeAddr payload[0]), n)])
+  else:
+    discard conn.send(header.toOpenArray(0, hlen - 1))
 
 proc writeFrameMasked*(conn: Connection, opcode: int, payload: openArray[byte],
                        mask: array[4, uint8]) =
@@ -478,13 +480,25 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
       let toCopy = min(remaining, avail)
       if toCopy > 0:
         if p.masked:
-          for j in 0 ..< toCopy:
-            p.payload[p.payloadOff + j] =
-              uint8(data[i + j]) xor p.maskKey[(p.payloadOff + j) mod 4]
+          let mk = p.maskKey
+          var di = i
+          var po = p.payloadOff
+          let poEnd = po + toCopy
+          while po + 4 <= poEnd:
+            p.payload[po]   = uint8(data[di])   xor mk[po and 3]
+            p.payload[po+1] = uint8(data[di+1]) xor mk[(po+1) and 3]
+            p.payload[po+2] = uint8(data[di+2]) xor mk[(po+2) and 3]
+            p.payload[po+3] = uint8(data[di+3]) xor mk[(po+3) and 3]
+            po += 4; di += 4
+          while po < poEnd:
+            p.payload[po] = uint8(data[di]) xor mk[po and 3]
+            inc po; inc di
+          p.payloadOff = po
+          i = di
         else:
           copyMem(addr p.payload[p.payloadOff], unsafeAddr data[i], toCopy)
-        p.payloadOff += toCopy
-        i += toCopy
+          p.payloadOff += toCopy
+          i += toCopy
       if p.payloadOff >= int(p.payloadLen):
         p.phase = WsPhaseReady
 
