@@ -996,7 +996,7 @@ proc readChunk*(stream: var BodyStream; maxLen: Natural): seq[byte] =
   ## Reads up to maxLen bytes from the body stream.
   ## Returns empty seq when no more data is available.
   let p = stream.parser
-  let blen = p.bodyLen()
+  let blen = bodyLen(p)
   let available = blen - stream.readPos
   if available <= 0: return @[]
   let toRead = min(available, maxLen)
@@ -1009,7 +1009,7 @@ proc readChunk*(stream: var BodyStream; maxLen: Natural): seq[byte] =
 proc readChunkString*(stream: var BodyStream; maxLen: Natural): string =
   ## Reads up to maxLen bytes from the body stream as a string.
   let p = stream.parser
-  let blen = p.bodyLen()
+  let blen = bodyLen(p)
   let available = blen - stream.readPos
   if available <= 0: return ""
   let toRead = min(available, maxLen)
@@ -1023,7 +1023,7 @@ proc peekChunk*(stream: var BodyStream; maxLen: Natural): tuple[data: ptr Unchec
   ## Returns a pointer and length to the next available chunk (up to maxLen).
   ## No copy is performed. The pointer is only valid until the next buffer operation.
   let p = stream.parser
-  let blen = p.bodyLen()
+  let blen = bodyLen(p)
   let available = blen - stream.readPos
   if available <= 0: return (nil, 0)
   let toRead = min(available, maxLen)
@@ -1031,7 +1031,7 @@ proc peekChunk*(stream: var BodyStream; maxLen: Natural): tuple[data: ptr Unchec
 
 proc drainChunk*(stream: var BodyStream; len: Natural) {.inline.} =
   let p = stream.parser
-  let blen = p.bodyLen()
+  let blen = bodyLen(p)
   let available = blen - stream.readPos
   stream.readPos += min(len, available)
 
@@ -1040,7 +1040,7 @@ proc readChunkInto*(stream: var BodyStream; buf: var seq[byte]; maxLen: Natural)
   ## Returns the number of bytes written (0 = EOF).
   ## The caller can reuse `buf` across calls — no per-chunk allocation.
   let p = stream.parser
-  let blen = p.bodyLen()
+  let blen = bodyLen(p)
   let available = blen - stream.readPos
   if available <= 0: return 0
   let toRead = min(available, maxLen)
@@ -1055,7 +1055,7 @@ proc peekAll*(stream: BodyStream): tuple[data: ptr UncheckedArray[byte]; len: in
   ## Zero-copy view of the entire remaining body. No allocation.
   ## The pointer is valid for the duration of the request handler.
   let p = stream.parser
-  let blen = p.bodyLen()
+  let blen = bodyLen(p)
   let remaining = blen - stream.readPos
   if remaining <= 0: return (nil, 0)
   result = (cast[ptr UncheckedArray[byte]](addr p.buf[p.headerEnd + stream.readPos]), remaining)
