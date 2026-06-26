@@ -122,6 +122,14 @@
         onClose: OnClose = nil)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">connectUnix
+  <li><a class="reference" href="#connectUnix%2CLoop%2Cstring%2Cproc%28Connection%29%2COnData%2COnClose" title="connectUnix(loop: Loop; path: string;
+            onConnect: proc (conn: Connection) {.closure.}; onData: OnData;
+            onClose: OnClose = nil)">connectUnix(loop: Loop; path: string;
+            onConnect: proc (conn: Connection) {.closure.}; onData: OnData;
+            onClose: OnClose = nil)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">continueSendFile
   <li><a class="reference" href="#continueSendFile%2CConnection" title="continueSendFile(conn: Connection): bool">continueSendFile(conn: Connection): bool</a></li>
 
@@ -182,7 +190,7 @@
     <div id="tocRoot"></div>
     
     <p class="module-desc"><p>powpow/net/tcp.nim — Non-blocking TCP server and client connections.</p>
-<p>Built on top of the powpow event loop for zero-threading, high-throughput TCP networking. Platform-agnostic: IOCP (Windows) or epoll/kqueue (Unix).</p>
+<p>This module provides a non-blocking TCP server and client implementation using the powpow event loop. It supports connection pooling, zero-copy file sending, and efficient read/write buffering. </p>
 </p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
@@ -342,6 +350,21 @@
 </div>
 
 </div>
+<div id="connectUnix-procs-all">
+  <div id="connectUnix,Loop,string,proc(Connection),OnData,OnClose">
+  <dt><pre><span class="Keyword">proc</span> <a href="#connectUnix%2CLoop%2Cstring%2Cproc%28Connection%29%2COnData%2COnClose"><span class="Identifier">connectUnix</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
+                 <span class="Identifier">onConnect</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}<span class="Other">;</span> <span class="Identifier">onData</span><span class="Other">:</span> <a href="#OnData"><span class="Identifier">OnData</span></a><span class="Other">;</span>
+                 <span class="Identifier">onClose</span><span class="Other">:</span> <a href="#OnClose"><span class="Identifier">OnClose</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="continueSendFile-procs-all">
   <div id="continueSendFile,Connection">
   <dt><pre><span class="Keyword">proc</span> <a href="#continueSendFile%2CConnection"><span class="Identifier">continueSendFile</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
@@ -483,7 +506,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:00 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-26 13:06:43 UTC</small>
       </div>
     </div>
   </div>

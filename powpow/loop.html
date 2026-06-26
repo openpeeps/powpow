@@ -69,6 +69,9 @@
 <li><a class="reference" href="#Loop" title="Loop = ref object
   platform*: Platform
   bufPool*: seq[ptr UncheckedArray[byte]]">Loop</a></li>
+<li><a class="reference" href="#Observer" title="Observer = ref object
+  varPtr*: ptr uint64
+  cb*: ObserverCallback">Observer</a></li>
 
     </ul>
   </details>
@@ -87,6 +90,10 @@
 </ul>
 <ul class="simple nested-toc-section">addTimer
   <li><a class="reference" href="#addTimer%2CLoop%2Cint%2CTimerCallback" title="addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId">addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">cancelObserver
+  <li><a class="reference" href="#cancelObserver%2CObserver" title="cancelObserver(obs: Observer)">cancelObserver(obs: Observer)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">cancelTimer
@@ -113,6 +120,14 @@
   <li><a class="reference" href="#newLoop" title="newLoop(): Loop">newLoop(): Loop</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">observe
+  <li><a class="reference" href="#observe%2CLoop%2Cptr.uint64%2CObserverCallback" title="observe(loop: Loop; varPtr: ptr uint64; cb: ObserverCallback): Observer">observe(loop: Loop; varPtr: ptr uint64; cb: ObserverCallback): Observer</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">pauseTimer
+  <li><a class="reference" href="#pauseTimer%2CLoop%2CTimerId" title="pauseTimer(loop: Loop; id: TimerId)">pauseTimer(loop: Loop; id: TimerId)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">poll
   <li><a class="reference" href="#poll%2CLoop%2Cint" title="poll(loop: Loop; timeoutMs: int = -1)">poll(loop: Loop; timeoutMs: int = -1)</a></li>
 
@@ -125,6 +140,10 @@
 </ul>
 <ul class="simple nested-toc-section">removeIdle
   <li><a class="reference" href="#removeIdle%2CLoop%2Cint" title="removeIdle(loop: Loop; id: int)">removeIdle(loop: Loop; id: int)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">resumeTimer
+  <li><a class="reference" href="#resumeTimer%2CLoop%2CTimerId" title="resumeTimer(loop: Loop; id: TimerId)">resumeTimer(loop: Loop; id: TimerId)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">run
@@ -196,6 +215,16 @@
     
   </dd>
 </div>
+<div id="Observer">
+  <dt><pre><a href="#Observer"><span class="Identifier">Observer</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
+  <span class="Identifier">varPtr</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">ptr</span> <span class="Identifier">uint64</span>
+  <span class="Identifier">cb</span><span class="Operator">*</span><span class="Other">:</span> <a href="types.html#ObserverCallback"><span class="Identifier">ObserverCallback</span></a></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
 
   </dl>
 </div>
@@ -233,6 +262,17 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="cancelObserver-procs-all">
+  <div id="cancelObserver,Observer">
+  <dt><pre><span class="Keyword">proc</span> <a href="#cancelObserver%2CObserver"><span class="Identifier">cancelObserver</span></a><span class="Other">(</span><span class="Identifier">obs</span><span class="Other">:</span> <a href="#Observer"><span class="Identifier">Observer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Cancel an observer. The observer is lazily removed from the loop during the next sweep.
     
   </dd>
 </div>
@@ -307,6 +347,29 @@
 </div>
 
 </div>
+<div id="observe-procs-all">
+  <div id="observe,Loop,ptr.uint64,ObserverCallback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#observe%2CLoop%2Cptr.uint64%2CObserverCallback"><span class="Identifier">observe</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">varPtr</span><span class="Other">:</span> <span class="Keyword">ptr</span> <span class="Identifier">uint64</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#ObserverCallback"><span class="Identifier">ObserverCallback</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#Observer"><span class="Identifier">Observer</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Observe a variable at <tt class="docutils literal"><span class="pre"><span class="Identifier">varPtr</span></span></tt>. The callback is invoked on each poll iteration when the variable's value changes from the last observed value. Returns an Observer handle that can be passed to <tt class="docutils literal"><span class="pre"><span class="Identifier">cancelObserver</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
+<div id="pauseTimer-procs-all">
+  <div id="pauseTimer,Loop,TimerId">
+  <dt><pre><span class="Keyword">proc</span> <a href="#pauseTimer%2CLoop%2CTimerId"><span class="Identifier">pauseTimer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">id</span><span class="Other">:</span> <a href="types.html#TimerId"><span class="Identifier">TimerId</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Pause a timer at its next scheduled fire. The timer is lazily removed from the wheel during processTimers and stored in a paused list. When resumed, it is re-scheduled from the current time (paused duration is not compensated).
+    
+  </dd>
+</div>
+
+</div>
 <div id="poll-procs-all">
   <div id="poll,Loop,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#poll%2CLoop%2Cint"><span class="Identifier">poll</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">timeoutMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">-1</span><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
@@ -338,6 +401,18 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="resumeTimer-procs-all">
+  <div id="resumeTimer,Loop,TimerId">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resumeTimer%2CLoop%2CTimerId"><span class="Identifier">resumeTimer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">id</span><span class="Other">:</span> <a href="types.html#TimerId"><span class="Identifier">TimerId</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Resume a previously paused timer. The timer fires after its original delay/interval from the moment of resume.
     
   </dd>
 </div>
@@ -407,7 +482,7 @@
 <div class="section" id="19">
   <h1><a class="toc-backref" href="#19">Exports</a></h1>
   <dl class="item">
-    <a href="types.html#TimerCallback"><span class="Identifier">TimerCallback</span></a>, <a href="types.html#==,TimerId,TimerId"><span class="Identifier">==</span></a>, <a href="types.html#Callback"><span class="Identifier">Callback</span></a>, <a href="types.html#FdCallback"><span class="Identifier">FdCallback</span></a>, <a href="types.html#EventType"><span class="Identifier">EventType</span></a>, <a href="types.html#TimerId"><span class="Identifier">TimerId</span></a>
+    <a href="types.html#TimerCallback"><span class="Identifier">TimerCallback</span></a>, <a href="types.html#ObserverCallback"><span class="Identifier">ObserverCallback</span></a>, <a href="types.html#Callback"><span class="Identifier">Callback</span></a>, <a href="types.html#FdCallback"><span class="Identifier">FdCallback</span></a>, <a href="types.html#==,TimerId,TimerId"><span class="Identifier">==</span></a>, <a href="types.html#EventType"><span class="Identifier">EventType</span></a>, <a href="types.html#TimerId"><span class="Identifier">TimerId</span></a>
   </dl>
 </div>
 
@@ -417,7 +492,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:00 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-26 13:06:43 UTC</small>
       </div>
     </div>
   </div>

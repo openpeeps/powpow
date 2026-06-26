@@ -250,6 +250,10 @@
   <li><a class="reference" href="#streamToFile%2CHttpRequest%2Cstring" title="streamToFile(req: HttpRequest; tmpDir = &quot;&quot;): string">streamToFile(req: HttpRequest; tmpDir = &quot;&quot;): string</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">tryAdvance
+  <li><a class="reference" href="#tryAdvance%2CHttpParser" title="tryAdvance(p: HttpParser)">tryAdvance(p: HttpParser)</a></li>
+
+</ul>
 
     </ul>
   </details>
@@ -534,7 +538,7 @@
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Parse and return headers. Materialized on first call, then cached.
+    
     
   </dd>
 </div>
@@ -542,7 +546,7 @@
 </div>
 <div id="getMethod-procs-all">
   <div id="getMethod,HttpRequest">
-  <dt><pre><span class="Keyword">func</span> <a href="#getMethod%2CHttpRequest"><span class="Identifier">getMethod</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getMethod%2CHttpRequest"><span class="Identifier">getMethod</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -572,7 +576,7 @@
 </div>
 <div id="getPath-procs-all">
   <div id="getPath,HttpRequest">
-  <dt><pre><span class="Keyword">func</span> <a href="#getPath%2CHttpRequest"><span class="Identifier">getPath</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getPath%2CHttpRequest"><span class="Identifier">getPath</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -583,7 +587,7 @@
 </div>
 <div id="getQuery-procs-all">
   <div id="getQuery,HttpRequest">
-  <dt><pre><span class="Keyword">func</span> <a href="#getQuery%2CHttpRequest"><span class="Identifier">getQuery</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getQuery%2CHttpRequest"><span class="Identifier">getQuery</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -609,7 +613,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#getRequest%2CHttpParser"><span class="Identifier">getRequest</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Create a request view from the parser. Only valid when <tt class="docutils literal"><span class="pre"><span class="Identifier">isComplete</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt>.
+    
     
   </dd>
 </div>
@@ -617,7 +621,7 @@
 </div>
 <div id="getUrl-procs-all">
   <div id="getUrl,HttpRequest">
-  <dt><pre><span class="Keyword">func</span> <a href="#getUrl%2CHttpRequest"><span class="Identifier">getUrl</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#getUrl%2CHttpRequest"><span class="Identifier">getUrl</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -699,7 +703,7 @@
 </div>
 <div id="peekContentType-procs-all">
   <div id="peekContentType,HttpParser">
-  <dt><pre><span class="Keyword">func</span> <a href="#peekContentType%2CHttpParser"><span class="Identifier">peekContentType</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#peekContentType%2CHttpParser"><span class="Identifier">peekContentType</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -723,7 +727,8 @@
 </div>
 <div id="peekPath-procs-all">
   <div id="peekPath,HttpParser">
-  <dt><pre><span class="Keyword">func</span> <a href="#peekPath%2CHttpParser"><span class="Identifier">peekPath</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#peekPath%2CHttpParser"><span class="Identifier">peekPath</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -785,7 +790,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#reset%2CHttpParser"><span class="Identifier">reset</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Reset the parser for a new request (keep-alive reuse).
+    
     
   </dd>
 </div>
@@ -821,6 +826,18 @@
 </div>
 
 </div>
+<div id="tryAdvance-procs-all">
+  <div id="tryAdvance,HttpParser">
+  <dt><pre><span class="Keyword">proc</span> <a href="#tryAdvance%2CHttpParser"><span class="Identifier">tryAdvance</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                 <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Advance the parser state machine using existing buffer data. Equivalent to <tt class="docutils literal"><span class="pre"><span class="Identifier">feed</span><span class="Punctuation">(</span><span class="Operator">@</span><span class="Punctuation">[</span><span class="Punctuation">]</span><span class="Punctuation">)</span></span></tt> but without allocating an empty seq. Used after <tt class="docutils literal"><span class="pre"><span class="Identifier">resetForNext</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> to process pipelined request bytes.
+    
+  </dd>
+</div>
+
+</div>
 
   </dl>
 </div>
@@ -831,7 +848,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:01 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-26 13:06:43 UTC</small>
       </div>
     </div>
   </div>

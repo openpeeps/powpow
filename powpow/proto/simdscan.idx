@@ -5,5 +5,5 @@ nim	findCRLFScalar	powpow/proto/simdscan.html#findCRLFScalar,ptr.UncheckedArray[
 nim	findDoubleCRLFScalar	powpow/proto/simdscan.html#findDoubleCRLFScalar,ptr.UncheckedArray[byte],int,int	proc findDoubleCRLFScalar(buf: ptr UncheckedArray[byte]; start, limit: int): int		36
 nim	findCRLFSse2	powpow/proto/simdscan.html#findCRLFSse2,ptr.UncheckedArray[byte],int,int	proc findCRLFSse2(buf: ptr UncheckedArray[byte]; start, limit: int): int		49
 nim	findDoubleCRLFSse2	powpow/proto/simdscan.html#findDoubleCRLFSse2,ptr.UncheckedArray[byte],int,int	proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int		69
-nim	findCRLF	powpow/proto/simdscan.html#findCRLF,ptr.UncheckedArray[byte],int,int	proc findCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int		91
-nim	findDoubleCRLF	powpow/proto/simdscan.html#findDoubleCRLF,ptr.UncheckedArray[byte],int,int	proc findDoubleCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int		99
+nim	findCRLF	powpow/proto/simdscan.html#findCRLF,ptr.UncheckedArray[byte],int,int	proc findCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int		98
+nim	findDoubleCRLF	powpow/proto/simdscan.html#findDoubleCRLF,ptr.UncheckedArray[byte],int,int	proc findDoubleCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int		106

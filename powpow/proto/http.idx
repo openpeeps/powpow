@@ -11,42 +11,43 @@ nim	PhaseComplete	powpow/proto/http.html#PhaseComplete	ParsePhase.PhaseComplete	
 nim	PhaseError	powpow/proto/http.html#PhaseError	ParsePhase.PhaseError		45
 nim	ParsePhase	powpow/proto/http.html#ParsePhase	enum ParsePhase		45
 nim	HttpParser	powpow/proto/http.html#HttpParser	type HttpParser		53
-nim	HttpRequest	powpow/proto/http.html#HttpRequest	type HttpRequest		98
-nim	BodyStream	powpow/proto/http.html#BodyStream	object BodyStream		113
-nim	newHttpParser	powpow/proto/http.html#newHttpParser,int	proc newHttpParser(initialBufSize = 4096): HttpParser		143
-nim	reset	powpow/proto/http.html#reset,HttpParser	proc reset(p: HttpParser)		167
-nim	resetForNext	powpow/proto/http.html#resetForNext,HttpParser	proc resetForNext(p: HttpParser)		197
-nim	phase	powpow/proto/http.html#phase,HttpParser	proc phase(p: HttpParser): ParsePhase		243
-nim	feed	powpow/proto/http.html#feed,HttpParser,openArray[byte]	proc feed(p: HttpParser; data: openArray[byte]): ParsePhase		682
-nim	feed	powpow/proto/http.html#feed,HttpParser,string	proc feed(p: HttpParser; data: string): ParsePhase		786
-nim	isComplete	powpow/proto/http.html#isComplete,HttpParser	proc isComplete(p: HttpParser): bool		790
-nim	isError	powpow/proto/http.html#isError,HttpParser	proc isError(p: HttpParser): bool		793
-nim	error	powpow/proto/http.html#error,HttpParser	proc error(p: HttpParser): HttpCode		796
-nim	peekMethod	powpow/proto/http.html#peekMethod,HttpParser	proc peekMethod(p: HttpParser): HttpMethod		801
-nim	peekPath	powpow/proto/http.html#peekPath,HttpParser	proc peekPath(p: HttpParser): lent string		804
-nim	peekContentType	powpow/proto/http.html#peekContentType,HttpParser	proc peekContentType(p: HttpParser): lent string		807
-nim	getRequest	powpow/proto/http.html#getRequest,HttpParser	proc getRequest(p: HttpParser): HttpRequest		812
-nim	getMethod	powpow/proto/http.html#getMethod,HttpRequest	proc getMethod(req: HttpRequest): HttpMethod		822
-nim	getPath	powpow/proto/http.html#getPath,HttpRequest	proc getPath(req: HttpRequest): lent string		825
-nim	getQuery	powpow/proto/http.html#getQuery,HttpRequest	proc getQuery(req: HttpRequest): lent string		828
-nim	getUrl	powpow/proto/http.html#getUrl,HttpRequest	proc getUrl(req: HttpRequest): lent string		831
-nim	getHeaders	powpow/proto/http.html#getHeaders,HttpRequest	proc getHeaders(req: HttpRequest): HttpHeaders		838
-nim	getContentLength	powpow/proto/http.html#getContentLength,HttpRequest	proc getContentLength(req: HttpRequest): int		878
-nim	getConnectionClose	powpow/proto/http.html#getConnectionClose,HttpRequest	proc getConnectionClose(req: HttpRequest): bool		881
-nim	getClientIp	powpow/proto/http.html#getClientIp,HttpRequest	proc getClientIp(req: HttpRequest): string		884
-nim	getBody	powpow/proto/http.html#getBody,HttpRequest	proc getBody(req: HttpRequest): seq[byte]		887
-nim	getBodyString	powpow/proto/http.html#getBodyString,HttpRequest	proc getBodyString(req: HttpRequest): string		906
-nim	getBodyStream	powpow/proto/http.html#getBodyStream,HttpRequest	proc getBodyStream(req: HttpRequest): BodyStream		920
-nim	readChunk	powpow/proto/http.html#readChunk,BodyStream,Natural	proc readChunk(stream: var BodyStream; maxLen: Natural): seq[byte]		925
-nim	readChunkString	powpow/proto/http.html#readChunkString,BodyStream,Natural	proc readChunkString(stream: var BodyStream; maxLen: Natural): string		939
-nim	peekChunk	powpow/proto/http.html#peekChunk,BodyStream,Natural	proc peekChunk(stream: var BodyStream; maxLen: Natural): tuple[\n    data: ptr UncheckedArray[byte], len: int]		952
-nim	drainChunk	powpow/proto/http.html#drainChunk,BodyStream,Natural	proc drainChunk(stream: var BodyStream; len: Natural)		962
-nim	readChunkInto	powpow/proto/http.html#readChunkInto,BodyStream,seq[byte],Natural	proc readChunkInto(stream: var BodyStream; buf: var seq[byte]; maxLen: Natural): int		968
-nim	peekAll	powpow/proto/http.html#peekAll,BodyStream	proc peekAll(stream: BodyStream): tuple[data: ptr UncheckedArray[byte], len: int]		984
-nim	getBodyView	powpow/proto/http.html#getBodyView,HttpParser	proc getBodyView(p: HttpParser): tuple[data: ptr UncheckedArray[byte], len: int]		995
-nim	bodyView	powpow/proto/http.html#bodyView,HttpRequest	proc bodyView(req: HttpRequest): tuple[data: ptr UncheckedArray[byte], len: int]		1009
-nim	getMultipart	powpow/proto/http.html#getMultipart,HttpRequest,string	proc getMultipart(req: HttpRequest; tmpDir = ""): MultipartStreamerRef		1016
-nim	streamToFile	powpow/proto/http.html#streamToFile,HttpRequest,string	proc streamToFile(req: HttpRequest; tmpDir = ""): string		1056
-nim	headerBytes	powpow/proto/http.html#headerBytes,HttpRequest	proc headerBytes(req: HttpRequest): int		1089
-nim	getRemainingData	powpow/proto/http.html#getRemainingData,HttpParser	proc getRemainingData(p: HttpParser): seq[byte]		1092
-nimgrp	feed	powpow/proto/http.html#feed-procs-all	proc		682
+nim	HttpRequest	powpow/proto/http.html#HttpRequest	type HttpRequest		100
+nim	BodyStream	powpow/proto/http.html#BodyStream	object BodyStream		115
+nim	newHttpParser	powpow/proto/http.html#newHttpParser,int	proc newHttpParser(initialBufSize = 4096): HttpParser		145
+nim	reset	powpow/proto/http.html#reset,HttpParser	proc reset(p: HttpParser)		171
+nim	resetForNext	powpow/proto/http.html#resetForNext,HttpParser	proc resetForNext(p: HttpParser)		202
+nim	phase	powpow/proto/http.html#phase,HttpParser	proc phase(p: HttpParser): ParsePhase		250
+nim	feed	powpow/proto/http.html#feed,HttpParser,openArray[byte]	proc feed(p: HttpParser; data: openArray[byte]): ParsePhase		677
+nim	feed	powpow/proto/http.html#feed,HttpParser,string	proc feed(p: HttpParser; data: string): ParsePhase		781
+nim	tryAdvance	powpow/proto/http.html#tryAdvance,HttpParser	proc tryAdvance(p: HttpParser)		785
+nim	isComplete	powpow/proto/http.html#isComplete,HttpParser	proc isComplete(p: HttpParser): bool		833
+nim	isError	powpow/proto/http.html#isError,HttpParser	proc isError(p: HttpParser): bool		836
+nim	error	powpow/proto/http.html#error,HttpParser	proc error(p: HttpParser): HttpCode		839
+nim	peekMethod	powpow/proto/http.html#peekMethod,HttpParser	proc peekMethod(p: HttpParser): HttpMethod		844
+nim	peekPath	powpow/proto/http.html#peekPath,HttpParser	proc peekPath(p: HttpParser): lent string		847
+nim	peekContentType	powpow/proto/http.html#peekContentType,HttpParser	proc peekContentType(p: HttpParser): lent string		855
+nim	getRequest	powpow/proto/http.html#getRequest,HttpParser	proc getRequest(p: HttpParser): HttpRequest		864
+nim	getMethod	powpow/proto/http.html#getMethod,HttpRequest	proc getMethod(req: HttpRequest): HttpMethod		873
+nim	getPath	powpow/proto/http.html#getPath,HttpRequest	proc getPath(req: HttpRequest): lent string		876
+nim	getQuery	powpow/proto/http.html#getQuery,HttpRequest	proc getQuery(req: HttpRequest): lent string		885
+nim	getUrl	powpow/proto/http.html#getUrl,HttpRequest	proc getUrl(req: HttpRequest): lent string		894
+nim	getHeaders	powpow/proto/http.html#getHeaders,HttpRequest	proc getHeaders(req: HttpRequest): HttpHeaders		901
+nim	getContentLength	powpow/proto/http.html#getContentLength,HttpRequest	proc getContentLength(req: HttpRequest): int		948
+nim	getConnectionClose	powpow/proto/http.html#getConnectionClose,HttpRequest	proc getConnectionClose(req: HttpRequest): bool		951
+nim	getClientIp	powpow/proto/http.html#getClientIp,HttpRequest	proc getClientIp(req: HttpRequest): string		954
+nim	getBody	powpow/proto/http.html#getBody,HttpRequest	proc getBody(req: HttpRequest): seq[byte]		957
+nim	getBodyString	powpow/proto/http.html#getBodyString,HttpRequest	proc getBodyString(req: HttpRequest): string		976
+nim	getBodyStream	powpow/proto/http.html#getBodyStream,HttpRequest	proc getBodyStream(req: HttpRequest): BodyStream		990
+nim	readChunk	powpow/proto/http.html#readChunk,BodyStream,Natural	proc readChunk(stream: var BodyStream; maxLen: Natural): seq[byte]		995
+nim	readChunkString	powpow/proto/http.html#readChunkString,BodyStream,Natural	proc readChunkString(stream: var BodyStream; maxLen: Natural): string		1009
+nim	peekChunk	powpow/proto/http.html#peekChunk,BodyStream,Natural	proc peekChunk(stream: var BodyStream; maxLen: Natural): tuple[\n    data: ptr UncheckedArray[byte], len: int]		1022
+nim	drainChunk	powpow/proto/http.html#drainChunk,BodyStream,Natural	proc drainChunk(stream: var BodyStream; len: Natural)		1032
+nim	readChunkInto	powpow/proto/http.html#readChunkInto,BodyStream,seq[byte],Natural	proc readChunkInto(stream: var BodyStream; buf: var seq[byte]; maxLen: Natural): int		1038
+nim	peekAll	powpow/proto/http.html#peekAll,BodyStream	proc peekAll(stream: BodyStream): tuple[data: ptr UncheckedArray[byte], len: int]		1054
+nim	getBodyView	powpow/proto/http.html#getBodyView,HttpParser	proc getBodyView(p: HttpParser): tuple[data: ptr UncheckedArray[byte], len: int]		1065
+nim	bodyView	powpow/proto/http.html#bodyView,HttpRequest	proc bodyView(req: HttpRequest): tuple[data: ptr UncheckedArray[byte], len: int]		1079
+nim	getMultipart	powpow/proto/http.html#getMultipart,HttpRequest,string	proc getMultipart(req: HttpRequest; tmpDir = ""): MultipartStreamerRef		1086
+nim	streamToFile	powpow/proto/http.html#streamToFile,HttpRequest,string	proc streamToFile(req: HttpRequest; tmpDir = ""): string		1126
+nim	headerBytes	powpow/proto/http.html#headerBytes,HttpRequest	proc headerBytes(req: HttpRequest): int		1159
+nim	getRemainingData	powpow/proto/http.html#getRemainingData,HttpParser	proc getRemainingData(p: HttpParser): seq[byte]		1162
+nimgrp	feed	powpow/proto/http.html#feed-procs-all	proc		677

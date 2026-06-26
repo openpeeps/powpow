@@ -7,5 +7,6 @@ nim	EventType	powpow/types.html#EventType	enum EventType		10
 nim	Callback	powpow/types.html#Callback	type Callback		16
 nim	FdCallback	powpow/types.html#FdCallback	type FdCallback		17
 nim	TimerCallback	powpow/types.html#TimerCallback	type TimerCallback		18
-nim	TimerId	powpow/types.html#TimerId	type TimerId		19
-nim	`==`	powpow/types.html#==,TimerId,TimerId	proc `==`(a, b: TimerId): bool		21
+nim	ObserverCallback	powpow/types.html#ObserverCallback	type ObserverCallback		19
+nim	TimerId	powpow/types.html#TimerId	type TimerId		20
+nim	`==`	powpow/types.html#==,TimerId,TimerId	proc `==`(a, b: TimerId): bool		22

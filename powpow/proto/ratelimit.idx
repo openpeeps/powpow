@@ -2,4 +2,4 @@ nimTitle	ratelimit	powpow/proto/ratelimit.html	module powpow/proto/ratelimit		0
 nim	RateLimiter	powpow/proto/ratelimit.html#RateLimiter	type RateLimiter		29
 nim	newRateLimiter	powpow/proto/ratelimit.html#newRateLimiter,Loop,int,int	proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter		36
 nim	allow	powpow/proto/ratelimit.html#allow,RateLimiter,string	proc allow(rl: RateLimiter; ip: string): bool		60
-nim	check	powpow/proto/ratelimit.html#check,RateLimiter,HttpRequest,HttpResponse	proc check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool		75
+nim	check	powpow/proto/ratelimit.html#check,RateLimiter,HttpRequest,HttpResponse	proc check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool		73

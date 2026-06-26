@@ -198,7 +198,13 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    SSE2-accelerated rnrn scanner.
+    <p>SSE2-accelerated rnrn scanner.</p>
+<p>Uses the same shift trick as findCRLFSse2, but applied twice:</p>
+<ol class="simple"><li>Find rn positions (crlfMask = crMask &amp; lfShifted)</li>
+<li>Find rnrn positions (crlfMask &amp; crlfShifted-by-2)</li>
+</ol>
+<p>This is a single SIMD pass, O(n/16), vs the old sliding-window approach.</p>
+
     
   </dd>
 </div>
@@ -214,7 +220,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:01 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-26 13:06:43 UTC</small>
       </div>
     </div>
   </div>

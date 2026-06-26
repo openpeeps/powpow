@@ -79,6 +79,10 @@
 <li><a class="reference external"
           data-doc-search-tag="types: type Callback" href="powpow/types.html#Callback">types: type Callback</a></li>
           </ul></dd>
+<dt><a name="cancelObserver" href="#cancelObserver"><span>cancelObserver:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: proc cancelObserver(obs: Observer)" href="powpow/loop.html#cancelObserver%2CObserver">loop: proc cancelObserver(obs: Observer)</a></li>
+          </ul></dd>
 <dt><a name="cancelTimer" href="#cancelTimer"><span>cancelTimer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="loop: proc cancelTimer(loop: Loop; id: TimerId)" href="powpow/loop.html#cancelTimer%2CLoop%2CTimerId">loop: proc cancelTimer(loop: Loop; id: TimerId)</a></li>
@@ -160,6 +164,14 @@
 <dt><a name="connectUdp" href="#connectUdp"><span>connectUdp:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="udp: proc connectUdp(loop: Loop; address: string; port: int; onData: OnUdpData = nil): UdpSocket" href="powpow/net/udp.html#connectUdp%2CLoop%2Cstring%2Cint%2COnUdpData">udp: proc connectUdp(loop: Loop; address: string; port: int; onData: OnUdpData = nil): UdpSocket</a></li>
+          </ul></dd>
+<dt><a name="connectUnix" href="#connectUnix"><span>connectUnix:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc connectUnix(loop: Loop; path: string;
+            onConnect: proc (conn: Connection) {.closure.}; onData: OnData;
+            onClose: OnClose = nil)" href="powpow/net/tcp.html#connectUnix%2CLoop%2Cstring%2Cproc%28Connection%29%2COnData%2COnClose">tcp: proc connectUnix(loop: Loop; path: string;
+            onConnect: proc (conn: Connection) {.closure.}; onData: OnData;
+            onClose: OnClose = nil)</a></li>
           </ul></dd>
 <dt><a name="ConnHttp" href="#ConnHttp"><span>ConnHttp:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -561,6 +573,18 @@
           <li><a class="reference external"
           data-doc-search-tag="ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer" href="powpow/proto/ws.html#newWsServer%2CLoop%2Cint">ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
           </ul></dd>
+<dt><a name="observe" href="#observe"><span>observe:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: proc observe(loop: Loop; varPtr: ptr uint64; cb: ObserverCallback): Observer" href="powpow/loop.html#observe%2CLoop%2Cptr.uint64%2CObserverCallback">loop: proc observe(loop: Loop; varPtr: ptr uint64; cb: ObserverCallback): Observer</a></li>
+          </ul></dd>
+<dt><a name="Observer" href="#Observer"><span>Observer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: type Observer" href="powpow/loop.html#Observer">loop: type Observer</a></li>
+          </ul></dd>
+<dt><a name="ObserverCallback" href="#ObserverCallback"><span>ObserverCallback:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="types: type ObserverCallback" href="powpow/types.html#ObserverCallback">types: type ObserverCallback</a></li>
+          </ul></dd>
 <dt><a name="OnAccept" href="#OnAccept"><span>OnAccept:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: type OnAccept" href="powpow/net/tcp.html#OnAccept">tcp: type OnAccept</a></li>
@@ -618,6 +642,10 @@
 <dt><a name="parseWsFrames" href="#parseWsFrames"><span>parseWsFrames:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ws: proc parseWsFrames(ws: WsConnection; data: openArray[byte])" href="powpow/proto/ws.html#parseWsFrames%2CWsConnection%2CopenArray%5Bbyte%5D">ws: proc parseWsFrames(ws: WsConnection; data: openArray[byte])</a></li>
+          </ul></dd>
+<dt><a name="pauseTimer" href="#pauseTimer"><span>pauseTimer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: proc pauseTimer(loop: Loop; id: TimerId)" href="powpow/loop.html#pauseTimer%2CLoop%2CTimerId">loop: proc pauseTimer(loop: Loop; id: TimerId)</a></li>
           </ul></dd>
 <dt><a name="peekAll" href="#peekAll"><span>peekAll:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -738,6 +766,10 @@
 <dt><a name="resolveAddr" href="#resolveAddr"><span>resolveAddr:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage" href="powpow/net/common.html#resolveAddr%2Cstring%2Cint%2Cint">common: proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage</a></li>
+          </ul></dd>
+<dt><a name="resumeTimer" href="#resumeTimer"><span>resumeTimer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: proc resumeTimer(loop: Loop; id: TimerId)" href="powpow/loop.html#resumeTimer%2CLoop%2CTimerId">loop: proc resumeTimer(loop: Loop; id: TimerId)</a></li>
           </ul></dd>
 <dt><a name="run" href="#run"><span>run:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -949,9 +981,9 @@
 <li><a class="reference external"
           data-doc-search-tag="types: type TimerId" href="powpow/types.html#TimerId">types: type TimerId</a></li>
           </ul></dd>
-<dt><a name="UdpMessage" href="#UdpMessage"><span>UdpMessage:</span></a></dt><dd><ul class="simple">
+<dt><a name="tryAdvance" href="#tryAdvance"><span>tryAdvance:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="udp: object UdpMessage" href="powpow/net/udp.html#UdpMessage">udp: object UdpMessage</a></li>
+          data-doc-search-tag="http: proc tryAdvance(p: HttpParser)" href="powpow/proto/http.html#tryAdvance%2CHttpParser">http: proc tryAdvance(p: HttpParser)</a></li>
           </ul></dd>
 <dt><a name="UdpSocket" href="#UdpSocket"><span>UdpSocket:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1057,7 +1089,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-22 03:13:01 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-26 13:06:44 UTC</small>
       </div>
     </div>
   </div>
