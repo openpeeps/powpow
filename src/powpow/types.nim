@@ -16,6 +16,7 @@ type
   Callback* = proc() {.closure.}
   FdCallback* = proc(fd: int, events: set[EventType]) {.closure.}
   TimerCallback* = proc(id: int) {.closure.}
+  ObserverCallback* = proc(value: uint64) {.closure.}
   TimerId* = distinct int
 
 proc `==`*(a, b: TimerId): bool {.borrow.}

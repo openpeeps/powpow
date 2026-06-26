@@ -10,7 +10,7 @@
 ## The loop uses a hierarchical timer wheel for efficient timer management, and supports edge-triggered I/O events.
 ## The API is designed to be minimal and efficient, with a focus on low-latency event handling and minimal overhead.
 
-import std/[tables, deques, sets, monotimes, bitops]
+import std/[tables, deques, sets, monotimes, bitops, sequtils]
 
 import ./platform, ./types
 export types
@@ -34,8 +34,10 @@ type
     id:       TimerId
     deadline: int64
     interval: int64
+    delayMs:  int64
     callback: TimerCallback
     cancelled: bool
+    paused:   bool
     next:     TimerNode
 
 # ── Timer wheel helpers ──────────────────────────────────────────────────────
@@ -53,6 +55,12 @@ type
     edgeTriggered*: bool
     gen:            int
     alive:          bool
+
+  Observer* = ref object
+    varPtr*:  ptr uint64
+    lastVal:  uint64
+    cb*:      ObserverCallback
+    alive:    bool
 
 # ── Loop ─────────────────────────────────────────────────────────────────────
 
@@ -77,6 +85,10 @@ type
     bufPool*:      seq[ptr UncheckedArray[byte]]
     occBits:       array[4, array[4, uint64]]  # 256 bits per level for bitmap-accelerated lookup
     nextDead:      int64                       # Earliest timer deadline across all levels
+    timerMap:      Table[TimerId, TimerNode]    # TimerId → TimerNode lookup for pause/resume
+    pausedList:    seq[TimerNode]               # Timers removed from wheel while paused
+    observers:     seq[Observer]                # Variable observers polled each loop
+    obsDead:       int
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -102,6 +114,10 @@ proc newLoop*(): Loop =
     occBits:     [default array[4, uint64], default array[4, uint64],
                   default array[4, uint64], default array[4, uint64]],
     nextDead:    int64.high,
+    timerMap:    initTable[TimerId, TimerNode](),
+    pausedList:  @[],
+    observers:   @[],
+    obsDead:     0,
   )
 
 proc close*(loop: Loop) =
@@ -141,6 +157,7 @@ proc addToWheel(loop: Loop; node: TimerNode) {.inline.} =
   let bitIdx = slot shr 6
   let bitOff = slot and 63
   loop.occBits[level][bitIdx] = loop.occBits[level][bitIdx] or (1.uint64 shl bitOff)
+  loop.timerMap[node.id] = node
   if node.deadline < loop.nextDead:
     loop.nextDead = node.deadline
 
@@ -222,8 +239,10 @@ proc addTimer*(loop: Loop, delayMs: int, callback: TimerCallback): TimerId =
     id:       result,
     deadline: monoMs() + delayMs.int64,
     interval: 0,
+    delayMs:  delayMs.int64,
     callback: callback,
     cancelled: false,
+    paused:   false,
   )
   addToWheel(loop, node)
 
@@ -235,13 +254,40 @@ proc addInterval*(loop: Loop, intervalMs: int,
     id:       result,
     deadline: monoMs() + intervalMs.int64,
     interval: intervalMs.int64,
+    delayMs:  intervalMs.int64,
     callback: callback,
     cancelled: false,
+    paused:   false,
   )
   addToWheel(loop, node)
 
 proc cancelTimer*(loop: Loop, id: TimerId) {.inline.} =
   loop.cancelled.incl(id)
+
+proc pauseTimer*(loop: Loop; id: TimerId) =
+  ## Pause a timer at its next scheduled fire.
+  ## The timer is lazily removed from the wheel during processTimers
+  ## and stored in a paused list. When resumed, it is re-scheduled
+  ## from the current time (paused duration is not compensated).
+  let node = loop.timerMap.getOrDefault(id)
+  if node != nil:
+    node.paused = true
+
+proc resumeTimer*(loop: Loop; id: TimerId) =
+  ## Resume a previously paused timer. The timer fires after its
+  ## original delay/interval from the moment of resume.
+  for i in 0 ..< loop.pausedList.len:
+    if loop.pausedList[i].id == id:
+      let node = loop.pausedList[i]
+      loop.pausedList.del(i)
+      node.paused = false
+      node.deadline = monoMs() + (if node.interval > 0: node.interval else: node.delayMs)
+      addToWheel(loop, node)
+      return
+  # Not yet in pausedList — still in the wheel with paused=true
+  let node = loop.timerMap.getOrDefault(id)
+  if node != nil:
+    node.paused = false
 
 # ── idle handlers ────────────────────────────────────────────────────────────
 
@@ -252,6 +298,20 @@ proc addIdle*(loop: Loop, cb: Callback): int {.inline.} =
 
 proc removeIdle*(loop: Loop, id: int) {.inline.} =
   loop.idleCbs.del(id)
+
+# ── observers ─────────────────────────────────────────────────────────────────
+
+proc observe*(loop: Loop; varPtr: ptr uint64; cb: ObserverCallback): Observer =
+  ## Observe a variable at `varPtr`. The callback is invoked on each poll
+  ## iteration when the variable's value changes from the last observed value.
+  ## Returns an Observer handle that can be passed to `cancelObserver`.
+  result = Observer(varPtr: varPtr, lastVal: varPtr[], cb: cb, alive: true)
+  loop.observers.add(result)
+
+proc cancelObserver*(obs: Observer) =
+  ## Cancel an observer. The observer is lazily removed from the loop
+  ## during the next sweep.
+  obs.alive = false
 
 # ── control ──────────────────────────────────────────────────────────────────
 
@@ -304,7 +364,10 @@ proc processTimers(loop: Loop; now: int64) =
           prev.next = next
         node.next = nil
         inc batch
-        if node.id in loop.cancelled:
+        if node.paused:
+          loop.pausedList.add(node)
+          dec loop.totalTimers
+        elif node.id in loop.cancelled:
           loop.cancelled.excl(node.id)
           dec loop.totalTimers
         else:
@@ -314,6 +377,7 @@ proc processTimers(loop: Loop; now: int64) =
             addToWheel(loop, node)
           else:
             dec loop.totalTimers
+            loop.timerMap.del(node.id)
       else:
         prev = node
       node = next
@@ -414,6 +478,19 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   if loop.stopFlag: return
 
   sweepDead(loop)
+
+  # Check observers for variable changes
+  for obs in loop.observers.mitems:
+    if obs.alive:
+      let val = obs.varPtr[]
+      if val != obs.lastVal:
+        obs.lastVal = val
+        obs.cb(val)
+    else:
+      inc loop.obsDead
+  if loop.obsDead > 64:
+    loop.observers.keepItIf(it.alive)
+    loop.obsDead = 0
 
   if nEvents == 0 and loop.idleCbs.len > 0:
     var batch = 0

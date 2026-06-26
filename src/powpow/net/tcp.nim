@@ -5,9 +5,10 @@
 #          https://github.com/openpeeps/powpow
 
 ## powpow/net/tcp.nim — Non-blocking TCP server and client connections.
-##
-## Built on top of the powpow event loop for zero-threading, high-throughput
-## TCP networking. Platform-agnostic: IOCP (Windows) or epoll/kqueue (Unix).
+## 
+## This module provides a non-blocking TCP server and client implementation using the powpow event loop.
+## It supports connection pooling, zero-copy file sending, and efficient read/write buffering.
+## 
 
 import std/tables
 import ../loop
@@ -646,3 +647,91 @@ proc connect*(loop: Loop, address: string, port: int,
           if onClose != nil: onClose(conn)
       onConnect(conn)
       if conn.state == Closed: return
+
+when not defined(windows):
+  proc connectUnix*(loop: Loop; path: string;
+                    onConnect: proc(conn: Connection) {.closure.};
+                    onData: OnData;
+                    onClose: OnClose = nil) =
+    let fd = socket(AF_UNIX.cint, SOCK_STREAM, 0)
+    if fd.cint < 0:
+      raise newException(NetError, "socket(AF_UNIX) failed")
+
+    setNonBlocking(fd)
+
+    let conn = Connection(
+      fd:        fd,
+      loop:      loop,
+      state:     Connecting,
+      readBuf:   acquireBuf(loop),
+      readBufLen: DefaultBufSize,
+    )
+
+    var sockAddr: Sockaddr_un
+    sockAddr.sun_family = AF_UNIX.uint8
+    let pathLen = path.len
+    if pathLen > UNIX_PATH_MAX:
+      conn.closeAndRelease()
+      raise newException(NetError,
+        "Unix socket path \"" & path & "\" exceeds max length (" & $UNIX_PATH_MAX & ")")
+    copyMem(addr sockAddr.sun_path[0], path.cstring, pathLen + 1)
+    let sLen = (sizeof(sockAddr.sun_family) + pathLen + 1).SockLen
+
+    let ret = connect(fd, cast[ptr Sockaddr](addr sockAddr), sLen)
+    if ret < 0 and not sockInProgress():
+      conn.closeAndRelease()
+      raise newException(NetError, "connect(AF_UNIX) failed for " & path)
+
+    if ret == 0:
+      conn.state = Connected
+      conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
+        if Error in ev:
+          conn.closeAndRelease()
+          if onClose != nil: onClose(conn)
+          return
+        if Write in ev:
+          if conn.flushWriteBuffer():
+            if conn.closeAfterFlush:
+              conn.closeAndRelease()
+              if onClose != nil: onClose(conn)
+              return
+            if conn.state == Connected:
+              conn.loop.modify(rfd, {Read})
+        if Read in ev or Hup in ev:
+          conn.handleClientRead(onData, onClose)
+        if Hup in ev and conn.state == Connected:
+          conn.closeAndRelease()
+          if onClose != nil: onClose(conn)
+      onConnect(conn)
+      if conn.state == Closed: return
+    else:
+      conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
+        conn.loop.unregister(wfd)
+        var err: cint = 0
+        var errLen: SockLen = sizeof(err).SockLen
+        discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
+        if err != 0:
+          conn.closeAndRelease()
+          return
+
+        conn.state = Connected
+        conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
+          if Error in ev:
+            conn.closeAndRelease()
+            if onClose != nil: onClose(conn)
+            return
+          if Write in ev:
+            if conn.flushWriteBuffer():
+              if conn.closeAfterFlush:
+                conn.closeAndRelease()
+                if onClose != nil: onClose(conn)
+                return
+              if conn.state == Connected:
+                conn.loop.modify(rfd, {Read})
+          if Read in ev or Hup in ev:
+            conn.handleClientRead(onData, onClose)
+          if Hup in ev and conn.state == Connected:
+            conn.closeAndRelease()
+            if onClose != nil: onClose(conn)
+        onConnect(conn)
+        if conn.state == Closed: return
