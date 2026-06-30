@@ -64,12 +64,18 @@
       <li><a class="reference" href="#BodyStream" title="BodyStream = object">BodyStream</a></li>
 <li><a class="reference" href="#HttpBodyCallback" title="HttpBodyCallback = proc (data: openArray[byte]; done: bool) {.closure.}">HttpBodyCallback</a></li>
 <li><a class="reference" href="#HttpParser" title="HttpParser = ref object
+  buf*: seq[byte]            ## Accumulation buffer
+  bufLen*: int               ## Current buffer length
   maxBodySize*: int64        ## Max body size (0 = unlimited)
+  headerEnd*: int            ## Byte offset past \r\n\r\n
+  contentLength*: int        ## From Content-Length header (-1 if absent)
   connectionClose*: bool     ## Connection: close seen
+  expectContinue*: bool      ## Client sent Expect: 100-continue
   onBodyData*: HttpBodyCallback ## Called as body bytes arrive (nil = buffered mode)
   bodyStreamed*: int64       ## Bytes streamed via callback so far
   streamingBody*: bool       ## true when body is being streamed to callback
-  methodCache*: HttpMethod">HttpParser</a></li>
+  methodCache*: HttpMethod
+  phase*: ParsePhase">HttpParser</a></li>
 <li><a class="reference" href="#HttpRequest" title="HttpRequest = ref object
   parser*: HttpParser
   httpMethod*: HttpMethod
@@ -302,12 +308,18 @@
 </div>
 <div id="HttpParser">
   <dt><pre><a href="#HttpParser"><span class="Identifier">HttpParser</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
+  <span class="Identifier">buf</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span>            <span class="Comment">## Accumulation buffer</span>
+  <span class="Identifier">bufLen</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>               <span class="Comment">## Current buffer length</span>
   <span class="Identifier">maxBodySize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>        <span class="Comment">## Max body size (0 = unlimited)</span>
+  <span class="Identifier">headerEnd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>            <span class="Comment">## Byte offset past \r\n\r\n</span>
+  <span class="Identifier">contentLength</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>        <span class="Comment">## From Content-Length header (-1 if absent)</span>
   <span class="Identifier">connectionClose</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>     <span class="Comment">## Connection: close seen</span>
+  <span class="Identifier">expectContinue</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>      <span class="Comment">## Client sent Expect: 100-continue</span>
   <span class="Identifier">onBodyData</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HttpBodyCallback"><span class="Identifier">HttpBodyCallback</span></a> <span class="Comment">## Called as body bytes arrive (nil = buffered mode)</span>
   <span class="Identifier">bodyStreamed</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>       <span class="Comment">## Bytes streamed via callback so far</span>
   <span class="Identifier">streamingBody</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>       <span class="Comment">## true when body is being streamed to callback</span>
-  <span class="Identifier">methodCache</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span></pre></dt>
+  <span class="Identifier">methodCache</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span>
+  <span class="Identifier">phase</span><span class="Operator">*</span><span class="Other">:</span> <a href="#ParsePhase"><span class="Identifier">ParsePhase</span></a></pre></dt>
   <dd>
     
     Incremental HTTP/1.1 request parser.
@@ -848,7 +860,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-28 12:45:10 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-30 09:19:53 UTC</small>
       </div>
     </div>
   </div>
