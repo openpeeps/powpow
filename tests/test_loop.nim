@@ -108,3 +108,109 @@ test "test_cancel_timer":
   doAssert not fired, "cancelled timer should not fire"
   loop.close()
 
+# ── Test 8: timer pause/resume ───────────────────────────────────────────────
+
+test "test_pause_one_shot":
+  var fired = false
+  let loop = newLoop()
+  let timerId = loop.addTimer(50) do (id: int):
+    fired = true
+  loop.pauseTimer(timerId)
+  discard loop.addTimer(100) do (id: int):
+    loop.stop()
+  loop.run()
+  doAssert not fired, "paused one-shot timer should not fire"
+  loop.close()
+
+test "test_pause_resume_one_shot":
+  var firedAt = 0
+  let loop = newLoop()
+  let t0 = monoMs()
+  let timerId = loop.addTimer(200) do (id: int):
+    firedAt = (monoMs() - t0).int
+    loop.stop()
+  loop.pauseTimer(timerId)
+  discard loop.addTimer(50) do (id: int):
+    loop.resumeTimer(timerId)
+  loop.run()
+  doAssert firedAt >= 150, "resumed timer should fire ~200ms from resume, got " & $firedAt
+  loop.close()
+
+test "test_pause_interval":
+  var count = 0
+  let loop = newLoop()
+  let intId = loop.addInterval(30) do (id: int):
+    inc count
+  discard loop.addTimer(80) do (id: int):
+    loop.pauseTimer(intId)
+  discard loop.addTimer(200) do (id: int):
+    loop.stop()
+  loop.run()
+  doAssert count <= 4, "paused interval should fire at most 4 times (80ms/30ms+1), got " & $count
+  loop.close()
+
+test "test_pause_nonexistent":
+  let loop = newLoop()
+  loop.pauseTimer(TimerId(99999))
+  loop.resumeTimer(TimerId(99999))
+  discard loop.addTimer(10) do (id: int):
+    loop.stop()
+  loop.run()
+  loop.close()
+
+test "test_pause_cancel_interaction":
+  var fired = false
+  let loop = newLoop()
+  let timerId = loop.addTimer(50) do (id: int):
+    fired = true
+  loop.pauseTimer(timerId)
+  loop.cancelTimer(timerId)
+  discard loop.addTimer(100) do (id: int):
+    loop.stop()
+  loop.run()
+  doAssert not fired, "cancelled+paused timer should not fire"
+  loop.close()
+
+# ── Test 13: observer ────────────────────────────────────────────────────────
+
+test "test_observer_value_change":
+  var observed: uint64 = 0
+  var cbVal: uint64 = 0
+  let loop = newLoop()
+  let obs = loop.observe(addr observed) do (val: uint64):
+    cbVal = val
+  discard loop.addTimer(10) do (id: int):
+    observed = 42
+  discard loop.addTimer(30) do (id: int):
+    loop.stop()
+  loop.run()
+  doAssert cbVal == 42, "observer callback should fire with new value, got " & $cbVal
+  loop.close()
+
+test "test_observer_no_change":
+  var cbCount = 0
+  let loop = newLoop()
+  var x: uint64 = 0
+  discard loop.observe(addr x) do (val: uint64):
+    inc cbCount
+  discard loop.addTimer(30) do (id: int):
+    loop.stop()
+  loop.run()
+  doAssert cbCount == 0, "observer should not fire when value unchanged, got " & $cbCount
+  loop.close()
+
+test "test_observer_cancel":
+  var cbCount = 0
+  let loop = newLoop()
+  var x: uint64 = 0
+  let obs = loop.observe(addr x) do (val: uint64):
+    inc cbCount
+  discard loop.addTimer(10) do (id: int):
+    cancelObserver(obs)
+    x = 42
+  discard loop.addTimer(30) do (id: int):
+    loop.stop()
+  loop.run()
+  doAssert cbCount == 0, "cancelled observer should not fire, got " & $cbCount
+  loop.close()
+

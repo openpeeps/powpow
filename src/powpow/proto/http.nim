@@ -52,8 +52,8 @@ type
 
   HttpParser* = ref object
     ## Incremental HTTP/1.1 request parser.
-    buf:       seq[byte]       ## Accumulation buffer
-    bufLen:    int              ## Current buffer length
+    buf*:      seq[byte]       ## Accumulation buffer
+    bufLen*:   int              ## Current buffer length
     maxBodySize*: int64         ## Max body size (0 = unlimited)
 
     # Request line fields (byte offsets into buf)
@@ -67,9 +67,9 @@ type
     httpMinor:  int
 
     # Header section
-    headerEnd:  int             ## Byte offset past \r\n\r\n
+    headerEnd*: int             ## Byte offset past \r\n\r\n
     headerCount: int            ## Number of headers parsed
-    contentLength: int          ## From Content-Length header (-1 if absent)
+    contentLength*: int          ## From Content-Length header (-1 if absent)
     transferChunked: bool       ## Transfer-Encoding: chunked
     connectionClose*: bool      ## Connection: close seen
     contentTypeStart: int       ## -1 if no Content-Type (lazy materialization)
@@ -83,6 +83,9 @@ type
     bodyLen: int                ## Total body length (for Content-Length)
     chunkBodyLen: int           ## Total decoded chunked body length
 
+    # Expect: 100-continue
+    expectContinue*: bool         ## Client sent Expect: 100-continue
+
     # Streaming body callback
     onBodyData*: HttpBodyCallback ## Called as body bytes arrive (nil = buffered mode)
     bodyStreamed*: int64           ## Bytes streamed via callback so far
@@ -94,7 +97,7 @@ type
     queryCache:    string
     contentTypeVal: string
 
-    phase:      ParsePhase
+    phase*:     ParsePhase
     errorCode:  HttpCode
 
   HttpRequest* = ref object
@@ -164,6 +167,7 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     contentTypeVal:"",
     contentTypeStart: -1,
     contentTypeLen: 0,
+    expectContinue: false,
     phase:         PhaseRequestLine,
     errorCode:     Http200,
   )
@@ -230,6 +234,7 @@ proc resetForNext*(p: HttpParser) =
   p.contentLength = -1
   p.transferChunked = false
   p.connectionClose = false
+  p.expectContinue = false
   p.chunkStart    = 0
   p.chunkSize     = -1
   p.chunkParsed   = 0
@@ -238,6 +243,7 @@ proc resetForNext*(p: HttpParser) =
   p.chunkBodyLen  = 0
   p.bodyStreamed  = 0
   p.streamingBody = false
+  p.expectContinue = false
   p.phase         = PhaseRequestLine
   p.errorCode     = Http200
   p.methodCache   = HttpGet
@@ -450,6 +456,34 @@ proc scanHeaders(p: HttpParser): bool =
                       break
                   if isClose:
                     p.connectionClose = true
+
+        # Quick check for Expect: 100-continue
+        if not matched and lineLen >= 16:
+          let c = char(buf[lineStart])
+          if c == 'E' or c == 'e':
+            var isExp = true
+            const expKey = "expect:"
+            if lineLen >= expKey.len:
+              for j in 0 ..< expKey.len:
+                let ch = char(buf[lineStart + j])
+                if ch != expKey[j] and ch != (char(ord(expKey[j]) xor 32)):
+                  isExp = false
+                  break
+              if isExp:
+                var valStart = lineStart + expKey.len
+                while valStart < i and char(buf[valStart]) == ' ':
+                  inc valStart
+                let valLen = i - valStart
+                const expectKey = "100-continue"
+                if valLen >= expectKey.len:
+                  var isEC = true
+                  for j in 0 ..< expectKey.len:
+                    let ch = char(buf[valStart + j])
+                    if ch != expectKey[j]:
+                      isEC = false
+                      break
+                  if isEC:
+                    p.expectContinue = true
 
         # Quick check for Content-Type
         if lineLen >= 14:

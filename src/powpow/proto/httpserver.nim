@@ -658,7 +658,7 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     maxBodySize: 0,
     maxConnections: 0,
     maxPipelineDepth: 0,
-    readTimeoutMs: 0
+    readTimeoutMs: 30_000
   )
   if populate:
     srv.populatePools()
@@ -715,6 +715,7 @@ proc dispatchRequest(server: HttpServer, conn: Connection,
   if req.getConnectionClose():
     res.closeConn = true
   if server.handler != nil:
+
     server.handler(req, res)
   else:
     res.sendError(Http500, "No handler configured")
@@ -736,6 +737,11 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
               c
   let p = ctx.parser
   p.feed(data)
+
+  if p.expectContinue and p.phase == PhaseBody:
+    let continueResp = "HTTP/1.1 100 Continue\r\n\r\n"
+    discard sockSend(conn.fd, unsafeAddr continueResp[0], continueResp.len)
+    p.expectContinue = false
 
   var pipelineCount = 0
   while p.isComplete():
