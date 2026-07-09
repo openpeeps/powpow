@@ -20,7 +20,7 @@
 ##   , Port(9000)
 ##   ```
 
-import std/[httpcore, tables, options, net, strutils, os, times]
+import std/[httpcore, tables, options, net, strutils, os, times, oids]
 
 import ../net/tcp
 import ../net/common
@@ -51,6 +51,7 @@ type
     parser: HttpParser
     sessionStreamFile: File
     sessionStreamPath: string
+    streamer: MultipartStreamerRef
 
   HttpServer* = ref object
     tcpServer: TcpServer
@@ -703,6 +704,9 @@ proc removeSession*(server: HttpServer, conn: Connection) =
     ctx.sessionStreamFile.close()
     removeFile(ctx.sessionStreamPath)
     ctx.sessionStreamPath = ""
+  if ctx.streamer != nil:
+    ctx.streamer[].cleanup()
+    ctx.streamer = nil
   releaseParser(server, ctx.parser)
   conn.data = nil
 
@@ -743,6 +747,32 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     discard sockSend(conn.fd, unsafeAddr continueResp[0], continueResp.len)
     p.expectContinue = false
 
+  # Auto-detect body streaming for large uploads.
+  # If the body is still incoming (not yet complete) and no streaming is set up,
+  # check Content-Type to decide the streaming strategy:
+  #   - multipart/form-data → feed body directly into a MultipartStreamerRef
+  #   - any other Content-Type with Content-Length → stream raw body to a temp file
+  # This keeps p.buf small (~headers only) regardless of total body size.
+  if p.phase == PhaseBody and p.onBodyData == nil and not p.streamingBody and not p.isComplete():
+    let ct = p.peekContentType()
+    if ct.startsWith("multipart/form-data") and p.contentLength > 0:
+      ctx.streamer = newMultipartStreamerRef(ct,
+        bodySize = p.contentLength.int64)
+      let ms = ctx.streamer
+      p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+        ms[].feed(data)
+      p.tryAdvance()
+    elif p.contentLength > 0:
+      let dir = getTempDir()
+      discard existsOrCreateDir(dir)
+      ctx.sessionStreamPath = dir / $genOid()
+      ctx.sessionStreamFile = open(ctx.sessionStreamPath, fmWrite)
+      p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+        discard ctx.sessionStreamFile.writeBuffer(unsafeAddr data[0], data.len)
+        if done:
+          ctx.sessionStreamFile.close()
+      p.tryAdvance()
+
   var pipelineCount = 0
   while p.isComplete():
     if server.maxPipelineDepth > 0 and pipelineCount >= server.maxPipelineDepth:
@@ -752,6 +782,11 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     if ctx.sessionStreamPath.len > 0:
       req.streamPath = ctx.sessionStreamPath
       ctx.sessionStreamPath = ""
+      p.onBodyData = nil
+    if ctx.streamer != nil:
+      req.streamer = ctx.streamer
+      ctx.streamer = nil
+      p.onBodyData = nil
     server.dispatchRequest(conn, req)
     releaseRequest(server, req)
     if conn.data == nil:
@@ -762,6 +797,9 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
       break
 
   if p.isError():
+    if ctx.streamer != nil:
+      ctx.streamer[].cleanup()
+      ctx.streamer = nil
     if ctx.sessionStreamPath.len > 0:
       ctx.sessionStreamFile.close()
       removeFile(ctx.sessionStreamPath)

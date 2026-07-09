@@ -2,7 +2,7 @@
 ##
 ## Demonstrates three approaches:
 ##
-##   /upload/raw     — Raw body via streamPath()  (~68KB — recommended)
+##   /upload/raw     — Raw body via streamToFile()  (~68KB — recommended)
 ##   /upload/stream  — Multipart via getMultipart()  (~68KB, same as /lazy)
 ##
 ## The two multipart routes (/lazy, /stream) are identical — both use
@@ -30,7 +30,7 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
     if meth == HttpPost:
       case path
       of "/upload/raw":
-        let path = req.streamPath
+        let path = req.streamToFile()
         let fileSize = getFileSize(openFileRead(path))
         res.status(Http200)
           .header("Content-Type", "application/json")
@@ -49,7 +49,8 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
             results.add("{\"type\": \"file\", \"fieldName\": \"" & b.fieldName &
                         "\", \"fileName\": \"" & b.fileName &
                         "\", \"fileType\": \"" & b.fileType &
-                        "\", \"fileSize\": " & $b.fileSize & "}")
+                        "\", \"fileSize\": " & $b.fileSize &
+                        ", \"filePath\": \"" & b.filePath & "\"}")
           of MultipartText:
             results.add("{\"type\": \"text\", \"fieldName\": \"" & b.fieldName &
                         "\", \"value\": \"" & b.value & "\"}")
@@ -71,7 +72,7 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
 # ── Start ────────────────────────────────────────────────────────────────────
 
 echo "Upload server listening on http://localhost:9000"
-echo "  POST /upload/raw   — raw body via streamPath() (~68KB — recommended)"
+echo "  POST /upload/raw   — raw body via streamToFile() (~68KB — recommended)"
 echo "  POST /upload/stream — multipart via getMultipart() (~68KB, same as /lazy)"
 echo "  Press Ctrl+C to stop"
 server.start(handler, Port(9000))
