@@ -29,7 +29,7 @@
 - FileSystem Monitoring via `inotify` (Linux) and `kqueue` (BSD, macOS) (Windows - not yet implemented)
 
 > [!NOTE]
-> 💥 PowPow is experimental and under active development. The API may change without deprecation. If you are looking for a more stable and mature library, consider using [supranim](https://github.com/supranim/supranim) instead (based on LibEvent). 💥
+> 💥 PowPow is now available in [Supranim](https://github.com/supranim/supranim) as a backend. Just switch to `-d:supraNative` when compiling your Supranim app!
 
 > [!WARNING]
 > 💥 This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms. **Use it, test it, and do not hesitate to report any issues you find!** 💥 
