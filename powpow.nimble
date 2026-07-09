@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.4"
+version       = "0.1.5"
 author        = "George Lemon"
 description   = "High-performance event notification library for Nim"
 license       = "LGPL-3.0-or-later"
