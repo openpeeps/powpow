@@ -663,3 +663,41 @@ test "test_stream_to_file_no_body":
   let req = parser.getRequest()
   doAssert req.streamToFile() == ""
   doAssert req.streamPath.len == 0
+
+# ── Test 34: Firefox POST regression (many headers + body, SSE2 \r\n\r\n) ────
+
+test "test_firefox_post_regression":
+  let body = "email=test%40example.com&password=secret&password_confirm=secret"
+  let raw = "POST /auth/register HTTP/1.1\r\n" &
+    "Host: 127.0.0.1:8000\r\n" &
+    "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0\r\n" &
+    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n" &
+    "Accept-Language: en-US,en;q=0.9\r\n" &
+    "Accept-Encoding: gzip, deflate, br, zstd\r\n" &
+    "Content-Type: application/x-www-form-urlencoded\r\n" &
+    "Content-Length: " & $body.len & "\r\n" &
+    "Origin: http://127.0.0.1:8000\r\n" &
+    "Sec-GPC: 1\r\n" &
+    "Connection: keep-alive\r\n" &
+    "Referer: http://127.0.0.1:8000/auth/register\r\n" &
+    "Cookie: ssid=FHsbnuNO2uBtpSxfEgQ9LI7YV4fC7u0mrItyJk5DAM\r\n" &
+    "Upgrade-Insecure-Requests: 1\r\n" &
+    "Sec-Fetch-Dest: document\r\n" &
+    "Sec-Fetch-Mode: navigate\r\n" &
+    "Sec-Fetch-Site: same-origin\r\n" &
+    "Sec-Fetch-User: ?1\r\n" &
+    "Priority: u=0, i\r\n" &
+    "Pragma: no-cache\r\n" &
+    "Cache-Control: no-cache\r\n" &
+    "\r\n" & body
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isComplete(), "Firefox POST should complete"
+  let req = parser.getRequest()
+  doAssert req.getMethod() == HttpPost
+  doAssert req.getPath() == "/auth/register"
+  doAssert req.getContentLength() == body.len
+  doAssert req.getBodyString() == body
+  let headers = req.getHeaders()
+  doAssert headers["Cookie"] == "ssid=FHsbnuNO2uBtpSxfEgQ9LI7YV4fC7u0mrItyJk5DAM"
+  doAssert headers["Cache-Control"] == "no-cache"

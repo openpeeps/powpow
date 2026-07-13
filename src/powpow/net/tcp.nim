@@ -130,6 +130,9 @@ proc flushWriteBuffer(conn: Connection): bool =
                      unsafeAddr conn.writeBuf[conn.writePos], remaining)
     if n < 0:
       if sockWouldBlock():
+        if conn.corked:
+          setTcpCork(conn.fd, false)
+          conn.corked = false
         return false
       conn.close()
       return true
@@ -398,6 +401,7 @@ proc acceptClients(server: TcpServer) =
                           addr addrLen)
     if clientFd.int >= 0:
       setNonBlocking(SocketHandle(clientFd))
+      setTcpNoDelay(SocketHandle(clientFd))
 
     if clientFd.int < 0:
       if sockWouldBlock():
@@ -520,7 +524,7 @@ proc newTcpServer*(loop: Loop,
                    onData: OnData,
                    onAccept: OnAccept = nil,
                    onClose: OnClose = nil): TcpServer =
-  let srv = TcpServer(
+  let srv {.cursor.} = TcpServer(
     fd:       SocketHandle(-1),
     loop:     loop,
     onAccept: onAccept,

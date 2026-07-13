@@ -85,7 +85,6 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   ev.events = 0
   if Read in events:  ev.events = ev.events or EPOLLIN
   if Write in events: ev.events = ev.events or EPOLLOUT
-  if edgeTriggered:   ev.events = ev.events or EPOLLET
   ev.data.ptr = udata
 
   let ret = epoll_ctl(p.epFd, EPOLL_CTL_ADD, fd.cint, addr ev)
@@ -108,7 +107,6 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
   ev.events = 0
   if Read in events:  ev.events = ev.events or EPOLLIN
   if Write in events: ev.events = ev.events or EPOLLOUT
-  if edgeTriggered:   ev.events = ev.events or EPOLLET
   ev.data.ptr = udata
 
   if epoll_ctl(p.epFd, EPOLL_CTL_MOD, fd.cint, addr ev) < 0:
