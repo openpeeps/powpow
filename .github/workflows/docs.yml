@@ -1,8 +1,14 @@
 name: docs
 on:
   push:
-    branches:
-      - main
+    paths-ignore:
+      - LICENSE
+      - README.*
+      - examples
+    tags:
+      - '*.*.*'
+    # branches:
+    #   - main
 env:
   nim-version: 'stable'
   nim-src: src/${{ github.event.repository.name }}.nim
