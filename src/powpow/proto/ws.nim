@@ -28,10 +28,11 @@
 ##     websocketUpgrade(res, req, onOpen, onMessage, onClose)
 ##   ```
 
-import std/[httpcore, base64, tables, strutils, posix]
+import std/[httpcore, base64, tables, strutils]
 import pkg/checksums/sha1
 
 import ../net/tcp
+import ../net/common
 import ../loop
 import ../types
 import ../proto/http
@@ -633,7 +634,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
             if Read in ev:
               var buf: array[65536, byte]
               while true:
-                let n = posix.recv(ws.conn.fd, addr buf[0], buf.len, 0)
+                let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
                 if n > 0:
                   ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                   if ws.conn.state != Connected:
@@ -646,12 +647,12 @@ proc listen*(wss: WsServer, address: string, port: int) =
                   wss.conns.del(efd)
                   return
                 else:
-                  if errno == EAGAIN or errno == EWOULDBLOCK:
+                  if sockWouldBlock():
                     break
-                  if errno == EINTR:
+                  if sockInterrupted():
                     continue
                   if not ws.onError.isNil:
-                    ws.onError(ws, "recv error: " & $errno)
+                    ws.onError(ws, "recv error: " & $lastSocketError())
                   ws.conn.close()
                   wss.conns.del(efd)
                   return
@@ -758,7 +759,7 @@ proc websocketUpgrade*(
         if Read in ev:
           var buf: array[65536, byte]
           while true:
-            let n = posix.recv(ws.conn.fd, addr buf[0], buf.len, 0)
+            let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
             if n > 0:
               ws.parseWsFrames(buf.toOpenArray(0, n - 1))
               if ws.conn.state != Connected:
@@ -769,12 +770,12 @@ proc websocketUpgrade*(
               ws.conn.close()
               return
             else:
-              if errno == EAGAIN or errno == EWOULDBLOCK:
+              if sockWouldBlock():
                 break
-              if errno == EINTR:
+              if sockInterrupted():
                 continue
               if not ws.onError.isNil:
-                ws.onError(ws, "recv error: " & $errno)
+                ws.onError(ws, "recv error: " & $lastSocketError())
               ws.conn.close()
               return
     )

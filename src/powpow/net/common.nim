@@ -16,6 +16,51 @@ when defined(windows):
     SocketHandle* = cint
     SockLen* = cint
 
+    Sockaddr* {.importc: "struct sockaddr", header: "<winsock2.h>",
+                pure, final.} = object
+      sa_family: cushort
+      sa_data: array[14, byte]
+
+    Sockaddr_in* {.importc: "struct sockaddr_in", header: "<winsock2.h>",
+                   pure, final.} = object
+      sin_family: cushort
+      sin_port: cushort
+      sin_addr: array[4, byte]
+      sin_zero: array[8, byte]
+
+    Sockaddr_in6* {.importc: "struct sockaddr_in6", header: "<winsock2.h>",
+                    pure, final.} = object
+      sin6_family: cushort
+      sin6_port: cushort
+      sin6_flowinfo: int32
+      sin6_addr: array[16, byte]
+      sin6_scope_id: int32
+
+    Sockaddr_storage* {.importc: "struct sockaddr_storage",
+                        header: "<winsock2.h>", pure, final.} = object
+      ss_family: cushort
+      ss_padding: array[120, byte]
+
+    AddrInfo* {.importc: "struct addrinfo", header: "<winsock2.h>",
+                pure, final.} = object
+      ai_flags: cint
+      ai_family: cint
+      ai_socktype: cint
+      ai_protocol: cint
+      ai_addrlen: SockLen
+      ai_canonname: cstring
+      ai_addr: ptr Sockaddr
+      ai_next: ptr AddrInfo
+
+    TLinger* {.importc: "struct linger", header: "<winsock2.h>",
+               pure, final.} = object
+      l_onoff: cushort
+      l_linger: cushort
+
+    IOVec* = object
+      iov_base: pointer
+      iov_len: int
+
   proc socket*(af, typ, protocol: cint): SocketHandle {.
     importc: "socket", stdcall, dynlib: "ws2_32.dll".}
   proc bindSocket*(s: SocketHandle, name: pointer, namelen: SockLen): cint {.
@@ -82,52 +127,6 @@ when defined(windows):
     WSAENETDOWN* = 10050
     WSAECONNRESET* = 10054
     WSAESHUTDOWN* = 10058
-
-  type
-    Sockaddr* {.importc: "struct sockaddr", header: "<winsock2.h>",
-                pure, final.} = object
-      sa_family: cushort
-      sa_data: array[14, byte]
-
-    Sockaddr_in* {.importc: "struct sockaddr_in", header: "<winsock2.h>",
-                   pure, final.} = object
-      sin_family: cushort
-      sin_port: cushort
-      sin_addr: array[4, byte]
-      sin_zero: array[8, byte]
-
-    Sockaddr_in6* {.importc: "struct sockaddr_in6", header: "<winsock2.h>",
-                    pure, final.} = object
-      sin6_family: cushort
-      sin6_port: cushort
-      sin6_flowinfo: int32
-      sin6_addr: array[16, byte]
-      sin6_scope_id: int32
-
-    Sockaddr_storage* {.importc: "struct sockaddr_storage",
-                        header: "<winsock2.h>", pure, final.} = object
-      ss_family: cushort
-      ss_padding: array[120, byte]
-
-    AddrInfo* {.importc: "struct addrinfo", header: "<winsock2.h>",
-                pure, final.} = object
-      ai_flags: cint
-      ai_family: cint
-      ai_socktype: cint
-      ai_protocol: cint
-      ai_addrlen: SockLen
-      ai_canonname: cstring
-      ai_addr: ptr Sockaddr
-      ai_next: ptr AddrInfo
-
-    TLinger* {.importc: "struct linger", header: "<winsock2.h>",
-               pure, final.} = object
-      l_onoff: cushort
-      l_linger: cushort
-
-    IOVec* = object
-      iov_base: pointer
-      iov_len: int
 
   proc gai_strerrorW(errcode: cint): cstring {.
     importc: "gai_strerrorW", stdcall, dynlib: "ws2_32.dll".}

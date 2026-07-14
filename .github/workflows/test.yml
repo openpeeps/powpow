@@ -14,9 +14,10 @@ on:
       - examples
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         nim-version:
           - 'stable'
     steps:
@@ -26,4 +27,12 @@ jobs:
           nim-version: ${{ matrix.nim-version }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
-      - run: nimble test -d:release
+      - if: runner.os != 'Windows'
+        run: nimble test -d:release
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          nim c -r tests/test_http.nim
+          nim c -r tests/test_net.nim
+          nim c -r tests/test_security.nim
+          nim c -r tests/test_signal.nim
