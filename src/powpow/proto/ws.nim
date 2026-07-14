@@ -378,9 +378,6 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
       p.masked = (b1 shr 7) == 1
       let len7 = b1 and 0x7F
 
-      if not p.masked:
-        ws.closeWs(1002, "Mask required")
-        return
       if p.opcode in {0x8, 0x9, 0xA} and len7 > MaxControlPayload:
         ws.closeWs(1002, "Control frame too large")
         return
