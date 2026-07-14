@@ -1,6 +1,6 @@
 nimTitle	multithread	powpow/proto/multithread.html	module powpow/proto/multithread		0
-nim	MultiThreadHttpServer	powpow/proto/multithread.html#MultiThreadHttpServer	type MultiThreadHttpServer		46
-nim	newMultiThreadHttpServer	powpow/proto/multithread.html#newMultiThreadHttpServer,int	proc newMultiThreadHttpServer(numThreads: int = 0): MultiThreadHttpServer		101
-nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,int	proc listen(srv: MultiThreadHttpServer; address: string; port: int)		111
-nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,int	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      port: int)		132
-nim	close	powpow/proto/multithread.html#close,MultiThreadHttpServer	proc close(srv: MultiThreadHttpServer)		137
+nim	MultiThreadHttpServer	powpow/proto/multithread.html#MultiThreadHttpServer	type MultiThreadHttpServer		47
+nim	newMultiThreadHttpServer	powpow/proto/multithread.html#newMultiThreadHttpServer,int	proc newMultiThreadHttpServer(numThreads: int = 0): MultiThreadHttpServer		102
+nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,int	proc listen(srv: MultiThreadHttpServer; address: string; port: int)		112
+nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,int	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      port: int)		133
+nim	close	powpow/proto/multithread.html#close,MultiThreadHttpServer	proc close(srv: MultiThreadHttpServer)		138
