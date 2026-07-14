@@ -288,7 +288,7 @@ proc poll*(p: Platform, timeoutMs: int): int =
     p.iocp, addr cqBuf[0], CqBufSize.DWORD,
     numRemoved, timeoutMs.DWORD, 0)
 
-  if not ok or numRemoved == 0:
+  if ok == 0 or numRemoved == 0:
     p.count = 0
     return 0
 
