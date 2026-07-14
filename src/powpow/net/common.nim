@@ -307,14 +307,15 @@ proc sockShutdown*(fd: SocketHandle, how: cint) {.inline.} =
 proc sockWritev*(fd: SocketHandle, iov: ptr IOVec, iovcnt: int): int {.inline.} =
   ## Scatter-gather write. On Windows, concatenates buffers and calls send.
   when defined(windows):
+    let arr = cast[ptr UncheckedArray[IOVec]](iov)
     var total = 0
     for i in 0 ..< iovcnt:
-      let n = send(fd, iov[i].iov_base, iov[i].iov_len.cint, 0).int
+      let n = send(fd, arr[i].iov_base, arr[i].iov_len.cint, 0).int
       if n < 0:
         if total > 0: return total
         return n
       total += n
-      if n < iov[i].iov_len: break
+      if n < arr[i].iov_len: break
     result = total
   else:
     result = posix.writev(fd.cint, cast[ptr posix.IOVec](iov), iovcnt.cint).int
