@@ -121,7 +121,7 @@ when defined(windows):
     AF_INET6* = cint(23)
     AI_PASSIVE* = cint(0x0001)
     SOMAXCONN* = cint(0x7FFFFFFF)
-    FIONBIO* = int32(0x8004667E)
+    FIONBIO* = -2147195266'i32
     WSAEWOULDBLOCK* = 10035
     WSAEINPROGRESS* = 10036
     WSAENETDOWN* = 10050
