@@ -57,8 +57,8 @@ when defined(windows):
       l_linger*: cushort
 
     IOVec* = object
-      iov_base: pointer
-      iov_len: int
+      iov_base*: pointer
+      iov_len*: int
 
   proc socket*(af, typ, protocol: cint): SocketHandle {.
     importc: "socket", stdcall, dynlib: "ws2_32.dll".}
