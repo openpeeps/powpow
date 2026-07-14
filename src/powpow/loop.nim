@@ -13,7 +13,7 @@
 import std/[tables, deques, sets, monotimes, bitops, sequtils]
 
 import ./platform, ./types
-export types
+export types, platform
 
 when defined(windows):
   proc closesocket(s: int): cint {.importc: "closesocket", stdcall, dynlib: "ws2_32.dll".}
