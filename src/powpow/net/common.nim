@@ -12,7 +12,6 @@
 when defined(windows):
   # ── Winsock2 imports ──────────────────────────────────────────────────────────
   type
-    cint* = int32
     SocketHandle* = cint
     SockLen* = cint
 
