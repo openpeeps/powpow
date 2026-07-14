@@ -54,8 +54,8 @@ when defined(windows):
 
     TLinger* {.importc: "struct linger", header: "<winsock2.h>",
                pure, final.} = object
-      l_onoff: cushort
-      l_linger: cushort
+      l_onoff*: cushort
+      l_linger*: cushort
 
     IOVec* = object
       iov_base: pointer
