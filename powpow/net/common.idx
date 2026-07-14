@@ -18,16 +18,16 @@ nim	sockSend	powpow/net/common.html#sockSend,SocketHandle,pointer,int	proc sockS
 nim	sockClose	powpow/net/common.html#sockClose,SocketHandle	proc sockClose(fd: SocketHandle)		292
 nim	sockShutdown	powpow/net/common.html#sockShutdown,SocketHandle,cint	proc sockShutdown(fd: SocketHandle; how: cint)		299
 nim	sockWritev	powpow/net/common.html#sockWritev,SocketHandle,ptr.IOVec,int	proc sockWritev(fd: SocketHandle; iov: ptr IOVec; iovcnt: int): int		307
-nim	SendFileChunkSize	powpow/net/common.html#SendFileChunkSize	const SendFileChunkSize		325
-nim	DefaultSendFileChunk	powpow/net/common.html#DefaultSendFileChunk	const DefaultSendFileChunk		326
-nim	O_RDONLY	powpow/net/common.html#O_RDONLY	const O_RDONLY		329
-nim	SEEK_SET	powpow/net/common.html#SEEK_SET	const SEEK_SET		330
-nim	SEEK_CUR	powpow/net/common.html#SEEK_CUR	const SEEK_CUR		331
-nim	SEEK_END	powpow/net/common.html#SEEK_END	const SEEK_END		332
-nim	openFileRead	powpow/net/common.html#openFileRead,string	proc openFileRead(path: string): int		353
-nim	getFileSize	powpow/net/common.html#getFileSize,int	proc getFileSize(fd: int): int64		357
-nim	closeFile	powpow/net/common.html#closeFile,int	proc closeFile(fd: int)		366
-nim	readFile	powpow/net/common.html#readFile,int,ptr.UncheckedArray[byte],int	proc readFile(fd: int; buf: ptr UncheckedArray[byte]; len: int): int64		370
-nim	seekFile	powpow/net/common.html#seekFile,int,int64	proc seekFile(fd: int; offset: int64): int64		374
-nim	sendFileChunk	powpow/net/common.html#sendFileChunk,SocketHandle,int,int64,int64	proc sendFileChunk(sockFd: SocketHandle; fileFd: int; fileOff: var int64;\n              remaining: var int64): int64		378
-nim	DefaultBufSize	powpow/net/common.html#DefaultBufSize	const DefaultBufSize		439
+nim	SendFileChunkSize	powpow/net/common.html#SendFileChunkSize	const SendFileChunkSize		326
+nim	DefaultSendFileChunk	powpow/net/common.html#DefaultSendFileChunk	const DefaultSendFileChunk		327
+nim	O_RDONLY	powpow/net/common.html#O_RDONLY	const O_RDONLY		330
+nim	SEEK_SET	powpow/net/common.html#SEEK_SET	const SEEK_SET		331
+nim	SEEK_CUR	powpow/net/common.html#SEEK_CUR	const SEEK_CUR		332
+nim	SEEK_END	powpow/net/common.html#SEEK_END	const SEEK_END		333
+nim	openFileRead	powpow/net/common.html#openFileRead,string	proc openFileRead(path: string): int		354
+nim	getFileSize	powpow/net/common.html#getFileSize,int	proc getFileSize(fd: int): int64		358
+nim	closeFile	powpow/net/common.html#closeFile,int	proc closeFile(fd: int)		367
+nim	readFile	powpow/net/common.html#readFile,int,ptr.UncheckedArray[byte],int	proc readFile(fd: int; buf: ptr UncheckedArray[byte]; len: int): int64		371
+nim	seekFile	powpow/net/common.html#seekFile,int,int64	proc seekFile(fd: int; offset: int64): int64		375
+nim	sendFileChunk	powpow/net/common.html#sendFileChunk,SocketHandle,int,int64,int64	proc sendFileChunk(sockFd: SocketHandle; fileFd: int; fileOff: var int64;\n              remaining: var int64): int64		379
+nim	DefaultBufSize	powpow/net/common.html#DefaultBufSize	const DefaultBufSize		440
