@@ -71,19 +71,33 @@ proc send*(sock: UdpSocket, data: string): int {.inline.} =
 
 proc handleRead(sock: UdpSocket) =
   while true:
-    var sender {.noInit.}: Sockaddr_storage
-    var senderLen: SockLen = sizeof(sender).SockLen
-    let n = recvfrom(sock.fd, addr sock.readBuf[0],
-                     sock.readBufLen.cint, 0,
-                     cast[ptr Sockaddr](addr sender), addr senderLen)
-    if n > 0:
-      sock.onData(sender, sock.readBuf.toOpenArray(0, n - 1))
-    elif n == 0:
-      return
-    else:
-      if sockWouldBlock():
+    when not defined(windows):
+      var sender {.noInit.}: Sockaddr_storage
+      var senderLen: SockLen = sizeof(sender).SockLen
+      let n = recvfrom(sock.fd, addr sock.readBuf[0],
+                       sock.readBufLen.cint, 0,
+                       cast[ptr Sockaddr](addr sender), addr senderLen)
+      if n > 0:
+        sock.onData(sender, sock.readBuf.toOpenArray(0, n - 1))
+      elif n == 0:
         return
-      return
+      else:
+        if sockWouldBlock():
+          return
+        return
+    else:
+      # On Windows, UDP sockets are polled via select() (not WSARecv)
+      # because WSARecv doesn't return the sender address. When select()
+      # reports readability, recvfrom will find a datagram.
+      var sender {.noInit.}: Sockaddr_storage
+      var senderLen: SockLen = sizeof(sender).SockLen
+      let n = recvfrom(sock.fd, addr sock.readBuf[0],
+                       sock.readBufLen.cint, 0,
+                       cast[ptr Sockaddr](addr sender), addr senderLen)
+      if n > 0:
+        sock.onData(sender, sock.readBuf.toOpenArray(0, n - 1))
+      else:
+        return
 
 # ── Server (bind + listen) ───────────────────────────────────────────────────
 

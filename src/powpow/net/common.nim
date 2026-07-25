@@ -10,14 +10,17 @@
 ## APIs, allowing powpow to use a consistent interface for network operations across platforms.
 
 when defined(windows):
+  {.passC: "-D_WIN32_WINNT=0x0601".}
+
   # ── Winsock2 imports ──────────────────────────────────────────────────────────
   type
     SocketHandle* = cint
     SockLen* = cint
+    DWORD* = uint32
 
     Sockaddr* {.importc: "struct sockaddr", header: "<winsock2.h>",
                 pure, final.} = object
-      sa_family: cushort
+      sa_family*: cushort
       sa_data: array[14, byte]
 
     Sockaddr_in* {.importc: "struct sockaddr_in", header: "<winsock2.h>",
@@ -27,8 +30,7 @@ when defined(windows):
       sin_addr: array[4, byte]
       sin_zero: array[8, byte]
 
-    Sockaddr_in6* {.importc: "struct sockaddr_in6", header: "<winsock2.h>",
-                    pure, final.} = object
+    Sockaddr_in6* {.pure, final.} = object
       sin6_family: cushort
       sin6_port: cushort
       sin6_flowinfo: int32
@@ -40,7 +42,7 @@ when defined(windows):
       ss_family: cushort
       ss_padding: array[120, byte]
 
-    AddrInfo* {.importc: "struct addrinfo", header: "<winsock2.h>",
+    AddrInfo* {.importc: "struct addrinfo", header: "<ws2tcpip.h>",
                 pure, final.} = object
       ai_flags: cint
       ai_family: cint
@@ -92,7 +94,7 @@ when defined(windows):
   proc recvfrom*(s: SocketHandle, buf: pointer, len: cint, flags: cint,
                  fromAddr: ptr Sockaddr, fromlen: ptr SockLen): cint {.
     importc: "recvfrom", stdcall, dynlib: "ws2_32.dll".}
-  proc wsagetlasterror(): cint {.
+  proc wsagetlasterror*(): cint {.
     importc: "WSAGetLastError", stdcall, dynlib: "ws2_32.dll".}
   proc wsaStartup(wVersionRequested: int16, lpWSAData: pointer): cint {.
     importc: "WSAStartup", stdcall, dynlib: "ws2_32.dll".}
@@ -104,11 +106,36 @@ when defined(windows):
     importc: "getaddrinfo", stdcall, dynlib: "ws2_32.dll".}
   proc freeaddrinfo*(res: ptr AddrInfo) {.
     importc: "freeaddrinfo", stdcall, dynlib: "ws2_32.dll".}
-  proc gai_strerror(errcode: cint): cstring {.
-    importc: "gai_strerrorA", stdcall, dynlib: "ws2_32.dll".}
+
+  proc getnameinfo*(sa: ptr Sockaddr, salen: SockLen,
+                    host: cstring, hostlen: DWORD,
+                    serv: cstring, servlen: DWORD,
+                    flags: cint): cint {.
+    importc: "getnameinfo", stdcall, dynlib: "ws2_32.dll".}
+
+  proc getpeername*(s: SocketHandle, name: ptr Sockaddr,
+                    namelen: ptr SockLen): cint {.
+    importc: "getpeername", stdcall, dynlib: "ws2_32.dll".}
+
+  const
+    NI_NUMERICHOST* = cint(1)
+    NI_MAXHOST* = 1025
+
+  proc FormatMessageA(flags: DWORD, source: pointer, msgId: DWORD,
+                      langId: DWORD, buf: var pointer, size: DWORD,
+                      args: pointer): DWORD {.
+    importc: "FormatMessageA", stdcall, dynlib: "kernel32".}
+  proc LocalFree(p: pointer): pointer {.
+    importc: "LocalFree", stdcall, dynlib: "kernel32".}
+
+  const
+    FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100
+    FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000
+    FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200
 
   const
     SOCK_STREAM* = cint(1)
+    SOCK_DGRAM* = cint(2)
     SOL_SOCKET* = cint(0xFFFF)
     SO_REUSEADDR* = cint(0x0004)
     SO_LINGER* = cint(0x0080)
@@ -127,21 +154,23 @@ when defined(windows):
     WSAECONNRESET* = 10054
     WSAESHUTDOWN* = 10058
 
-  proc gai_strerrorW(errcode: cint): cstring {.
-    importc: "gai_strerrorW", stdcall, dynlib: "ws2_32.dll".}
-
-  proc gai_strerrorCompat(errcode: cint): cstring {.inline.} =
-    when defined(cpu64):
-      result = gai_strerrorW(errcode)
+  proc gai_strerrorCompat(errcode: cint): string {.inline.} =
+    var buf: pointer = nil
+    let n = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER or FORMAT_MESSAGE_FROM_SYSTEM or FORMAT_MESSAGE_IGNORE_INSERTS,
+      nil, errcode.DWORD, 0, buf, 0, nil)
+    if n > 0:
+      result = $cast[ptr UncheckedArray[char]](buf)
+      discard LocalFree(buf)
     else:
-      result = gai_strerror(errcode)
+      result = "getaddrinfo error (code: " & $errcode & ")"
 
 else:
   # ── POSIX imports ────────────────────────────────────────────────────────────
   import std/posix
   export posix
-  proc gai_strerrorCompat(errcode: cint): cstring {.inline.} =
-    gai_strerror(errcode)
+  proc gai_strerrorCompat(errcode: cint): string {.inline.} =
+    $gai_strerror(errcode)
 
   proc ioctl(fd: cint; request: culong; arg: pointer): cint {.
     importc: "ioctl", header: "<sys/ioctl.h>".}
@@ -274,7 +303,7 @@ proc sockInterrupted*(): bool {.inline.} =
 
 proc sockInProgress*(): bool {.inline.} =
   when defined(windows):
-    result = wsagetlasterror() == WSAEINPROGRESS
+    result = wsagetlasterror() == WSAEWOULDBLOCK
   else:
     result = errno == EINPROGRESS
 
@@ -332,6 +361,7 @@ const
   SEEK_END* = 2
 
 when defined(windows):
+  const O_BINARY* = 0x8000.cint
   proc c_open(path: cstring; flags, mode: cint): cint {.
     importc: "_open", header: "<fcntl.h>".}
   proc c_lseek(fd: cint; offset: int64; whence: cint): int64 {.
@@ -341,6 +371,7 @@ when defined(windows):
   proc c_close(fd: cint): cint {.
     importc: "_close", header: "<io.h>".}
 else:
+  const O_BINARY* = 0.cint
   proc c_open(path: cstring; flags, mode: cint): cint =
     posix.open(path, flags, mode).cint
   proc c_lseek(fd: cint; offset: int64; whence: cint): int64 =
@@ -352,7 +383,9 @@ else:
 
 proc openFileRead*(path: string): int =
   ## Open a file for reading. Returns fd or -1 on error.
-  result = c_open(path.cstring, O_RDONLY, 0)
+  ## On Windows, force binary mode to prevent _read from treating
+  ## 0x1A (Ctrl-Z) as EOF in binary files like videos/images.
+  result = c_open(path.cstring, O_RDONLY or O_BINARY, 0)
 
 proc getFileSize*(fd: int): int64 =
   ## Get file size from an open fd. Returns -1 on error.
@@ -416,11 +449,15 @@ proc sendFileChunk*(sockFd: SocketHandle; fileFd: int;
     remaining -= sent
     result = sent
   else:
-    # Windows fallback: read a chunk and send it
+    # Windows fallback: read a chunk and send it.
+    # Seek to fileOff before reading so partial sends don't desync
+    # the file position from fileOff (POSIX sendfile handles this
+    # internally, but the read+send fallback must do it manually).
+    # TODO: replace with TransmitFile when IOCP interaction is resolved.
     var buf = cast[ptr UncheckedArray[byte]](alloc(SendFileChunkSize))
-    let toRead = min(remaining, SendFileChunkSize)
-    let n = c_read(fileFd.cint, buf,
-                   if toRead > SendFileChunkSize: SendFileChunkSize.cint else: toRead.cint)
+    let toRead = min(remaining, SendFileChunkSize.int64).cint
+    discard c_lseek(fileFd.cint, fileOff, SEEK_SET)
+    let n = c_read(fileFd.cint, buf, toRead)
     if n <= 0:
       dealloc(buf)
       return if n == 0: 0 else: -1

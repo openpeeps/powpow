@@ -631,28 +631,40 @@ proc listen*(wss: WsServer, address: string, port: int) =
             if Read in ev:
               var buf: array[65536, byte]
               while true:
-                let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
-                if n > 0:
-                  ws.parseWsFrames(buf.toOpenArray(0, n - 1))
-                  if ws.conn.state != Connected:
+                when defined(windows):
+                  let n = ws.conn.loop.platform.getReadData(
+                    ws.conn.fd.int,
+                    cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
+                  if n > 0:
+                    ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+                    if ws.conn.state != Connected:
+                      wss.conns.del(efd)
+                      return
+                  else:
+                    break
+                else:
+                  let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
+                  if n > 0:
+                    ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+                    if ws.conn.state != Connected:
+                      wss.conns.del(efd)
+                      return
+                  elif n == 0:
+                    if not ws.onClose.isNil:
+                      ws.onClose(ws, 1000, "")
+                    ws.conn.close()
                     wss.conns.del(efd)
                     return
-                elif n == 0:
-                  if not ws.onClose.isNil:
-                    ws.onClose(ws, 1000, "")
-                  ws.conn.close()
-                  wss.conns.del(efd)
-                  return
-                else:
-                  if sockWouldBlock():
-                    break
-                  if sockInterrupted():
-                    continue
-                  if not ws.onError.isNil:
-                    ws.onError(ws, "recv error: " & $lastSocketError())
-                  ws.conn.close()
-                  wss.conns.del(efd)
-                  return
+                  else:
+                    if sockWouldBlock():
+                      break
+                    if sockInterrupted():
+                      continue
+                    if not ws.onError.isNil:
+                      ws.onError(ws, "recv error: " & $lastSocketError())
+                    ws.conn.close()
+                    wss.conns.del(efd)
+                    return
         )
 
         # Fire onOpen
@@ -756,25 +768,36 @@ proc websocketUpgrade*(
         if Read in ev:
           var buf: array[65536, byte]
           while true:
-            let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
-            if n > 0:
-              ws.parseWsFrames(buf.toOpenArray(0, n - 1))
-              if ws.conn.state != Connected:
-                return
-            elif n == 0:
-              if not ws.onClose.isNil:
-                ws.onClose(ws, 1000, "")
-              ws.conn.close()
-              return
-            else:
-              if sockWouldBlock():
+            when defined(windows):
+              let n = ws.conn.loop.platform.getReadData(
+                ws.conn.fd.int,
+                cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
+              if n > 0:
+                ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+                if ws.conn.state != Connected:
+                  return
+              else:
                 break
-              if sockInterrupted():
-                continue
-              if not ws.onError.isNil:
-                ws.onError(ws, "recv error: " & $lastSocketError())
-              ws.conn.close()
-              return
+            else:
+              let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
+              if n > 0:
+                ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+                if ws.conn.state != Connected:
+                  return
+              elif n == 0:
+                if not ws.onClose.isNil:
+                  ws.onClose(ws, 1000, "")
+                ws.conn.close()
+                return
+              else:
+                if sockWouldBlock():
+                  break
+                if sockInterrupted():
+                  continue
+                if not ws.onError.isNil:
+                  ws.onError(ws, "recv error: " & $lastSocketError())
+                ws.conn.close()
+                return
     )
 
     # Fire onOpen

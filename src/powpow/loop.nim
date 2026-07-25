@@ -208,15 +208,18 @@ proc unregister*(loop: Loop, fd: int) =
     loop.platform.remove(fd)
 
 proc unregisterFd*(loop: Loop, fd: int) =
-  ## Remove fd watcher without platform syscall.
-  ## The fd was already closed by the caller, and the OS removes it
-  ## from epoll/kqueue automatically. Only cleans up in-memory state.
+  ## Remove fd watcher. On POSIX the fd is already closed by the caller and
+  ## the OS removes it from epoll/kqueue automatically, so only in-memory
+  ## state is cleaned. On Windows/IOCP the per-fd state must be explicitly
+  ## removed — deferred-free handles late completions from closesocket.
   if fd in loop.fdWatchers:
     let w = loop.fdWatchers[fd]
     w.alive = false
     inc loop.deadCount
     loop.fdWatcherPool.add(w)
     loop.fdWatchers.del(fd)
+    when defined(windows):
+      loop.platform.remove(fd)
 
 proc modify*(loop: Loop, fd: int, events: set[EventType]) {.inline.} =
   if fd in loop.fdWatchers:

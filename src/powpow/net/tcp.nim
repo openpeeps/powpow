@@ -21,10 +21,16 @@ when not defined(windows):
   const NI_MAXHOST = 1025
   const NI_NUMERICHOST = 1
 
-  proc formatIp(saAddr: Sockaddr_storage): string =
-    var host: array[NI_MAXHOST, char]
-    let sa = cast[ptr Sockaddr](unsafeAddr saAddr)
-    let salen = getSockLen(unsafeAddr saAddr)
+proc formatIp(saAddr: Sockaddr_storage): string =
+  var host: array[NI_MAXHOST, char]
+  let sa = cast[ptr Sockaddr](unsafeAddr saAddr)
+  let salen = getSockLen(unsafeAddr saAddr)
+  when defined(windows):
+    if getnameinfo(sa, salen, cast[cstring](addr host[0]), NI_MAXHOST.DWORD, nil, 0, NI_NUMERICHOST) == 0:
+      result = $cast[cstring](addr host[0])
+    else:
+      result = "unknown"
+  else:
     if getnameinfo(sa, salen, cast[cstring](addr host[0]), host.len.SockLen, nil, 0, NI_NUMERICHOST) == 0:
       result = $cast[cstring](addr host[0])
     else:
@@ -78,8 +84,7 @@ type
     sendFileOff*:     int64
     sendFileRemain*:  int64
     data*:            pointer
-    when not defined(windows):
-      clientAddr:     Sockaddr_storage
+    clientAddr:       Sockaddr_storage
 
   OnAccept*  = proc(conn: Connection) {.closure.}
   OnData*    = proc(conn: Connection, data: openArray[byte]) {.closure.}
@@ -341,9 +346,8 @@ proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
     )
 
 proc getClientIp*(conn: Connection): string {.inline.} =
-  when not defined(windows):
-    if conn.clientIp.len == 0 and conn.fd.int >= 0:
-      conn.clientIp = formatIp(conn.clientAddr)
+  if conn.clientIp.len == 0 and conn.fd.int >= 0:
+    conn.clientIp = formatIp(conn.clientAddr)
   conn.clientIp
 
 proc releaseConnection(server: TcpServer, conn: Connection) =
@@ -369,10 +373,8 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
 proc handleClientRead(conn: Connection, onData: OnData, onClose: OnClose) =
   while conn.state == Connected:
     when defined(windows):
-      # On Windows, data is read asynchronously by the IOCP backend.
-      # getReadData returns buffered data from a completed IOCP read.
       let n = conn.loop.platform.getReadData(
-        conn.fd.int, addr conn.readBuf[0], conn.readBufLen)
+        conn.fd.int, cast[ptr UncheckedArray[byte]](addr conn.readBuf[0]), conn.readBufLen)
     else:
       let n = sockRecv(conn.fd, addr conn.readBuf[0], conn.readBufLen)
     if n > 0:
@@ -413,8 +415,7 @@ proc acceptClients(server: TcpServer) =
       return
     
     let conn = acquireConnection(server, clientFd)
-    when not defined(windows):
-      conn.clientAddr = clientAddr
+    conn.clientAddr = clientAddr
 
     if server.onAccept != nil:
       server.onAccept(conn)
