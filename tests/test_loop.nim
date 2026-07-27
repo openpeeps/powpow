@@ -3,7 +3,25 @@
 ## Tests: timer, interval, deferred calls, fd eventing, stop.
 
 import ../src/powpow
-import std/[times, unittest, monotimes, os, net, posix]
+import std/[times, unittest, monotimes, os, net]
+
+when defined(windows):
+  proc c_pipe(fds: var array[2, cint]): cint {.
+    importc: "_pipe", header: "<io.h>".}
+  proc c_read(fd: cint, buf: pointer, count: cint): cint {.
+    importc: "_read", header: "<io.h>".}
+  proc c_write(fd: cint, buf: pointer, count: cint): cint {.
+    importc: "_write", header: "<io.h>".}
+  proc c_close(fd: cint): cint {.
+    importc: "_close", header: "<io.h>".}
+else:
+  import std/posix
+  proc c_pipe(fds: var array[2, cint]): cint = posix.pipe(fds)
+  proc c_read(fd: cint, buf: pointer, count: cint): cint =
+    posix.read(fd, buf, count).cint
+  proc c_write(fd: cint, buf: pointer, count: cint): cint =
+    posix.write(fd, buf, count).cint
+  proc c_close(fd: cint): cint = posix.close(fd).cint
 
 proc monoMs(): int64 {.inline.} =
   getMonoTime().ticks div 1_000_000
@@ -61,7 +79,7 @@ test "test_timer_ordering":
 test "test_fd_eventing":
   # Create a pipe; write to one end, poll the other.
   var fds: array[2, cint]
-  let ret = pipe(fds)
+  let ret = c_pipe(fds)
   doAssert ret == 0, "pipe() failed"
 
   var gotRead = false
@@ -71,20 +89,20 @@ test "test_fd_eventing":
     gotRead = true
     # drain the pipe
     var buf: array[64, char]
-    discard read(fd.cint, addr buf[0], buf.len)
+    discard c_read(fd.cint, addr buf[0], buf.len.cint)
     loop.unregister(fd)
     loop.stop()
 
   # Write a byte after a short delay to give the loop time to poll.
   discard loop.addTimer(5) do (id: int):
     var msg = "hello"
-    discard write(fds[1], addr msg[0], msg.len)
+    discard c_write(fds[1], addr msg[0], msg.len.cint)
 
   loop.run()
   doAssert gotRead, "fd read event should have fired"
 
-  discard close(fds[0])
-  discard close(fds[1])
+  discard c_close(fds[0])
+  discard c_close(fds[1])
   loop.close()
 
 test "test_is_running":
