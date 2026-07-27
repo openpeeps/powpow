@@ -28,12 +28,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
-      - if: runner.os != 'Windows'
-        run: nimble test -d:release
-      - if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          nim c -r tests/test_http.nim
-          nim c -r tests/test_net.nim
-          nim c -r tests/test_security.nim
-          nim c -r tests/test_signal.nim
+      - run: nimble test -d:release
