@@ -40,7 +40,7 @@ type
     len: int32
     buf: ptr byte
 
-  SOCKET = Handle
+  SOCKET = uint64
 
   FdSet {.importc: "fd_set", header: "<winsock2.h>", pure, final.} = object
     fd_count: uint32

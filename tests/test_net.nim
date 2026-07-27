@@ -3,7 +3,7 @@
 ## Tests: TCP server echo, TCP client connect, UDP bind/send/recv.
 
 import ../src/powpow
-import std/[posix, os, unittest]
+import std/unittest
 
 # ── Test 1: TCP echo server ──────────────────────────────────────────────────
 
