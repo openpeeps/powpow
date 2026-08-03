@@ -115,6 +115,7 @@ proc shutWrVal(): cint {.inline.} =
   when defined(windows): 1 else: SHUT_WR
 
 # Forward declarations for the TLS primitives defined below (used by `close`).
+{.push gcsafe.}
 proc driveHandshake*(conn: Connection): bool
 proc tlsRead*(conn: Connection, buf: pointer, count: int): int
 proc tlsWrite*(conn: Connection, buf: pointer, count: int): int
@@ -445,6 +446,7 @@ proc continueSendFile*(conn: Connection): bool =
     conn.close()
   return true
 
+{.pop.}
 proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
   if server.connPool.len > 0:
     result = server.connPool.pop()

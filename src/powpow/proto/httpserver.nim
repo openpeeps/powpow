@@ -218,6 +218,7 @@ proc writeUint(buf: ptr UncheckedArray[byte], n: int64): int =
     buf[i] = digits[ndigits - 1 - i]
   return ndigits
 
+{.push gcsafe.}
 proc send*(res: HttpResponse, body: string = "") =
   if res.sent: return
   res.sent = true
@@ -343,6 +344,7 @@ proc send*(res: HttpResponse, body: seq[byte]) =
   if res.closeConn:
     res.conn.closeAfterDrain()
 
+{.pop.}
 proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) {.inline.} =
   copyMem(addr buf[p], "Content-Disposition: attachment; filename=\"".cstring, 43); p += 43
   copyMem(addr buf[p], name.cstring, name.len); p += name.len
