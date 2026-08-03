@@ -1,0 +1,144 @@
+# A high-performance, event notification library for Nim.
+#
+# (c) 2026 George Lemon | LGPL-v3 License
+#          Made by Humans from OpenPeeps
+#          https://github.com/openpeeps/powpow
+
+## powpow/net/tls.nim — Non-blocking TLS over powpow Connections (OpenSSL).
+##
+## This module lets you wrap a `Connection` in TLS, both as a server (implicit
+## TLS on accept, or an in-place STARTTLS-style upgrade) and as a client
+## (immediately after connect). The handshake is driven by the event loop's
+## read/write notifications; once `TlsActive`, all reads/writes on the
+## connection are transparently encrypted.
+##
+## TLS is currently only compiled on POSIX platforms (macOS, BSD, Linux).
+## On Windows the API is present but every call raises `SslError`.
+##
+## ```nim
+## import powpow
+##
+## let loop = newLoop()
+## let server = newTcpServer(loop,
+##   onAccept = proc(conn: Connection) =
+##     conn.wrapTls(serverCtx)
+##   ,
+##   onData = proc(conn: Connection, data: openArray[byte]) =
+##     discard conn.send("pong")
+##   ,
+## )
+## server.listen("0.0.0.0", 8443)
+## loop.run()
+## ```
+
+import std/openssl
+
+import ./tcp
+import ../types
+
+type
+  TlsRole* = enum
+    TlsServer, TlsClient
+
+  SslContext* = ref object
+    ctx:  SslCtx
+    role: TlsRole
+
+  SslError* = object of CatchableError
+
+when not defined(windows):
+  # note: -lssl -lcrypto link flags come from net/tcp.nim (always imported here)
+
+  proc opensslLastError*(): string =
+    ## Returns the most recent OpenSSL error from the error queue, or "" if empty.
+    let e = ERR_get_error()
+    if e == 0: return ""
+    var buf = newString(256)
+    discard ERR_error_string(e, buf.cstring)
+    let z = buf.find('\0')
+    result = if z >= 0: buf[0 ..< z] else: buf
+
+  proc newServerTlsContext*(certFile, keyFile: string): SslContext =
+    ## Creates a server-side TLS context loaded from the given PEM certificate
+    ## and private key files. Raises `SslError` on failure.
+    discard SSL_library_init()
+    let tlsMethod = TLS_server_method()
+    if tlsMethod == nil:
+      raise newException(SslError, "TLS_server_method() failed")
+    let ctx = SSL_CTX_new(tlsMethod)
+    if ctx == nil:
+      raise newException(SslError, "SSL_CTX_new() failed")
+
+    if SSL_CTX_use_certificate_file(ctx, certFile.cstring, SSL_FILETYPE_PEM.cint) != 1:
+      let err = opensslLastError()
+      SSL_CTX_free(ctx)
+      raise newException(SslError, "certificate load failed: " & err)
+    if SSL_CTX_use_PrivateKey_file(ctx, keyFile.cstring, SSL_FILETYPE_PEM.cint) != 1:
+      let err = opensslLastError()
+      SSL_CTX_free(ctx)
+      raise newException(SslError, "private key load failed: " & err)
+    if SSL_CTX_check_private_key(ctx) != 1:
+      let err = opensslLastError()
+      SSL_CTX_free(ctx)
+      raise newException(SslError, "certificate/private key mismatch: " & err)
+
+    result = SslContext(ctx: ctx, role: TlsServer)
+
+  proc newClientTlsContext*(): SslContext =
+    ## Creates a client-side TLS context with peer verification disabled.
+    discard SSL_library_init()
+    let tlsMethod = TLS_client_method()
+    if tlsMethod == nil:
+      raise newException(SslError, "TLS_client_method() failed")
+    let ctx = SSL_CTX_new(tlsMethod)
+    if ctx == nil:
+      raise newException(SslError, "SSL_CTX_new() failed")
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nil)
+    result = SslContext(ctx: ctx, role: TlsClient)
+
+  proc wrapTls*(conn: Connection, ctx: SslContext) =
+    ## Wrap an existing connected `Connection` in TLS and begin a non-blocking
+    ## handshake. For a server this is used for implicit TLS (e.g. SMTP 465) or
+    ## an in-place STARTTLS upgrade; for a client it must be called from the
+    ## connect callback.
+    ##
+    ## The handshake completes asynchronously on the event loop; any data sent
+    ## with `conn.send` before it completes is buffered and flushed once TLS is
+    ## active.
+    if conn.ssl != nil:
+      return
+    let ssl = SSL_new(ctx.ctx)
+    if ssl == nil:
+      raise newException(SslError, "SSL_new() failed")
+    if SSL_set_fd(ssl, conn.fd) != 1:
+      SSL_free(ssl)
+      raise newException(SslError, "SSL_set_fd() failed")
+    case ctx.role
+    of TlsServer:
+      sslSetAcceptState(ssl)
+    of TlsClient:
+      sslSetConnectState(ssl)
+    conn.ssl = cast[pointer](ssl)
+    conn.tlsState = TlsHandshaking
+    # Clients must kick the handshake off by writing the ClientHello; servers
+    # are driven by their first read event (accept) or STARTTLS upgrade.
+    if ctx.role == TlsClient:
+      discard conn.driveHandshake()
+
+  proc isTlsActive*(conn: Connection): bool {.inline.} =
+    ## True once the connection's TLS handshake has completed.
+    conn.tlsState == TlsActive
+
+else:
+  proc opensslLastError*(): string = ""
+
+  proc newServerTlsContext*(certFile, keyFile: string): SslContext =
+    raise newException(SslError, "TLS is not supported on Windows")
+
+  proc newClientTlsContext*(): SslContext =
+    raise newException(SslError, "TLS is not supported on Windows")
+
+  proc wrapTls*(conn: Connection, ctx: SslContext) =
+    raise newException(SslError, "TLS is not supported on Windows")
+
+  proc isTlsActive*(conn: Connection): bool {.inline.} = false

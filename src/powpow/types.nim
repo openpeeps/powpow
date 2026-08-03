@@ -13,6 +13,11 @@ type
     Error
     Hup
 
+  TlsState* = enum
+    TlsOff
+    TlsHandshaking
+    TlsActive
+
   Callback* = proc() {.closure.}
   FdCallback* = proc(fd: int, events: set[EventType]) {.closure.}
   TimerCallback* = proc(id: int) {.closure.}

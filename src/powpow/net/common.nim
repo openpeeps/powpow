@@ -257,6 +257,21 @@ proc setTcpCork*(fd: SocketHandle, enable: bool) =
     discard setsockopt(fd, IPPROTO_TCP, TCP_NOPUSH,
                        addr val, sizeof(val).SockLen)
 
+proc setIpv6Only*(fd: SocketHandle) =
+  ## Set IPV6_V6ONLY so an IPv6 wildcard socket does not also claim IPv4
+  ## (required to bind 0.0.0.0 and :: on the same port). No-op on Windows.
+  when not defined(windows):
+    const IPPROTO_IPV6 = cint(41)
+    when defined(linux):
+      const IPV6_V6ONLY = cint(26)
+    elif defined(macosx) or defined(bsd):
+      const IPV6_V6ONLY = cint(24)
+    else:
+      const IPV6_V6ONLY = cint(24)
+    var one: cint = 1
+    discard setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
+                       addr one, sizeof(one).SockLen)
+
 # ── Address resolution ───────────────────────────────────────────────────────
 
 proc resolveAddr*(address: string, port: int,

@@ -11,6 +11,8 @@ srcDir        = "src"
 task test, "Run all tests":
   exec "nim c -r tests/test_loop.nim"
   exec "nim c -r tests/test_net.nim"
+  exec "nim c -r tests/test_tls.nim"
+  exec "nim c -r tests/test_signal.nim"
   exec "nim c -r tests/test_http.nim"
   exec "nim c -r tests/test_bench_event_loop.nim"
   exec "nim c -r tests/test_security.nim"

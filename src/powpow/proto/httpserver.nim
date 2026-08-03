@@ -23,6 +23,7 @@
 import std/[httpcore, tables, options, net, strutils, os, times, oids]
 
 import ../net/tcp
+import ../net/tls
 import ../net/common
 import ../loop
 import ../types
@@ -57,6 +58,7 @@ type
     tcpServer: TcpServer
     loop:      Loop
     handler*:  OnRequestCallback
+    sslCtx*:   tls.SslContext
     connRoots: Table[int, ConnHttp]
     parserPool: seq[HttpParser]
     reqPool:   seq[HttpRequest]
@@ -248,7 +250,7 @@ proc send*(res: HttpResponse, body: string = "") =
     copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
     if body.len > 0:
       copyMem(addr buf[pos], unsafeAddr body[0], body.len); pos += body.len
-    discard sockSend(res.conn.fd, addr buf[0], pos)
+    discard res.conn.send(buf.toOpenArray(0, pos - 1))
   else:
     type Part = tuple[data: ptr UncheckedArray[byte], len: int]
     const MaxParts = 150
@@ -310,7 +312,7 @@ proc send*(res: HttpResponse, body: seq[byte]) =
     copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
     if body.len > 0:
       copyMem(addr buf[pos], addr body[0], body.len); pos += body.len
-    discard sockSend(res.conn.fd, addr buf[0], pos)
+    discard res.conn.send(buf.toOpenArray(0, pos - 1))
   else:
     type Part = tuple[data: ptr UncheckedArray[byte], len: int]
     const MaxParts = 150
@@ -448,6 +450,22 @@ proc sendFile*(res: HttpResponse, path: string;
 
     discard seekFile(fileFd, rangeStart)
 
+    if res.conn.isTlsActive():
+      # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+      const TlsChunk = 65536
+      var tlsBuf = newSeq[byte](TlsChunk)
+      var remain = rangeLen
+      while remain > 0:
+        let toRead = if remain > TlsChunk: TlsChunk else: int(remain)
+        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr tlsBuf[0]), toRead)
+        if n <= 0: break
+        discard res.conn.send(tlsBuf.toOpenArray(0, int(n) - 1))
+        remain -= n
+      closeFile(fileFd)
+      if res.closeConn:
+        res.conn.closeAfterDrain()
+      return
+
     var fileOff = rangeStart
     var remain = rangeLen
 
@@ -564,6 +582,20 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
 
     discard seekFile(fileFd, rangeStart)
 
+    if res.conn.isTlsActive():
+      # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+      const TlsChunk = 65536
+      var tlsBuf = newSeq[byte](TlsChunk)
+      var remain = rangeLen
+      while remain > 0:
+        let toRead = if remain > TlsChunk: TlsChunk else: int(remain)
+        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr tlsBuf[0]), toRead)
+        if n <= 0: break
+        discard res.conn.send(tlsBuf.toOpenArray(0, int(n) - 1))
+        remain -= n
+      closeFile(fileFd)
+      return
+
     var fileOff = rangeStart
     var remain = rangeLen
 
@@ -655,6 +687,7 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     parserPool: @[],
     reqPool:   @[],
     resPool:   @[],
+    sslCtx:    nil,
     keepAliveMs: DefaultKeepAliveMs,
     maxBodySize: 0,
     maxConnections: 0,
@@ -744,7 +777,7 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
 
   if p.expectContinue and p.phase == PhaseBody:
     let continueResp = "HTTP/1.1 100 Continue\r\n\r\n"
-    discard sockSend(conn.fd, unsafeAddr continueResp[0], continueResp.len)
+    discard conn.send(continueResp.toOpenArrayByte(0, continueResp.len - 1))
     p.expectContinue = false
 
   # Auto-detect body streaming for large uploads.
@@ -812,29 +845,33 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
 
 # ── Listen ───────────────────────────────────────────────────────────────────
 
-proc listen*(server: HttpServer, address: string, port: int) =
-  server.tcpServer = newTcpServer(server.loop,
+proc buildTcpServer(server: HttpServer): TcpServer =
+  ## Create the underlying TcpServer, wrapping accepted connections in TLS when
+  ## `server.sslCtx` is set (implicit TLS, e.g. HTTPS on port 443).
+  result = newTcpServer(server.loop,
     onData = proc(conn: Connection, data: openArray[byte]) =
       server.handleConnectionData(conn, data)
+    ,
+    onAccept = if server.sslCtx != nil:
+        proc(conn: Connection) =
+          conn.wrapTls(server.sslCtx)
+      else:
+        nil
     ,
     onClose = proc(conn: Connection) =
       server.removeSession(conn)
     ,
   )
-  server.tcpServer.maxConnections = server.maxConnections
+  result.maxConnections = server.maxConnections
+
+proc listen*(server: HttpServer, address: string, port: int) =
+  server.tcpServer = server.buildTcpServer()
   server.tcpServer.listen(address, port)
 
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =
     ## Listen on a Unix domain socket. `mode` is the file permission bits for the socket.
-    server.tcpServer = newTcpServer(server.loop,
-      onData = proc(conn: Connection, data: openArray[byte]) =
-        server.handleConnectionData(conn, data)
-      ,
-      onClose = proc(conn: Connection) =
-        server.removeSession(conn)
-      ,
-    )
+    server.tcpServer = server.buildTcpServer()
     server.tcpServer.listenUnix(path, mode)
 
 proc close*(server: HttpServer) =
@@ -847,13 +884,7 @@ proc close*(server: HttpServer) =
 proc ensureTcpServer*(server: HttpServer) =
   ## Ensure the server has a TCP server instance
   if server.tcpServer != nil: return
-  server.tcpServer = newTcpServer(server.loop,
-    onData = proc(conn: Connection, data: openArray[byte]) =
-      server.handleConnectionData(conn, data)
-    ,
-    onClose = proc(conn: Connection) =
-      server.removeSession(conn)
-  )
+  server.tcpServer = server.buildTcpServer()
 
 proc populatePools*(server: HttpServer; poolSize = 256) =
   ## Pre-allocate parsers, responses, connections, and buffers to

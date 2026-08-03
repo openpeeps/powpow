@@ -85,6 +85,8 @@ type
     sendFileRemain*:  int64
     data*:            pointer
     clientAddr:       Sockaddr_storage
+    ssl*:             pointer
+    tlsState*:        TlsState
 
   OnAccept*  = proc(conn: Connection) {.closure.}
   OnData*    = proc(conn: Connection, data: openArray[byte]) {.closure.}
@@ -112,6 +114,12 @@ proc newConnection*(fd: SocketHandle, loop: Loop, server: TcpServer,
 proc shutWrVal(): cint {.inline.} =
   when defined(windows): 1 else: SHUT_WR
 
+# Forward declarations for the TLS primitives defined below (used by `close`).
+proc driveHandshake*(conn: Connection): bool
+proc tlsRead*(conn: Connection, buf: pointer, count: int): int
+proc tlsWrite*(conn: Connection, buf: pointer, count: int): int
+proc tlsFree*(conn: Connection)
+
 # ── Connection ───────────────────────────────────────────────────────────────
 
 proc close*(conn: Connection) =
@@ -124,6 +132,8 @@ proc close*(conn: Connection) =
     conn.sendFileFd = -1
   setLinger0(conn.fd)
   conn.loop.unregisterFd(conn.fd.int)
+  if conn.ssl != nil:
+    conn.tlsFree()
   sockClose(conn.fd)
   conn.writeBuf.setLen(0)
   conn.writePos = 0
@@ -131,10 +141,13 @@ proc close*(conn: Connection) =
 proc flushWriteBuffer(conn: Connection): bool =
   while conn.writePos < conn.writeBuf.len:
     let remaining = conn.writeBuf.len - conn.writePos
-    let n = sockSend(conn.fd,
-                     unsafeAddr conn.writeBuf[conn.writePos], remaining)
+    let n = if conn.tlsState == TlsActive:
+              conn.tlsWrite(unsafeAddr conn.writeBuf[conn.writePos], remaining)
+            else:
+              sockSend(conn.fd,
+                       unsafeAddr conn.writeBuf[conn.writePos], remaining)
     if n < 0:
-      if sockWouldBlock():
+      if n == -2 or sockWouldBlock():
         if conn.corked:
           setTcpCork(conn.fd, false)
           conn.corked = false
@@ -151,8 +164,105 @@ proc flushWriteBuffer(conn: Connection): bool =
     conn.corked = false
   return true
 
+# ── TLS ───────────────────────────────────────────────────────────────────────
+# The connection carries an optional OpenSSL `SSL*` pointer (`ssl`). When set,
+# all reads/writes are routed through SSL_read/SSL_write and the handshake is
+# driven non-blockingly from the event loop (see wrapTls in net/tls.nim).
+
+when not defined(windows):
+  {.passL: "-lssl -lcrypto".}
+  import std/openssl
+
+  proc handleHandshake(conn: Connection): bool =
+    ## Progress the non-blocking TLS handshake. Returns true once complete.
+    if conn.ssl == nil: return true
+    let r = sslDoHandshake(cast[SslPtr](conn.ssl))
+    if r == 1:
+      conn.tlsState = TlsActive
+      return true
+    let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
+    if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
+      return false
+    conn.close()
+    false
+
+  proc driveHandshake*(conn: Connection): bool =
+    ## Advance the connection's TLS handshake (client kick-off or loop-driven
+    ## progress). Returns true once TLS is active. Writes queued during the
+    ## handshake are flushed on completion.
+    if conn.ssl == nil or conn.tlsState == TlsActive:
+      return true
+    if conn.handleHandshake():
+      if conn.writeBuf.len > 0:
+        if not conn.flushWriteBuffer():
+          conn.loop.modify(conn.fd.int, {Read, Write})
+      return true
+    false
+
+  proc tlsRead*(conn: Connection, buf: pointer, count: int): int =
+    ## SSL_read wrapper. Returns bytes read, -2 when the operation would
+    ## block, 0 on clean EOF or error (connection is closed by caller).
+    if conn.ssl == nil: return -1
+    let r = SSL_read(cast[SslPtr](conn.ssl), cast[cstring](buf), count.cint)
+    if r > 0: return r
+    let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
+    if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
+      return -2
+    0
+
+  proc tlsWrite*(conn: Connection, buf: pointer, count: int): int =
+    ## SSL_write wrapper. Returns bytes written or -2 when the operation
+    ## would block (caller buffers and waits for a Write event).
+    if conn.ssl == nil: return -1
+    let r = SSL_write(cast[SslPtr](conn.ssl), cast[cstring](buf), count.cint)
+    if r > 0: return r
+    let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
+    if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
+      return -2
+    -1
+
+  proc tlsFree*(conn: Connection) =
+    ## Tear down the TLS session and release the SSL object.
+    if conn.ssl != nil:
+      discard SSL_shutdown(cast[SslPtr](conn.ssl))
+      SSL_free(cast[SslPtr](conn.ssl))
+      conn.ssl = nil
+    conn.tlsState = TlsOff
+else:
+  proc driveHandshake*(conn: Connection): bool = true
+  proc tlsRead*(conn: Connection, buf: pointer, count: int): int = -1
+  proc tlsWrite*(conn: Connection, buf: pointer, count: int): int = -1
+  proc tlsFree*(conn: Connection) = discard
+
 proc send*(conn: Connection, data: openArray[byte]): int =
   if conn.state != Connected: return 0
+
+  if conn.tlsState != TlsOff:
+    # TLS: every byte must go through SSL_write. During the handshake (or when
+    # a write is already pending) we simply queue — the flush happens once the
+    # handshake completes / the socket becomes writable.
+    if conn.tlsState == TlsHandshaking or conn.writeBuf.len > 0:
+      let oldLen = conn.writeBuf.len
+      conn.writeBuf.setLen(oldLen + data.len)
+      copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
+      return data.len
+    let n = conn.tlsWrite(unsafeAddr data[0], data.len)
+    if n == -2:
+      conn.writeBuf.setLen(data.len)
+      copyMem(addr conn.writeBuf[0], unsafeAddr data[0], data.len)
+      conn.writePos = 0
+      conn.loop.modify(conn.fd.int, {Read, Write})
+      return data.len
+    if n < 0:
+      conn.close()
+      return -1
+    if n < data.len:
+      let remaining = data.len - n
+      conn.writeBuf.setLen(remaining)
+      copyMem(addr conn.writeBuf[0], unsafeAddr data[n], remaining)
+      conn.writePos = 0
+      conn.loop.modify(conn.fd.int, {Read, Write})
+    return data.len
 
   if conn.writeBuf.len > 0:
     let oldLen = conn.writeBuf.len
@@ -199,6 +309,15 @@ proc sendv*(conn: Connection,
     totalLen += part.len
 
   if totalLen == 0: return 0
+
+  if conn.tlsState != TlsOff:
+    # No writev over TLS: coalesce and send through SSL_write.
+    var buf = newSeq[byte](totalLen)
+    var pos = 0
+    for part in parts:
+      copyMem(addr buf[pos], part.data, part.len)
+      pos += part.len
+    return conn.send(buf)
 
   if conn.writeBuf.len > 0:
     for part in parts:
@@ -334,6 +453,8 @@ proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
     result.loop = server.loop
     result.server = server
     result.state = Connected
+    result.ssl = nil
+    result.tlsState = TlsOff
   else:
     result = Connection(
       fd:        fd,
@@ -350,6 +471,10 @@ proc getClientIp*(conn: Connection): string {.inline.} =
     conn.clientIp = formatIp(conn.clientAddr)
   conn.clientIp
 
+proc getClientSockAddr*(conn: Connection): Sockaddr_storage {.inline.} =
+  ## Return the client's raw socket address (set at accept/connect time).
+  conn.clientAddr
+
 proc releaseConnection(server: TcpServer, conn: Connection) =
   conn.state = Closed
   conn.fd = SocketHandle(-1)
@@ -361,6 +486,8 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
   conn.writeBuf.setLen(0)
   conn.writePos = 0
   conn.clientIp = ""
+  conn.ssl = nil
+  conn.tlsState = TlsOff
   if server.connPool.len < MaxConnPoolSize:
     server.connPool.add(conn)
   else:
@@ -372,21 +499,34 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
 
 proc handleClientRead(conn: Connection, onData: OnData, onClose: OnClose) =
   while conn.state == Connected:
-    when defined(windows):
-      let n = conn.loop.platform.getReadData(
-        conn.fd.int, cast[ptr UncheckedArray[byte]](addr conn.readBuf[0]), conn.readBufLen)
+    if conn.tlsState == TlsHandshaking:
+      # The handshake is driven from the event-loop callback, not here.
+      return
+    var n: int
+    if conn.tlsState == TlsActive:
+      n = conn.tlsRead(addr conn.readBuf[0], conn.readBufLen)
     else:
-      let n = sockRecv(conn.fd, addr conn.readBuf[0], conn.readBufLen)
+      when defined(windows):
+        n = conn.loop.platform.getReadData(
+          conn.fd.int, cast[ptr UncheckedArray[byte]](addr conn.readBuf[0]), conn.readBufLen)
+      else:
+        n = sockRecv(conn.fd, addr conn.readBuf[0], conn.readBufLen)
     if n > 0:
       onData(conn, conn.readBuf.toOpenArray(0, n - 1))
       if conn.state != Connected:
         if onClose != nil: onClose(conn)
+        return
+      if conn.tlsState != TlsOff:
+        # TLS was enabled during onData (STARTTLS-style upgrade); the
+        # handshake is now driven from the event loop.
         return
     elif n == 0:
       conn.close()
       if onClose != nil: onClose(conn)
       return
     else:
+      if n == -2:
+        return
       when defined(windows):
         return
       else:
@@ -546,6 +686,10 @@ proc newTcpServer*(loop: Loop,
       if srv.onClose != nil: srv.onClose(conn)
       srv.releaseConnection(conn)
       return
+    if conn.tlsState == TlsHandshaking:
+      # Progress the TLS handshake on any I/O; return until it completes.
+      if not conn.driveHandshake():
+        return
     if Write in ev:
       if conn.sendFileFd >= 0:
         if conn.continueSendFile():
@@ -605,6 +749,9 @@ proc connect*(loop: Loop, address: string, port: int,
         conn.closeAndRelease()
         if onClose != nil: onClose(conn)
         return
+      if conn.tlsState == TlsHandshaking:
+        if not conn.driveHandshake():
+          return
       if Write in ev:
         if conn.flushWriteBuffer():
           if conn.closeAfterFlush:
@@ -637,6 +784,9 @@ proc connect*(loop: Loop, address: string, port: int,
           conn.closeAndRelease()
           if onClose != nil: onClose(conn)
           return
+        if conn.tlsState == TlsHandshaking:
+          if not conn.driveHandshake():
+            return
         if Write in ev:
           if conn.flushWriteBuffer():
             if conn.closeAfterFlush:
@@ -694,6 +844,9 @@ when not defined(windows):
           conn.closeAndRelease()
           if onClose != nil: onClose(conn)
           return
+        if conn.tlsState == TlsHandshaking:
+          if not conn.driveHandshake():
+            return
         if Write in ev:
           if conn.flushWriteBuffer():
             if conn.closeAfterFlush:
@@ -725,6 +878,9 @@ when not defined(windows):
             conn.closeAndRelease()
             if onClose != nil: onClose(conn)
             return
+          if conn.tlsState == TlsHandshaking:
+            if not conn.driveHandshake():
+              return
           if Write in ev:
             if conn.flushWriteBuffer():
               if conn.closeAfterFlush:

@@ -17,10 +17,12 @@ import ./types
 
 import ./net/common
 import ./net/tcp
+import ./net/tls
 import ./net/udp
 
 export common
 export tcp
+export tls
 export udp
 export loop
 export types
