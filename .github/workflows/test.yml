@@ -29,3 +29,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
       - run: nimble test -d:release
+
+  smuggler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: iffy/install-nim@v5
+        with:
+          version: 'binary:stable'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: nimble install -Y
+      # The testSmuggler task compiles against the smuggler source at
+      # $HOME/Development/packages/smuggler/src and drives the `smuggler` CLI
+      # binary for the live two-request desync campaign.
+      - run: nimble install https://github.com/openpeeps/smuggler
+      - run: |
+          git clone --depth 1 https://github.com/openpeeps/smuggler \
+            "$HOME/Development/packages/smuggler"
+      - run: nimble testSmuggler

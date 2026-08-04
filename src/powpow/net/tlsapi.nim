@@ -14,7 +14,8 @@
 ## The bindings are declared with `{.importc.}` and no header, so they work as
 ## long as the linker can find `-lssl -lcrypto` (system, Homebrew, MacPorts, ...).
 
-{.passL: "-lssl -lcrypto".}
+when not defined(windows):
+  {.passL: "-lssl -lcrypto".}
 
 type
   SslCtx* = pointer  ## `SSL_CTX*`
