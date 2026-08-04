@@ -36,33 +36,66 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y wrk
       - run: nim c -d:release examples/httpserver.nim
       - run: nim c -d:release --threads:on examples/httpserver_threads.nim
+
+      - name: Record commit
+        run: |
+          echo "commit: $GITHUB_SHA" | tee -a bench-results.txt
+          echo "commit-short: $(echo $GITHUB_SHA | cut -c1-8)" | tee -a bench-results.txt
+          echo "ref: $GITHUB_REF" | tee -a bench-results.txt
+          echo "commit-date: $(git show -s --format=%ci $GITHUB_SHA)" | tee -a bench-results.txt
+          echo "params: duration=${{ inputs.duration }}s connections=${{ inputs.connections }} threads=${{ inputs.threads }} path=${{ inputs.path }}" | tee -a bench-results.txt
+
       - name: Single-threaded (keep-alive)
         run: |
           ./examples/httpserver & PID=$!; sleep 1
-          
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
-              -d${{ inputs.duration }} http://127.0.0.1:9000${{ inputs.path }}
+              -d${{ inputs.duration }} http://127.0.0.1:9000${{ inputs.path }} \
+              | grep -oE 'Requests/sec: *[0-9.]+' > st-ka.txt || true
           kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+          echo "single-threaded keep-alive: $(cat st-ka.txt)" | tee -a bench-results.txt
+
       - name: 'Single-threaded (Connection: close)'
         run: |
           ./examples/httpserver & PID=$!; sleep 1
-          
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
               -d${{ inputs.duration }} -H 'Connection: close' \
-              http://127.0.0.1:9000${{ inputs.path }}
+              http://127.0.0.1:9000${{ inputs.path }} \
+              | grep -oE 'Requests/sec: *[0-9.]+' > st-close.txt || true
           kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+          echo "single-threaded close: $(cat st-close.txt)" | tee -a bench-results.txt
+
       - name: Multi-threaded (keep-alive)
         run: |
           ./examples/httpserver_threads & PID=$!; sleep 2
-          
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
-              -d${{ inputs.duration }} http://127.0.0.1:9000${{ inputs.path }}
+              -d${{ inputs.duration }} http://127.0.0.1:9000${{ inputs.path }} \
+              | grep -oE 'Requests/sec: *[0-9.]+' > mt-ka.txt || true
           kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+          echo "multi-threaded keep-alive: $(cat mt-ka.txt)" | tee -a bench-results.txt
+
       - name: 'Multi-threaded (Connection: close)'
         run: |
           ./examples/httpserver_threads & PID=$!; sleep 2
-          
           wrk -t${{ inputs.threads }} -c${{ inputs.connections }} \
               -d${{ inputs.duration }} -H 'Connection: close' \
-              http://127.0.0.1:9000${{ inputs.path }}
+              http://127.0.0.1:9000${{ inputs.path }} \
+              | grep -oE 'Requests/sec: *[0-9.]+' > mt-close.txt || true
           kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
+          echo "multi-threaded close: $(cat mt-close.txt)" | tee -a bench-results.txt
+
+      - name: Benchmark summary
+        run: |
+          echo "## Benchmark results" > "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| commit | $GITHUB_SHA |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| commit-date | $(git show -s --format=%ci $GITHUB_SHA) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| params | duration=${{ inputs.duration }}s connections=${{ inputs.connections }} threads=${{ inputs.threads }} path=${{ inputs.path }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| test | requests/sec |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| single-threaded keep-alive | $(cat st-ka.txt) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| single-threaded close | $(cat st-close.txt) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| multi-threaded keep-alive | $(cat mt-ka.txt) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| multi-threaded close | $(cat mt-close.txt) |" >> "$GITHUB_STEP_SUMMARY"
+          cat bench-results.txt

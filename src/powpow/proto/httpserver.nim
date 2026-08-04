@@ -53,6 +53,7 @@ type
     sessionStreamFile: File
     sessionStreamPath: string
     streamer: MultipartStreamerRef
+    idleTimer: TimerId   # pending idle/read timeout (TimerId(0) = none)
 
   HttpServer* = ref object
     tcpServer: TcpServer
@@ -350,6 +351,30 @@ proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) 
   copyMem(addr buf[p], name.cstring, name.len); p += name.len
   copyMem(addr buf[p], "\"\r\n".cstring, 3); p += 3
 
+template hdrEnsure(buf: var seq[byte]; p, need: int) =
+  ## Grow `buf` so that p + need bytes fit (response headers may be driven by
+  ## attacker-controlled data — e.g. long filenames or custom headers — so a
+  ## fixed-size stack buffer would overflow; copyMem bypasses Nim's checks).
+  if p + need > buf.len:
+    buf.setLen(max(p + need, buf.len * 2))
+
+template hdrAdd(buf: var seq[byte]; p: var int; src: string; n: int) =
+  hdrEnsure(buf, p, n)
+  copyMem(addr buf[p], src.cstring, n)
+  p += n
+
+template hdrAdd(buf: var seq[byte]; p: var int; s: string) =
+  hdrAdd(buf, p, s, s.len)
+
+template hdrByte(buf: var seq[byte]; p: var int; b: byte) =
+  hdrEnsure(buf, p, 1)
+  buf[p] = b
+  p += 1
+
+template hdrUint(buf: var seq[byte]; p: var int; val: int64) =
+  hdrEnsure(buf, p, 20)
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr buf[p]), val)
+
 proc sendFile*(res: HttpResponse, path: string;
                req: HttpRequest = default(HttpRequest);
                closeConn = true,
@@ -399,50 +424,51 @@ proc sendFile*(res: HttpResponse, path: string;
     let connHeader = if closeConn: "close" else: "keep-alive"
 
     res.sent = true
-    var hdrBuf: array[768, byte]
+    var hdrBuf = newSeq[byte](768)
     var p = 0
 
     if status == Http200:
-      copyMem(addr hdrBuf[p], "HTTP/1.1 200 OK\r\n".cstring, 17); p += 17
+      hdrAdd(hdrBuf, p, "HTTP/1.1 200 OK\r\n", 17)
     else:
-      copyMem(addr hdrBuf[p], "HTTP/1.1 206 Partial Content\r\n".cstring, 30); p += 30
+      hdrAdd(hdrBuf, p, "HTTP/1.1 206 Partial Content\r\n", 30)
 
-    copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeLen)
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "Content-Length: ", 16)
+    hdrUint(hdrBuf, p, rangeLen)
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
-    copyMem(addr hdrBuf[p], "Accept-Ranges: bytes\r\n".cstring, 22); p += 22
+    hdrAdd(hdrBuf, p, "Accept-Ranges: bytes\r\n", 22)
 
     let ext = getFileExt(path)[1..^1]
     let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
-    copyMem(addr hdrBuf[p], "Content-Type: ".cstring, 14); p += 14
-    copyMem(addr hdrBuf[p], mimeType.cstring, mimeType.len); p += mimeType.len
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "Content-Type: ", 14)
+    hdrAdd(hdrBuf, p, mimeType)
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
     if contentDisposition:
       let (_, fileName, _) = path.splitFile()
+      hdrEnsure(hdrBuf, p, 43 + fileName.len + 3)
       writeDisposition(cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), fileName, p)
 
-    copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
-    copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "Connection: ", 12)
+    hdrAdd(hdrBuf, p, connHeader)
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
     for (k, v) in res.headers:
-      copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
-      copyMem(addr hdrBuf[p], ": ".cstring, 2); p += 2
-      copyMem(addr hdrBuf[p], v.cstring, v.len); p += v.len
-      copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+      hdrAdd(hdrBuf, p, k)
+      hdrAdd(hdrBuf, p, ": ", 2)
+      hdrAdd(hdrBuf, p, v)
+      hdrAdd(hdrBuf, p, "\r\n", 2)
 
     if status == Http206:
-      copyMem(addr hdrBuf[p], "Content-Range: bytes ".cstring, 21); p += 21
-      p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart)
-      hdrBuf[p] = byte('-'); p += 1
-      p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart + rangeLen - 1)
-      hdrBuf[p] = byte('/'); p += 1
-      p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), fileSize)
-      copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+      hdrAdd(hdrBuf, p, "Content-Range: bytes ", 21)
+      hdrUint(hdrBuf, p, rangeStart)
+      hdrByte(hdrBuf, p, byte('-'))
+      hdrUint(hdrBuf, p, rangeStart + rangeLen - 1)
+      hdrByte(hdrBuf, p, byte('/'))
+      hdrUint(hdrBuf, p, fileSize)
+      hdrAdd(hdrBuf, p, "\r\n", 2)
 
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
     type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
     var parts: array[6, Part]
@@ -540,41 +566,41 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
         return
 
     res.sent = true
-    var hdrBuf: array[768, byte]
+    var hdrBuf = newSeq[byte](768)
     var p = 0
 
-    copyMem(addr hdrBuf[p], "HTTP/1.1 206 Partial Content\r\n".cstring, 30); p += 30
+    hdrAdd(hdrBuf, p, "HTTP/1.1 206 Partial Content\r\n", 30)
 
-    copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeLen)
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "Content-Length: ", 16)
+    hdrUint(hdrBuf, p, rangeLen)
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
-    copyMem(addr hdrBuf[p], "Accept-Ranges: bytes\r\n".cstring, 22); p += 22
+    hdrAdd(hdrBuf, p, "Accept-Ranges: bytes\r\n", 22)
 
     let ext = getFileExt(path)[1..^1]
     let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
-    copyMem(addr hdrBuf[p], "Content-Type: ".cstring, 14); p += 14
-    copyMem(addr hdrBuf[p], mimeType.cstring, mimeType.len); p += mimeType.len
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "Content-Type: ", 14)
+    hdrAdd(hdrBuf, p, mimeType)
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
-    copyMem(addr hdrBuf[p], "Connection: keep-alive\r\n".cstring, 24); p += 24
+    hdrAdd(hdrBuf, p, "Connection: keep-alive\r\n", 24)
 
     for (k, v) in res.headers:
-      copyMem(addr hdrBuf[p], k.cstring, k.len); p += k.len
-      copyMem(addr hdrBuf[p], ": ".cstring, 2); p += 2
-      copyMem(addr hdrBuf[p], v.cstring, v.len); p += v.len
-      copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+      hdrAdd(hdrBuf, p, k)
+      hdrAdd(hdrBuf, p, ": ", 2)
+      hdrAdd(hdrBuf, p, v)
+      hdrAdd(hdrBuf, p, "\r\n", 2)
 
     let rangeEnd = min(rangeStart + rangeLen - 1, fileSize - 1)
-    copyMem(addr hdrBuf[p], "Content-Range: bytes ".cstring, 21); p += 21
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeStart)
-    hdrBuf[p] = byte('-'); p += 1
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), rangeEnd)
-    hdrBuf[p] = byte('/'); p += 1
-    p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), fileSize)
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "Content-Range: bytes ", 21)
+    hdrUint(hdrBuf, p, rangeStart)
+    hdrByte(hdrBuf, p, byte('-'))
+    hdrUint(hdrBuf, p, rangeEnd)
+    hdrByte(hdrBuf, p, byte('/'))
+    hdrUint(hdrBuf, p, fileSize)
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
-    copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+    hdrAdd(hdrBuf, p, "\r\n", 2)
 
     type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
     var parts: array[6, Part]
@@ -734,6 +760,9 @@ proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
 proc removeSession*(server: HttpServer, conn: Connection) =
   let ctx = cast[ConnHttp](conn.data)
   if ctx == nil: return
+  if ctx.idleTimer != TimerId(0):
+    server.loop.cancelTimer(ctx.idleTimer)
+    ctx.idleTimer = TimerId(0)
   server.connRoots.del(conn.fd.int)
   if ctx.sessionStreamPath.len > 0:
     ctx.sessionStreamFile.close()
@@ -744,6 +773,28 @@ proc removeSession*(server: HttpServer, conn: Connection) =
     ctx.streamer = nil
   releaseParser(server, ctx.parser)
   conn.data = nil
+
+proc armIdleTimeout(server: HttpServer, conn: Connection, delayMs: int) =
+  ## (Re)arm the per-connection idle/read timeout. A connection that sends no
+  ## data for `delayMs` is closed. 0 disables the timeout.
+  ## Enforces both readTimeoutMs (partial/slow-request stalls) and keepAliveMs
+  ## (idle keep-alive connections) — previously declared but never enforced,
+  ## leaving the server open to slowloris / connection-exhaustion attacks.
+  if delayMs <= 0: return
+  let ctx = cast[ConnHttp](conn.data)
+  if ctx == nil or conn.state != Connected: return
+  if ctx.idleTimer != TimerId(0):
+    server.loop.cancelTimer(ctx.idleTimer)
+  ctx.idleTimer = server.loop.addTimer(delayMs) do (id: int):
+    ctx.idleTimer = TimerId(0)
+    if conn.state != Connected or conn.data == nil:
+      return
+    if conn.sendFileFd >= 0:
+      # A zero-copy response is mid-flight; defer until it completes.
+      server.armIdleTimeout(conn, server.keepAliveMs)
+      return
+    server.removeSession(conn)
+    conn.close()
 
 # ── Request dispatch ─────────────────────────────────────────────────────────
 
@@ -775,7 +826,14 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
               server.connRoots[conn.fd.int] = c
               c
   let p = ctx.parser
-  p.feed(data)
+  server.armIdleTimeout(conn, server.readTimeoutMs)
+  try:
+    p.feed(data)
+  except MultipartSizeLimitError:
+    # A multipart upload exceeded a configured size limit — the shared error
+    # handling below cleans up streaming state and replies 413 instead of
+    # letting the exception crash the event loop.
+    p.setError(Http413)
 
   if p.expectContinue and p.phase == PhaseBody:
     let continueResp = "HTTP/1.1 100 Continue\r\n\r\n"
@@ -790,13 +848,23 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   # This keeps p.buf small (~headers only) regardless of total body size.
   if p.phase == PhaseBody and p.onBodyData == nil and not p.streamingBody and not p.isComplete():
     let ct = p.peekContentType()
+    # Bound auto-streamed uploads: server.maxBodySize when set, otherwise a
+    # hard cap — a client must not be able to fill the disk/temp dir with an
+    # unbounded upload. (Previously maxBodySize=0 meant unlimited disk writes.)
+    let uploadCap = if server.maxBodySize > 0: server.maxBodySize
+                    else: int64(MaxStreamBodySize)
     if ct.startsWith("multipart/form-data") and p.contentLength > 0:
       ctx.streamer = newMultipartStreamerRef(ct,
-        bodySize = p.contentLength.int64)
+        bodySize = p.contentLength.int64,
+        sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
+                                       maxFileSize: uploadCap))
       let ms = ctx.streamer
       p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
         ms[].feed(data)
-      p.tryAdvance()
+      try:
+        p.tryAdvance()
+      except MultipartSizeLimitError:
+        p.setError(Http413)
     elif p.contentLength > 0:
       let dir = getTempDir()
       discard existsOrCreateDir(dir)
@@ -830,6 +898,14 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     p.tryAdvance()
     if conn.sendFileFd >= 0:
       break
+
+  # All pipelined requests handled. If at least one request completed, the
+  # connection is now idle waiting for the next one — switch from the read
+  # timeout to the keep-alive timeout. If the current request is still
+  # incomplete (slowloris), keep the read timeout armed (set at the top).
+  if conn.state == Connected and conn.data != nil and conn.sendFileFd < 0 and
+     pipelineCount > 0:
+    server.armIdleTimeout(conn, server.keepAliveMs)
 
   if p.isError():
     if ctx.streamer != nil:
@@ -972,7 +1048,10 @@ proc serveFile*(res: HttpResponse, req: HttpRequest, path: string;
       if path.contains("..") or path.contains("~"):
         res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
         return true
-      if not path.startsWith(fsRoot):
+      # Path must equal fsRoot or sit directly under it — a bare startsWith
+      # check would also accept sibling dirs sharing the prefix (e.g.
+      # fsRoot="/var/www" matching "/var/www2/..."), a path-confusion escape.
+      if path != fsRoot and not path.startsWith(fsRoot & "/"):
         res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
         return true
 

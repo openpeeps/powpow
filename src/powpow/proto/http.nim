@@ -27,6 +27,12 @@ const
   MaxRequestLine* = 8192   ## Max request line size
   MaxHeaders*     = 100    ## Max number of headers
   DefaultBodyBuf* = 65536  ## Default body read buffer
+  HeaderBufCap    = MaxRequestLine + MaxHeaderSize  ## feed()-time bound on the
+    ## header-section buffer: a single oversized packet must be rejected (414/431)
+    ## BEFORE ensureCapacity grows the buffer to its size.
+  MaxStreamBodySize* = 512 * 1024 * 1024  ## Absolute cap for streamed bodies
+    ## (onBodyData) when maxBodySize == 0: a hostile client can't drive
+    ## unbounded disk/RAM via a streaming upload.
 
   httpNewLine = "\r\n"
   headerSep   = "\r\n\r\n"
@@ -126,6 +132,15 @@ type
 
 # ── Fast method parser ───────────────────────────────────────────────────────
 
+func contentEnd(p: HttpParser): int {.inline.} =
+  ## Byte offset just past the Content-Length body. Saturates at high(int)
+  ## instead of overflowing when contentLength is near high(int) — a hostile
+  ## `Content-Length: 9223372036854775808` header must not crash the parser.
+  if p.contentLength > high(int) - p.headerEnd:
+    high(int)
+  else:
+    p.headerEnd + p.contentLength
+
 func parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.} =
   # Parse HTTP method from raw bytes. Switch on first char for speed.
   if len == 0: return HttpGet  # default
@@ -212,7 +227,7 @@ proc resetForNext*(p: HttpParser) =
   ## only leftover bytes from the next request — no copy needed.
   let consumed = if p.streamingBody: 0  # buffer already contains only next-request bytes
                  elif p.transferChunked: p.headerEnd + p.chunkBodyLen
-                 elif p.contentLength > 0: p.headerEnd + p.contentLength
+                 elif p.contentLength > 0: p.contentEnd
                  else: p.headerEnd
   let leftover = p.bufLen - consumed
 
@@ -388,11 +403,12 @@ proc scanHeaders(p: HttpParser): bool =
               var num = 0
               var j = valStart
               while j < i and char(buf[j]) in '0'..'9':
-                if num > high(int) div 10:
+                let digit = ord(char(buf[j])) - ord('0')
+                if num > (high(int) - digit) div 10:
                   p.phase = PhaseError
                   p.errorCode = Http413
                   return false
-                num = num * 10 + (ord(char(buf[j])) - ord('0'))
+                num = num * 10 + digit
                 inc j
               if j == valStart:
                 p.phase = PhaseError
@@ -724,8 +740,16 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
   # Streaming mode: after headers are parsed, body bytes go to callback
   if p.streamingBody and p.phase == PhaseBody:
     if p.transferChunked:
-      # Chunked streaming: forward all data; chunk boundaries handle splitting
+      # Chunked streaming: forward all data; chunk boundaries handle splitting.
+      # Enforce the body cap here too (chunked bodies are otherwise uncounted).
       if data.len > 0 and p.onBodyData != nil:
+        let streamCap = if p.maxBodySize > 0: p.maxBodySize
+                        else: int64(MaxStreamBodySize)
+        if p.bodyStreamed + int64(data.len) > streamCap:
+          p.phase = PhaseError
+          p.errorCode = Http413
+          return p.phase
+        p.bodyStreamed += int64(data.len)
         p.onBodyData(data, false)
       return p.phase
     # Content-Length streaming: only forward body bytes, buffer leftover for next request
@@ -735,6 +759,13 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
       p.phase = PhaseComplete
       return p.phase
     let bodyBytes = min(data.len, remaining)
+    let streamCap = if p.maxBodySize > 0: p.maxBodySize
+                    else: int64(MaxStreamBodySize)
+    if p.bodyStreamed + int64(bodyBytes) > streamCap:
+      # Upload exceeds the cap — reject before writing more to disk/RAM.
+      p.phase = PhaseError
+      p.errorCode = Http413
+      return p.phase
     if bodyBytes > 0 and p.onBodyData != nil:
       p.onBodyData(data.toOpenArray(0, bodyBytes - 1), bodyBytes >= remaining)
     p.bodyStreamed += bodyBytes
@@ -749,10 +780,44 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
       p.bufLen += leftover
     return p.phase
 
-  p.ensureCapacity(data.len)
-  if data.len > 0:
-    copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], data.len)
-    p.bufLen += data.len
+  # Bound header-section buffering so an attacker cannot force a large
+  # allocation with one oversized packet: while the header section is still
+  # incomplete, only buffer up to HeaderBufCap, let the 414/431 checks run,
+  # then buffer any body bytes that follow a completed header section.
+  if p.phase == PhaseRequestLine or p.phase == PhaseHeaders:
+    if p.bufLen + data.len > HeaderBufCap:
+      let headRoom = HeaderBufCap - p.bufLen
+      if headRoom > 0:
+        p.ensureCapacity(headRoom)
+        copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], headRoom)
+        p.bufLen += headRoom
+      if p.phase == PhaseRequestLine:
+        if not p.parseRequestLine(): return p.phase
+      if p.phase == PhaseHeaders:
+        if not p.scanHeaders(): return p.phase
+      if p.phase == PhaseBody:
+        # Headers completed inside the capped prefix — buffer the rest as body.
+        let offset = headRoom
+        if data.len - offset > 0:
+          p.ensureCapacity(data.len - offset)
+          copyMem(addr p.buf[p.bufLen], unsafeAddr data[offset], data.len - offset)
+          p.bufLen += data.len - offset
+        # Fall through so the PhaseBody completion check below runs.
+      elif p.phase != PhaseError:
+        # Headers still incomplete at the cap — reject without further growth.
+        p.phase = PhaseError
+        p.errorCode = Http431
+        return p.phase
+    else:
+      p.ensureCapacity(data.len)
+      if data.len > 0:
+        copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], data.len)
+        p.bufLen += data.len
+  else:
+    p.ensureCapacity(data.len)
+    if data.len > 0:
+      copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], data.len)
+      p.bufLen += data.len
 
   # State machine advancement
   if p.phase == PhaseRequestLine:
@@ -805,7 +870,7 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
         p.phase = PhaseComplete
     else:
       # Content-Length based
-      let expected = p.headerEnd + p.contentLength
+      let expected = p.contentEnd
       if p.bufLen >= expected:
         p.bodyLen = p.contentLength
         p.phase = PhaseComplete
@@ -859,7 +924,7 @@ proc tryAdvance*(p: HttpParser) =
       if p.parseChunkedBody():
         p.phase = PhaseComplete
     elif p.contentLength > 0:
-      let expected = p.headerEnd + p.contentLength
+      let expected = p.contentEnd
       if p.bufLen >= expected:
         p.bodyLen = p.contentLength
         p.phase = PhaseComplete
@@ -869,6 +934,11 @@ func isComplete*(p: HttpParser): bool {.inline.} =
 
 func isError*(p: HttpParser): bool {.inline.} =
   p.phase == PhaseError
+
+proc setError*(p: HttpParser, code: HttpCode) {.inline.} =
+  ## Put the parser into the error state with the given HTTP status code.
+  p.phase = PhaseError
+  p.errorCode = code
 
 func error*(p: HttpParser): HttpCode {.inline.} =
   p.errorCode
@@ -997,7 +1067,7 @@ proc getBody*(req: HttpRequest): seq[byte] =
       req.bodyVal = newSeq[byte](p.chunkBodyLen)
       copyMem(addr req.bodyVal[0],
               addr p.buf[p.headerEnd], p.chunkBodyLen)
-    elif p.contentLength > 0 and p.bufLen >= p.headerEnd + p.contentLength:
+    elif p.contentLength > 0 and p.bufLen >= p.contentEnd:
       # Content-Length body
       req.bodyVal = newSeq[byte](p.contentLength)
       copyMem(addr req.bodyVal[0],
@@ -1105,7 +1175,7 @@ proc getBodyView*(p: HttpParser): tuple[data: ptr UncheckedArray[byte]; len: int
   ## Returns (nil, 0) if no body is present.
   if p.transferChunked and p.chunkBodyLen > 0:
     result = (cast[ptr UncheckedArray[byte]](addr p.buf[p.headerEnd]), p.chunkBodyLen)
-  elif p.contentLength > 0 and p.bufLen >= p.headerEnd + p.contentLength:
+  elif p.contentLength > 0 and p.bufLen >= p.contentEnd:
     result = (cast[ptr UncheckedArray[byte]](addr p.buf[p.headerEnd]), p.contentLength)
   else:
     result = (nil, 0)
@@ -1198,7 +1268,7 @@ proc getRemainingData*(p: HttpParser): seq[byte] =
   ## Useful after an HTTP/1.1 upgrade (e.g. WebSocket) where extra bytes
   ## from the initial TCP read may contain the first protocol frames.
   let consumed = if p.transferChunked: p.headerEnd + p.chunkBodyLen
-                 elif p.contentLength > 0: p.headerEnd + p.contentLength
+                 elif p.contentLength > 0: p.contentEnd
                  else: p.headerEnd
   let leftover = p.bufLen - consumed
   if leftover > 0:

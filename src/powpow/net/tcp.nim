@@ -171,34 +171,49 @@ proc flushWriteBuffer(conn: Connection): bool =
 # driven non-blockingly from the event loop (see wrapTls in net/tls.nim).
 
 when not defined(windows):
-  {.passL: "-lssl -lcrypto".}
-  import std/openssl
+  import ./tlsapi
 
-  proc handleHandshake(conn: Connection): bool =
-    ## Progress the non-blocking TLS handshake. Returns true once complete.
-    if conn.ssl == nil: return true
-    let r = sslDoHandshake(cast[SslPtr](conn.ssl))
+  type
+    HandshakeState = enum
+      hsDone, hsWantRead, hsWantWrite, hsError
+
+  proc progressHandshake(conn: Connection): HandshakeState =
+    ## Progress the non-blocking TLS handshake one step.
+    if conn.ssl == nil: return hsDone
+    let r = SSL_do_handshake(cast[SslPtr](conn.ssl))
     if r == 1:
       conn.tlsState = TlsActive
-      return true
+      return hsDone
     let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
-    if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
-      return false
+    if e == SSL_ERROR_WANT_READ: return hsWantRead
+    if e == SSL_ERROR_WANT_WRITE: return hsWantWrite
     conn.close()
-    false
+    hsError
 
   proc driveHandshake*(conn: Connection): bool =
     ## Advance the connection's TLS handshake (client kick-off or loop-driven
     ## progress). Returns true once TLS is active. Writes queued during the
     ## handshake are flushed on completion.
+    ##
+    ## OpenSSL may buffer handshake output and return WANT_WRITE (e.g. writing
+    ## the ServerHello / client Finished). The connection must then be watched
+    ## for writability — registering {Read} only deadlocks the handshake.
     if conn.ssl == nil or conn.tlsState == TlsActive:
       return true
-    if conn.handleHandshake():
+    case conn.progressHandshake()
+    of hsDone:
       if conn.writeBuf.len > 0:
         if not conn.flushWriteBuffer():
           conn.loop.modify(conn.fd.int, {Read, Write})
       return true
-    false
+    of hsWantWrite:
+      conn.loop.modify(conn.fd.int, {Read, Write})
+      false
+    of hsWantRead:
+      conn.loop.modify(conn.fd.int, {Read})
+      false
+    of hsError:
+      false
 
   proc tlsRead*(conn: Connection, buf: pointer, count: int): int =
     ## SSL_read wrapper. Returns bytes read, -2 when the operation would

@@ -6,7 +6,7 @@
 ## Parser-level tests use zero-copy access patterns.
 
 import ../src/powpow
-import std/[unittest, strutils, httpcore]
+import std/[unittest, strutils, httpcore, os]
 
 # ══════════════════════════════════════════════════════════════════════
 # Section 1: HTTP Parser Security
@@ -51,12 +51,49 @@ test "test_max_body_size_chunked_at_limit":
   parser.feed(raw)
   assert parser.isComplete(), "should accept chunked body at limit"
 
+test "test_streaming_body_enforces_max_size":
+  # Chunked streaming bodies were previously forwarded to onBodyData with no
+  # size accounting — an attacker could stream unbounded data to disk/RAM.
+  # Verify maxBodySize is now enforced (413) in streaming mode.
+  let rawHeaders = "POST /x HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+  var streamed = 0
+  let parser = newHttpParser()
+  parser.maxBodySize = 100
+  parser.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+    streamed += data.len
+  parser.feed(rawHeaders)
+  assert parser.phase == PhaseBody, "headers should parse into the body phase"
+  parser.feed(repeat('X', 200))
+  assert parser.isError(), "chunked streaming must enforce maxBodySize"
+  assert parser.error() == Http413
+
 test "test_content_length_overflow_handled_safely":
   let raw = "POST /overflow HTTP/1.1\r\nHost: localhost\r\nContent-Length: 99999999999999999999\r\n\r\n"
   let parser = newHttpParser()
   parser.feed(raw)
   assert parser.isError()
   assert parser.error() == Http413
+
+test "test_content_length_exact_boundary_rejected":
+  # Content-Length = 2^63 (9223372036854775808) — the exact boundary where
+  # `num * 10 + digit` wraps past high(int). Previously the `num > high div 10`
+  # check let this value through: it raised OverflowDefect in release builds
+  # (crash/DoS) and wrapped to a negative contentLength in -d:danger builds
+  # (request-smuggling/desync primitive).
+  let raw = "POST /x HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9223372036854775808\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  assert parser.isError(), "exact-boundary CL must be rejected, not crash or wrap"
+  assert parser.error() == Http413
+  assert parser.contentLength == -1, "contentLength must stay -1 on error"
+
+test "test_content_length_max_int64_accepted":
+  # The largest representable value must still parse (no false positive).
+  let raw = "POST /x HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9223372036854775807\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  assert not parser.isError(), "max int64 CL should not be rejected"
+  assert parser.contentLength == high(int)
 
 test "test_max_body_size_zero_is_unlimited":
   let body = repeat('X', 50000)
@@ -88,12 +125,25 @@ test "test_max_header_size_exceeded":
   assert parser.error() == Http431
 
 test "test_max_request_line_exceeded":
-  let bigPath = "/" & repeat("A", 9000)
-  let raw = "GET " & bigPath & " HTTP/1.1\r\nHost: localhost\r\n\r\n"
+  let longLine = repeat('A', 9000)
+  let raw = "GET /" & longLine & " HTTP/1.1\r\nHost: localhost\r\n\r\n"
   let parser = newHttpParser()
   parser.feed(raw)
-  assert parser.isError()
+  assert parser.isError(), "oversized request line should error"
   assert parser.error() == Http414
+
+test "test_oversized_header_packet_rejected_before_allocation":
+  # A single packet whose header section vastly exceeds the caps must be
+  # rejected without first growing the parser buffer to its size. The parser
+  # buffer must stay small after the feed.
+  let huge = repeat('X', 1024 * 1024)   # 1 MB of header bytes in one packet
+  let raw = "GET / HTTP/1.1\r\nHost: localhost\r\nX-Huge: " & huge & "\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  assert parser.isError(), "oversized header packet should error immediately"
+  assert parser.error() == Http431
+  assert parser.buf.len < 64 * 1024,
+    "parser buffer must not grow to match the hostile packet (len=" & $parser.buf.len & ")"
 
 test "test_chunk_size_overflow_rejected":
   let raw = "POST /overflow HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" &
@@ -274,6 +324,101 @@ test "test_serve_static_rejects_tilde":
   assert "403" in resp or "Forbidden" in resp,
     "tilde path should be rejected with 403, got: '" & resp & "'"
 
+proc testServeFileSiblingEscape(port: int): string =
+  ## Serves a file from a *sibling* directory whose name shares the fsRoot
+  ## prefix (fsRoot="..._root", sibling="..._root2"). The guard must reject it.
+  var responseData: seq[byte] = @[]
+  let loop = newLoop()
+
+  let fsRoot = os.getTempDir() / "powpow_test_root"
+  removeDir(fsRoot)
+  removeDir(fsRoot & "2")
+  createDir(fsRoot)
+  createDir(fsRoot & "2")
+  writeFile(fsRoot & "2" / "secret.txt", "TOP-SECRET")
+
+  let server = newHttpServer(loop)
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    {.gcsafe.}:
+      if not serveFile(res, req, fsRoot & "2" / "secret.txt", fsRoot = fsRoot):
+        res.sendError(Http404, "Not Found")
+
+  server.listen("127.0.0.1", port)
+
+  discard loop.addTimer(50) do (id: int):
+    loop.connect("127.0.0.1", port,
+      onConnect = proc(conn: Connection) =
+        discard conn.send("GET /anything HTTP/1.1\r\nHost: localhost\r\n\r\n")
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        responseData.add(@data)
+        conn.close()
+      ,
+      onClose = proc(conn: Connection) =
+        server.close()
+        loop.stop()
+    )
+
+  discard loop.addTimer(3000) do (id: int):
+    server.close()
+    loop.stop()
+
+  loop.run()
+  loop.close()
+  removeDir(fsRoot)
+  removeDir(fsRoot & "2")
+  result = cast[string](responseData)
+
+test "test_serve_file_rejects_sibling_prefix_escape":
+  let resp = testServeFileSiblingEscape(20095)
+  assert "403" in resp or "Forbidden" in resp,
+    "sibling-prefix path must be rejected with 403, got: '" & resp & "'"
+
+proc testSendFileHugeHeader(port: int): string =
+  ## sendFile used to build its response headers into a fixed `array[768, byte]`
+  ## via unchecked copyMem. A long custom header (or a long Content-Disposition
+  ## filename) overflowed the stack buffer. Verify a large header is sent intact.
+  var responseData: seq[byte] = @[]
+  let loop = newLoop()
+  let f = getTempDir() / "powpow_sendfile_huge.txt"
+  writeFile(f, "FILE-BODY")
+
+  let server = newHttpServer(loop)
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    {.gcsafe.}:
+      res.header("X-Huge", repeat('A', 5000))
+      res.sendFile(f, req, closeConn = false, contentDisposition = true)
+  server.listen("127.0.0.1", port)
+
+  discard loop.addTimer(50) do (id: int):
+    loop.connect("127.0.0.1", port,
+      onConnect = proc(conn: Connection) =
+        discard conn.send("GET /x HTTP/1.1\r\nHost: localhost\r\n\r\n")
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        responseData.add(@data)
+        conn.close()
+      ,
+      onClose = proc(conn: Connection) =
+        server.close()
+        loop.stop()
+    )
+
+  discard loop.addTimer(3000) do (id: int):
+    server.close()
+    loop.stop()
+
+  loop.run()
+  loop.close()
+  removeFile(f)
+  result = cast[string](responseData)
+
+test "test_send_file_huge_header_no_overflow":
+  let resp = testSendFileHugeHeader(20096)
+  assert "200 OK" in resp,
+    "should serve file with huge header, got: '" & resp[0 ..< min(resp.len, 120)] & "'"
+  assert "X-Huge" in resp, "huge custom header must be present in response"
+
 test "test_max_pipeline_depth_enforced":
   var requestCount = 0
   let loop = newLoop()
@@ -362,6 +507,35 @@ test "test_ws_rejects_64bit_large_frame":
   ws.parseWsFrames(frame)
   assert ws.conn.state != Connected,
     "connection should be closed for 64-bit oversized frame"
+  loop.close()
+
+test "test_ws_rejects_64bit_frame_unlimited_mode":
+  # maxFrameSize == 0 (unlimited) must still not allocate a huge buffer:
+  # a 2^63 payload length must be rejected against the hard cap, not OOM.
+  let loop = newLoop()
+  let conn = makeWsTestConn(loop)
+  let ws = newWsConnection(conn, maxFrameSize = 0)
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  var frame = @[0x82'u8, 0xFF, 0x80, 0, 0, 0, 0, 0, 0, 0]  # 64-bit length = 2^63
+  for m in mask: frame.add(m)
+  ws.parseWsFrames(frame)
+  assert ws.conn.state != Connected,
+    "64-bit oversized frame must be rejected even when maxFrameSize == 0"
+  loop.close()
+
+test "test_ws_rejects_huge_fragmented_message_unlimited_mode":
+  # Fragmented message whose first fragment exceeds the hard cap must be
+  # rejected even when maxFrameSize == 0 (prevents unbounded assembleBuf growth).
+  let loop = newLoop()
+  let conn = makeWsTestConn(loop)
+  let ws = newWsConnection(conn, maxFrameSize = 0)
+  let mask = [0x00'u8, 0x00, 0x00, 0x00]
+  # First fragment announces a 600MB payload (above the 512MB hard cap)
+  var frame = @[0x02'u8, 0xFF, 0, 0, 0, 0, 0x24, 0, 0, 0]  # 64-bit length = 600MB
+  for m in mask: frame.add(m)
+  ws.parseWsFrames(frame)
+  assert ws.conn.state != Connected,
+    "oversized first fragment must be rejected in unlimited mode"
   loop.close()
 
 test "test_ws_rejects_unmasked_frame":
@@ -512,6 +686,66 @@ test "test_rejects_body_exceeding_limit_without_allocation":
   parser.feed(headers)
   assert parser.isError(), "should immediately error on oversized Content-Length"
   assert parser.error() == Http413
+
+test "test_idle_keepalive_timeout_closes_connection":
+  # A client that connects and then goes idle must be closed after keepAliveMs.
+  # Previously keepAliveMs/readTimeoutMs were declared but never enforced,
+  # leaving idle keep-alive connections to accumulate unbounded (resource
+  # exhaustion). Timing-based: short timeout + bounded poll window.
+  let loop = newLoop()
+  var server = newHttpServer(loop)
+  server.setKeepAliveTimeout(120)
+  server.readTimeoutMs = 120
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    res.status(Http200).send("ok")
+  server.listen("127.0.0.1", 19901)
+
+  var closedByServer = false
+  loop.connect("127.0.0.1", 19901,
+    onConnect = proc(conn: Connection) =
+      # Partial request, then idle — the server must time the connection out.
+      discard conn.send("GET / HTTP/1.1\r\nHost: localhost\r\n")
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) = discard,
+    onClose = proc(conn: Connection) = closedByServer = true,
+  )
+
+  var polls = 0
+  while not closedByServer and polls < 10000:
+    loop.poll(1)
+    inc polls
+  assert closedByServer, "idle connection should be closed by keep-alive timeout"
+  server.close()
+  loop.close()
+
+test "test_read_timeout_closes_slow_request":
+  # A client that sends a partial request line and then stalls (slowloris)
+  # must be closed after readTimeoutMs.
+  let loop = newLoop()
+  var server = newHttpServer(loop)
+  server.setKeepAliveTimeout(2000)
+  server.readTimeoutMs = 120
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    res.status(Http200).send("ok")
+  server.listen("127.0.0.1", 19902)
+
+  var closed = false
+  loop.connect("127.0.0.1", 19902,
+    onConnect = proc(conn: Connection) =
+      discard conn.send("GET / HTT")   # incomplete request line, never finished
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) = discard,
+    onClose = proc(conn: Connection) = closed = true,
+  )
+  var polls = 0
+  while not closed and polls < 10000:
+    loop.poll(1)
+    inc polls
+  assert closed, "stalled request should be closed by read timeout"
+  assert polls < 1500,
+    "connection should be closed by readTimeoutMs (120ms), not keepAliveMs (2000ms)"
+  server.close()
+  loop.close()
 
 # ══════════════════════════════════════════════════════════════════════
 # Section 5: Rate Limiter Tests

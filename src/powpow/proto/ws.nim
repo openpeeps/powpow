@@ -45,6 +45,10 @@ const
   MaxControlPayload = 125       ## Max payload for control frames (RFC 6455 §5.5)
   DefaultWsBufSize  = 65536    ## Initial frame parser buffer
   DefaultMaxFrameSize* = 10 * 1024 * 1024  ## Default max WebSocket frame size (10 MB)
+  WsHardMaxFrameSize = 512 * 1024 * 1024  ## Absolute allocation cap: applied even
+    ## when maxFrameSize == 0, so a hostile 64-bit frame length can never drive an
+    ## unbounded newSeq (OOM / negative-length allocation) or an unbounded
+    ## fragmented-message assembly.
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
@@ -282,6 +286,9 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
     if ws.maxFrameSize > 0 and (ws.assembleBuf.len + plen) > ws.maxFrameSize:
       ws.closeWs(1009, "Message too large")
       return
+    if ws.maxFrameSize == 0 and (ws.assembleBuf.len + plen) > WsHardMaxFrameSize:
+      ws.closeWs(1009, "Message too large")
+      return
     if plen > 0:
       ws.assembleBuf.add p.payload.toOpenArray(0, plen - 1)
     if p.fin:
@@ -295,6 +302,9 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
       ws.closeWs(1002, "Unexpected data frame during fragmentation")
       return
     if not p.fin and ws.maxFrameSize > 0 and plen > ws.maxFrameSize:
+      ws.closeWs(1009, "Message too large")
+      return
+    if not p.fin and ws.maxFrameSize == 0 and plen > WsHardMaxFrameSize:
       ws.closeWs(1009, "Message too large")
       return
     if p.fin:
@@ -355,6 +365,9 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
   var i = 0
   let dataLen = data.len
 
+  let frameLimit = if ws.maxFrameSize > 0: uint64(ws.maxFrameSize)
+                   else: uint64(WsHardMaxFrameSize)
+
   template readByte(): uint8 =
     if i >= dataLen: return
     let b = data[i]
@@ -412,7 +425,7 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
         inc i
       if p.lengthIdx == 2:
         p.payloadLen = (uint64(p.lengthBuf[0]) shl 8) or uint64(p.lengthBuf[1])
-        if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
+        if p.payloadLen > frameLimit:
           ws.closeWs(1009, "Frame too large")
           return
         if p.opcode in {0x8, 0x9, 0xA} and p.payloadLen > MaxControlPayload:
@@ -439,7 +452,7 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
         for j in 0 ..< 8:
           v = (v shl 8) or uint64(p.lengthBuf[j])
         p.payloadLen = v
-        if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
+        if p.payloadLen > frameLimit:
           ws.closeWs(1009, "Frame too large")
           return
         if p.opcode in {0x8, 0x9, 0xA} and p.payloadLen > MaxControlPayload:
@@ -462,7 +475,7 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
         inc p.maskIdx
         inc i
       if p.maskIdx == 4:
-        if ws.maxFrameSize > 0 and p.payloadLen > uint64(ws.maxFrameSize):
+        if p.payloadLen > frameLimit:
           ws.closeWs(1009, "Frame too large")
           return
         if p.opcode in {0x8, 0x9, 0xA} and p.payloadLen > MaxControlPayload:

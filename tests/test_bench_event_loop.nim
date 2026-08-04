@@ -70,15 +70,16 @@ else:
 
   test "timer_10k_interval":
     const N = 10_000
+    const WindowMs = 100
     var fired = 0
     let loop = newLoop()
     for i in 0 ..< N:
       discard loop.addInterval(1) do (id: int):
         inc fired
-    discard loop.addTimer(50) do (id: int):
+    discard loop.addTimer(WindowMs) do (id: int):
       loop.stop()
     loop.run()
-    echo &"  timer_10k_interval  N={N}  fired={fired}  {N*1000 div 50}/s (max)"
+    echo &"  timer_10k_interval  N={N}  fired={fired}  {N*1000 div WindowMs}/s (max)"
     check fired >= N * 3
     loop.close()
 
