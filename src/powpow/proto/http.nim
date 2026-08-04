@@ -372,6 +372,13 @@ proc scanHeaders(p: HttpParser): bool =
       # Process header line from lineStart to i
       let lineLen = i - lineStart
       if lineLen > 0:
+        # Reject obs-fold / leading-whitespace header lines (RFC 7230 §3.2.4):
+        # a header whose name begins with SP/HTAB is a smuggling/parsing hazard.
+        let lc = char(buf[lineStart])
+        if lc == ' ' or lc == '\t':
+          p.phase = PhaseError
+          p.errorCode = Http400
+          return false
         inc p.headerCount
         if p.headerCount > MaxHeaders:
           p.phase = PhaseError
@@ -441,8 +448,30 @@ proc scanHeaders(p: HttpParser): bool =
                 var valStart = lineStart + teKey.len
                 while valStart < i and char(buf[valStart]) == ' ':
                   inc valStart
-                if i - valStart >= 7:
-                  p.transferChunked = true
+                # Only enable chunked framing when the FINAL comma-separated
+                # token is exactly "chunked" (RFC 7230 §3.3.1). A TE value like
+                # "gzip" or "identity" must NOT enable chunked body parsing.
+                var j = i - 1
+                while j >= valStart and (char(buf[j]) == ' ' or char(buf[j]) == '\t'):
+                  dec j
+                let tokEnd = j + 1
+                while j >= valStart and char(buf[j]) != ',':
+                  dec j
+                var tokStart = j + 1
+                while tokStart < tokEnd and
+                      (char(buf[tokStart]) == ' ' or char(buf[tokStart]) == '\t'):
+                  inc tokStart
+                let tokLen = tokEnd - tokStart
+                if tokLen == 7:
+                  const chunkedTok = "chunked"
+                  var isChunked = true
+                  for k in 0 ..< 7:
+                    let ch = char(buf[tokStart + k])
+                    if ch != chunkedTok[k] and ch != (char(ord(chunkedTok[k]) xor 32)):
+                      isChunked = false
+                      break
+                  if isChunked:
+                    p.transferChunked = true
 
         # Quick check for Connection: close
         if not matched and lineLen >= 12:

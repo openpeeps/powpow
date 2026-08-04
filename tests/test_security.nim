@@ -176,6 +176,33 @@ test "test_negative_content_length_rejected":
   assert parser.isError(), "negative CL should be rejected"
   assert parser.error() == Http400
 
+test "test_non_chunked_transfer_encoding_does_not_enable_chunked":
+  # Previously ANY Transfer-Encoding value >= 7 chars enabled chunked framing
+  # (e.g. "gzipfoo"). Only a final "chunked" token may do so — a non-chunked TE
+  # must not make the parser wait for a chunked body.
+  let raw = "POST /x HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: gzipfoo\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  assert parser.isComplete(),
+    "non-chunked TE value must not enable chunked framing (request completes)"
+
+test "test_transfer_encoding_chunked_as_final_token_enabled":
+  # "gzip, chunked" — chunked is final → chunked framing enabled.
+  let raw = "POST /x HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: gzip, chunked\r\n\r\n" &
+            "3\r\nabc\r\n0\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  assert parser.isComplete(), "chunked body should parse when TE ends in chunked"
+
+test "test_leading_whitespace_header_rejected":
+  # obs-fold / leading-whitespace header lines are a smuggling hazard and must
+  # be rejected (previously tolerated as generic headers).
+  let raw = "GET /x HTTP/1.1\r\nHost: localhost\r\n Transfer-Encoding: chunked\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  assert parser.isError(), "leading-whitespace header line should be rejected"
+  assert parser.error() == Http400
+
 test "test_malformed_content_length_rejected":
   let raw = "GET /mal HTTP/1.1\r\nHost: localhost\r\nContent-Length: abc\r\n\r\n"
   let parser = newHttpParser()
@@ -536,6 +563,63 @@ test "test_ws_rejects_huge_fragmented_message_unlimited_mode":
   ws.parseWsFrames(frame)
   assert ws.conn.state != Connected,
     "oversized first fragment must be rejected in unlimited mode"
+  loop.close()
+
+test "test_ws_handshake_timeout_closes_stalled_connections":
+  # A client that connects and never sends handshake data must be closed by the
+  # handshake timeout (previously handshake sessions grew unboundedly — a
+  # handshake-stall memory/resource DoS).
+  let loop = newLoop()
+  var wss = newWsServer(loop)
+  wss.handshakeTimeoutMs = 120
+  wss.listen("127.0.0.1", 29960)
+
+  var closed = false
+  loop.connect("127.0.0.1", 29960,
+    onConnect = proc(conn: Connection) =
+      discard  # stall: send nothing, never complete the HTTP upgrade
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) = discard,
+    onClose = proc(conn: Connection) = closed = true,
+  )
+
+  var polls = 0
+  while not closed and polls < 10000:
+    loop.poll(1)
+    inc polls
+  assert closed, "stalled handshake connection should be closed by timeout"
+  assert wss.handshakeCount() == 0,
+    "stalled handshake sessions must be cleaned up"
+  wss.close()
+  loop.close()
+
+test "test_ws_handshake_sessions_bounded":
+  # maxHandshakeSessions caps in-flight handshakes; excess connections are
+  # rejected at accept time.
+  let loop = newLoop()
+  var wss = newWsServer(loop)
+  wss.handshakeTimeoutMs = 2000
+  wss.maxHandshakeSessions = 2
+  wss.listen("127.0.0.1", 29961)
+
+  for i in 0 ..< 3:
+    loop.connect("127.0.0.1", 29961,
+      onConnect = proc(conn: Connection) =
+        discard  # stall the handshake
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) = discard,
+      onClose = proc(conn: Connection) = discard,
+    )
+    # drive the loop so the accept callback runs and the cap is enforced
+    var p = 0
+    while p < 400:
+      loop.poll(1)
+      inc p
+
+  # the cap is 2, so at most 2 sessions survive at once
+  assert wss.handshakeCount() <= 2,
+    "handshake sessions must be bounded, got " & $wss.handshakeCount()
+  wss.close()
   loop.close()
 
 test "test_ws_rejects_unmasked_frame":

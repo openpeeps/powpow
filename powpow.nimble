@@ -18,7 +18,7 @@ task test, "Run all tests":
   exec "nim c -r tests/test_security.nim"
 
 task testSmuggler, "Fuzz powpow with the smuggler package (requires smuggler installed)":
-  exec "nim c -r tests/test_smuggler_integration.nim"
+  exec "nim c -r --threads:on --path:\"$HOME/Development/packages/smuggler/src\" tests/test_smuggler_integration.nim"
 
 # Dependencies
 

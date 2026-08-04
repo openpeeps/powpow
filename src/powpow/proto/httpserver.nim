@@ -53,7 +53,9 @@ type
     sessionStreamFile: File
     sessionStreamPath: string
     streamer: MultipartStreamerRef
-    idleTimer: TimerId   # pending idle/read timeout (TimerId(0) = none)
+    conn: Connection            ## back-reference used by the timeout sweep
+    lastActive: int64            ## monoMs of the last data/activity
+    idleAfter: int64             ## monoMs when the last request completed (idle)
 
   HttpServer* = ref object
     tcpServer: TcpServer
@@ -69,6 +71,12 @@ type
     maxConnections*: int
     maxPipelineDepth*: int
     readTimeoutMs*: int
+    timeoutSweepMs*: int
+      ## How often the lazy timeout sweep runs (ms). The sweep closes
+      ## connections that exceed readTimeoutMs (mid-request) or keepAliveMs
+      ## (idle) with one periodic pass over active connections — avoiding a
+      ## per-request timer add/cancel on the hot path.
+    sweepTimer: TimerId
 
 const
   DefaultKeepAliveMs* = 5_000
@@ -720,7 +728,9 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     maxBodySize: 0,
     maxConnections: 0,
     maxPipelineDepth: 0,
-    readTimeoutMs: 30_000
+    readTimeoutMs: 30_000,
+    timeoutSweepMs: 200,
+    sweepTimer: TimerId(0)
   )
   if populate:
     srv.populatePools()
@@ -760,9 +770,6 @@ proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
 proc removeSession*(server: HttpServer, conn: Connection) =
   let ctx = cast[ConnHttp](conn.data)
   if ctx == nil: return
-  if ctx.idleTimer != TimerId(0):
-    server.loop.cancelTimer(ctx.idleTimer)
-    ctx.idleTimer = TimerId(0)
   server.connRoots.del(conn.fd.int)
   if ctx.sessionStreamPath.len > 0:
     ctx.sessionStreamFile.close()
@@ -774,27 +781,53 @@ proc removeSession*(server: HttpServer, conn: Connection) =
   releaseParser(server, ctx.parser)
   conn.data = nil
 
-proc armIdleTimeout(server: HttpServer, conn: Connection, delayMs: int) =
-  ## (Re)arm the per-connection idle/read timeout. A connection that sends no
-  ## data for `delayMs` is closed. 0 disables the timeout.
-  ## Enforces both readTimeoutMs (partial/slow-request stalls) and keepAliveMs
-  ## (idle keep-alive connections) — previously declared but never enforced,
-  ## leaving the server open to slowloris / connection-exhaustion attacks.
-  if delayMs <= 0: return
+proc markActivity(server: HttpServer, conn: Connection) =
+  ## Record data arrival on a connection (read-timeout window restarts).
   let ctx = cast[ConnHttp](conn.data)
-  if ctx == nil or conn.state != Connected: return
-  if ctx.idleTimer != TimerId(0):
-    server.loop.cancelTimer(ctx.idleTimer)
-  ctx.idleTimer = server.loop.addTimer(delayMs) do (id: int):
-    ctx.idleTimer = TimerId(0)
-    if conn.state != Connected or conn.data == nil:
-      return
-    if conn.sendFileFd >= 0:
-      # A zero-copy response is mid-flight; defer until it completes.
-      server.armIdleTimeout(conn, server.keepAliveMs)
-      return
-    server.removeSession(conn)
-    conn.close()
+  if ctx == nil: return
+  ctx.lastActive = monoMs()
+
+proc markIdle(server: HttpServer, conn: Connection) =
+  ## Mark a connection idle: a request just completed, so the keep-alive
+  ## timeout now applies.
+  let ctx = cast[ConnHttp](conn.data)
+  if ctx == nil: return
+  ctx.idleAfter = monoMs()
+
+proc closeStale(server: HttpServer, ctx: ConnHttp) =
+  ## Close a connection that exceeded its read/keep-alive timeout.
+  if ctx.conn == nil or ctx.conn.state != Connected: return
+  if ctx.conn.sendFileFd >= 0: return  # zero-copy response in flight
+  server.removeSession(ctx.conn)
+  ctx.conn.close()
+
+proc sweepTimeouts(server: HttpServer) =
+  ## Lazy timeout enforcement: a single periodic pass over active connections.
+  ## Enforces readTimeoutMs (mid-request stalls) and keepAliveMs (idle
+  ## keep-alive) without any per-request timer add/cancel on the hot path.
+  if server.keepAliveMs <= 0 and server.readTimeoutMs <= 0:
+    return
+  let now = monoMs()
+  var stale: seq[ConnHttp]
+  for ctx in server.connRoots.values:
+    if ctx.idleAfter >= ctx.lastActive:
+      # Idle — waiting for the next request → keep-alive applies.
+      if server.keepAliveMs > 0 and now - ctx.idleAfter > server.keepAliveMs:
+        stale.add(ctx)
+    else:
+      # A request is in progress → read timeout applies.
+      if server.readTimeoutMs > 0 and now - ctx.lastActive > server.readTimeoutMs:
+        stale.add(ctx)
+  for ctx in stale:
+    server.closeStale(ctx)
+
+proc startTimeoutSweep(server: HttpServer) =
+  ## Arm the single server-wide timeout sweep timer (one timer per server, not
+  ## per request). `timeoutSweepMs` is the sweep granularity.
+  if server.sweepTimer != TimerId(0): return
+  let interval = max(server.timeoutSweepMs, 25)
+  server.sweepTimer = server.loop.addInterval(interval) do (id: int):
+    server.sweepTimeouts()
 
 # ── Request dispatch ─────────────────────────────────────────────────────────
 
@@ -822,11 +855,13 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   let ctx = if conn.data != nil: cast[ConnHttp](conn.data)
             else:
               let c = ConnHttp(parser: acquireParser(server))
+              c.conn = conn
+              c.lastActive = monoMs()
               conn.data = cast[pointer](c)
               server.connRoots[conn.fd.int] = c
               c
   let p = ctx.parser
-  server.armIdleTimeout(conn, server.readTimeoutMs)
+  server.markActivity(conn)
   try:
     p.feed(data)
   except MultipartSizeLimitError:
@@ -900,12 +935,12 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
       break
 
   # All pipelined requests handled. If at least one request completed, the
-  # connection is now idle waiting for the next one — switch from the read
-  # timeout to the keep-alive timeout. If the current request is still
-  # incomplete (slowloris), keep the read timeout armed (set at the top).
+  # connection is now idle waiting for the next one — the timeout sweep will
+  # apply keepAliveMs. If the current request is still incomplete (slowloris),
+  # it stays in the read-timeout state until readTimeoutMs.
   if conn.state == Connected and conn.data != nil and conn.sendFileFd < 0 and
      pipelineCount > 0:
-    server.armIdleTimeout(conn, server.keepAliveMs)
+    server.markIdle(conn)
 
   if p.isError():
     if ctx.streamer != nil:
@@ -944,16 +979,21 @@ proc buildTcpServer(server: HttpServer): TcpServer =
 
 proc listen*(server: HttpServer, address: string, port: int) =
   server.tcpServer = server.buildTcpServer()
+  server.startTimeoutSweep()
   server.tcpServer.listen(address, port)
 
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =
     ## Listen on a Unix domain socket. `mode` is the file permission bits for the socket.
     server.tcpServer = server.buildTcpServer()
+    server.startTimeoutSweep()
     server.tcpServer.listenUnix(path, mode)
 
 proc close*(server: HttpServer) =
   ## Close the server and all active connections
+  if server.sweepTimer != TimerId(0):
+    server.loop.cancelTimer(server.sweepTimer)
+    server.sweepTimer = TimerId(0)
   if server.tcpServer != nil:
     server.tcpServer.close()
   server.connRoots.clear()

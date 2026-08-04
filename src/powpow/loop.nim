@@ -42,7 +42,7 @@ type
 
 # ── Timer wheel helpers ──────────────────────────────────────────────────────
 
-proc monoMs(): int64 {.inline.} =
+proc monoMs*(): int64 {.inline.} =
   getMonoTime().ticks div 1_000_000
 
 # ── Watcher ──────────────────────────────────────────────────────────────────
