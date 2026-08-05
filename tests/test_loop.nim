@@ -5,16 +5,9 @@
 import ../src/powpow
 import std/[times, unittest, monotimes, os, net]
 
-when defined(windows):
-  proc c_pipe(fds: var array[2, cint]): cint {.
-    importc: "_pipe", header: "<io.h>".}
-  proc c_read(fd: cint, buf: pointer, count: cint): cint {.
-    importc: "_read", header: "<io.h>".}
-  proc c_write(fd: cint, buf: pointer, count: cint): cint {.
-    importc: "_write", header: "<io.h>".}
-  proc c_close(fd: cint): cint {.
-    importc: "_close", header: "<io.h>".}
-else:
+when not defined(windows):
+  # fd eventing is exercised with a pipe. The Windows iocp backend can only
+  # register IOCP-compatible handles (sockets), so this is POSIX-only.
   import std/posix
   proc c_pipe(fds: var array[2, cint]): cint = posix.pipe(fds)
   proc c_read(fd: cint, buf: pointer, count: cint): cint =
@@ -76,34 +69,35 @@ test "test_timer_ordering":
 
 # ── Test 5: fd eventing via pipe ─────────────────────────────────────────────
 
-test "test_fd_eventing":
-  # Create a pipe; write to one end, poll the other.
-  var fds: array[2, cint]
-  let ret = c_pipe(fds)
-  doAssert ret == 0, "pipe() failed"
+when not defined(windows):
+  test "test_fd_eventing":
+    # Create a pipe; write to one end, poll the other.
+    var fds: array[2, cint]
+    let ret = c_pipe(fds)
+    doAssert ret == 0, "pipe() failed"
 
-  var gotRead = false
-  let loop = newLoop()
+    var gotRead = false
+    let loop = newLoop()
 
-  loop.register(fds[0].int, {Read}) do (fd: int, ev: set[EventType]):
-    gotRead = true
-    # drain the pipe
-    var buf: array[64, char]
-    discard c_read(fd.cint, addr buf[0], buf.len.cint)
-    loop.unregister(fd)
-    loop.stop()
+    loop.register(fds[0].int, {Read}) do (fd: int, ev: set[EventType]):
+      gotRead = true
+      # drain the pipe
+      var buf: array[64, char]
+      discard c_read(fd.cint, addr buf[0], buf.len.cint)
+      loop.unregister(fd)
+      loop.stop()
 
-  # Write a byte after a short delay to give the loop time to poll.
-  discard loop.addTimer(5) do (id: int):
-    var msg = "hello"
-    discard c_write(fds[1], addr msg[0], msg.len.cint)
+    # Write a byte after a short delay to give the loop time to poll.
+    discard loop.addTimer(5) do (id: int):
+      var msg = "hello"
+      discard c_write(fds[1], addr msg[0], msg.len.cint)
 
-  loop.run()
-  doAssert gotRead, "fd read event should have fired"
+    loop.run()
+    doAssert gotRead, "fd read event should have fired"
 
-  discard c_close(fds[0])
-  discard c_close(fds[1])
-  loop.close()
+    discard c_close(fds[0])
+    discard c_close(fds[1])
+    loop.close()
 
 test "test_is_running":
   let loop = newLoop()
