@@ -295,11 +295,14 @@ when not defined(windows):
       loop.connect("127.0.0.1", 20097,
         onConnect = proc(conn: Connection) =
           clientConn = conn
-          # First chunk: headers + partial body, so the body is still incoming
-          # and the auto-streaming (with the per-file cap) activates.
+          # Send headers + a partial body so the upload is still incoming and
+          # the auto-streaming (with the per-file cap) activates. The file part
+          # already exceeds the cap inside this chunk, so the server must reject
+          # with 413 without requiring the rest of the body. (A second pending
+          # send is deliberately avoided: if the client still has bytes queued
+          # when the server responds and closes, the client's failed write can
+          # tear down its socket before the response is read on some platforms.)
           discard conn.send(headers & body[0 ..< 512])
-          discard loop.addTimer(20) do (id: int):
-            discard conn.send(body[512 .. ^1])
         ,
         onData = proc(conn: Connection, data: openArray[byte]) =
           responseData.add(@data)

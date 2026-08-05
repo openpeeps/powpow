@@ -442,7 +442,16 @@ proc shutdown*(conn: Connection) =
 proc closeAfterDrain*(conn: Connection) {.inline.} =
   if conn.state == Closed: return
   if conn.writeBuf.len == 0:
-    conn.close()
+    if conn.tlsState == TlsOff:
+      # The response was already handed to the kernel. Shut the write side down
+      # gracefully (FIN) instead of the SO_LINGER=0 RST close: an immediate RST
+      # discards the peer's unread receive buffer on Linux, silently dropping
+      # just-sent responses. The connection is reclaimed when the peer closes
+      # (handleClientRead sees EOF) or by the timeout sweep.
+      conn.shutdown()
+      conn.loop.modify(conn.fd.int, {Read})
+    else:
+      conn.close()
   else:
     conn.closeAfterFlush = true
 
@@ -536,7 +545,7 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
 # ── TcpServer ────────────────────────────────────────────────────────────────
 
 proc handleClientRead(conn: Connection, onData: OnData, onClose: OnClose) =
-  while conn.state == Connected:
+  while conn.state == Connected or conn.state == Closing:
     if conn.tlsState == TlsHandshaking:
       # The handshake is driven from the event-loop callback, not here.
       return
@@ -550,6 +559,10 @@ proc handleClientRead(conn: Connection, onData: OnData, onClose: OnClose) =
       else:
         n = sockRecv(conn.fd, addr conn.readBuf[0], conn.readBufLen)
     if n > 0:
+      if conn.state != Connected:
+        # The write side was shut down (graceful close); discard any straggler
+        # data and keep waiting for the peer's FIN.
+        continue
       onData(conn, conn.readBuf.toOpenArray(0, n - 1))
       if conn.state != Connected:
         if onClose != nil: onClose(conn)

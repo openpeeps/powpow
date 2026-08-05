@@ -800,8 +800,8 @@ proc markIdle(server: HttpServer, conn: Connection) =
 
 proc closeStale(server: HttpServer, ctx: ConnHttp) =
   ## Close a connection that exceeded its read/keep-alive timeout.
-  if ctx.conn == nil or ctx.conn.state != Connected: return
-  if ctx.conn.sendFileFd >= 0: return  # zero-copy response in flight
+  if ctx.conn == nil or ctx.conn.state == Closed: return
+  if ctx.conn.state == Connected and ctx.conn.sendFileFd >= 0: return  # zero-copy response in flight
   server.removeSession(ctx.conn)
   ctx.conn.close()
 
@@ -814,6 +814,12 @@ proc sweepTimeouts(server: HttpServer) =
   let now = monoMs()
   var stale: seq[ConnHttp]
   for ctx in server.connRoots.values:
+    if ctx.conn != nil and ctx.conn.state == Closing:
+      # Graceful close in progress (response sent, FIN sent): reclaim if the
+      # peer never finishes reading/closing.
+      if server.keepAliveMs > 0 and now - ctx.lastActive > server.keepAliveMs:
+        stale.add(ctx)
+      continue
     if ctx.idleAfter >= ctx.lastActive:
       # Idle — waiting for the next request → keep-alive applies.
       if server.keepAliveMs > 0 and now - ctx.idleAfter > server.keepAliveMs:
