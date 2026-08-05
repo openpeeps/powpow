@@ -6,6 +6,8 @@ testresults/
 /tests/*
 !/tests/*.nim
 !/tests/*.nims
+!/tests/fuzz
+!/tests/fuzz/*.cfg
 /examples/*
 !/examples/*.nim
 !/examples/*.nims
