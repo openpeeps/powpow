@@ -4,7 +4,7 @@
 ## (split across boundaries), text fields, file uploads, partial boundary
 ## matches spanning feeds, mixed parts, edge cases.
 
-import ../src/powpow/proto/multipart
+import pkg/multipart
 import std/[os, unittest, strutils]
 
 const
