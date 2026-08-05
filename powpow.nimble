@@ -12,7 +12,7 @@ requires "nim >= 2.2.0"
 requires "nimsimd >= 0.1.0"
 requires "mimedb >= 0.1.0"
 requires "openparser >= 0.1.6"
-requires "multipart >= 0.1.2"
+requires "multipart >= 0.1.3"
 requires "checksums > = 0.1.0"
 
 # Tasks
