@@ -327,13 +327,34 @@ proc sendv*(conn: Connection,
   if totalLen == 0: return 0
 
   if conn.tlsState != TlsOff:
-    # No writev over TLS: coalesce and send through SSL_write.
-    var buf = newSeq[byte](totalLen)
+    # No writev over TLS: coalesce and send through SSL_write. The coalesce
+    # buffer is bounded so an attacker-controlled response body reflected via
+    # sendv cannot force an arbitrarily large allocation (reflection DoS);
+    # oversized payloads stream through a bounded chunk buffer instead.
+    const MaxTlsCoalesce = 1 shl 20  # 1 MB
+    if totalLen <= MaxTlsCoalesce:
+      var buf = newSeq[byte](totalLen)
+      var pos = 0
+      for part in parts:
+        copyMem(addr buf[pos], part.data, part.len)
+        pos += part.len
+      return conn.send(buf)
+    var chunk = newSeq[byte](MaxTlsCoalesce)
     var pos = 0
     for part in parts:
-      copyMem(addr buf[pos], part.data, part.len)
-      pos += part.len
-    return conn.send(buf)
+      var off = 0
+      while off < part.len:
+        let n = min(part.len - off, chunk.len - pos)
+        copyMem(addr chunk[pos],
+                cast[ptr UncheckedArray[byte]](cast[uint](part.data) + off.uint), n)
+        pos += n
+        off += n
+        if pos == chunk.len:
+          discard conn.send(chunk.toOpenArray(0, pos - 1))
+          pos = 0
+    if pos > 0:
+      discard conn.send(chunk.toOpenArray(0, pos - 1))
+    return totalLen
 
   if conn.writeBuf.len > 0:
     for part in parts:

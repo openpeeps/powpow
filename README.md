@@ -108,10 +108,6 @@ Transfer/sec:     26.98MB
 
 ```
 
-### ❤ Contributions & Support
-- 🐛 Found a bug? [Create a new Issue](https://github.com/openpeeps/powpow/issues)
-- 👋 Wanna help? [Fork it!](https://github.com/openpeeps/powpow/fork)
-
 ### Security
 
 Need to take input validation and DoS-resistance seriously. A dedicated security
@@ -140,8 +136,24 @@ covered by regression tests in [`tests/test_security.nim`](tests/test_security.n
 - **Path-confusion-proof static serving** — `serveFile` requires a real path
   boundary under `fsRoot`, so a sibling directory sharing the prefix
   (e.g. `/var/www2`) can no longer be served.
+- **Symlink-safe static serving** — served paths are resolved with `realpath`
+  and must stay under `fsRoot`; a symlink inside the root pointing outside is
+  rejected with `403`.
+- **Multipart per-file limits** — `server.maxFileSize` bounds a single uploaded
+  part independently of the total body cap (violations reply `413`).
+- **WebSocket handshake hardening** — `handshakeTimeoutMs` closes connections
+  that never complete the HTTP→WebSocket upgrade, and `maxHandshakeSessions`
+  caps in-flight handshakes (handshake-stall DoS defense).
+- **Strict header parsing** — obs-fold / leading-whitespace header lines are
+  rejected (`400`), and `Transfer-Encoding` enables chunked framing only when
+  the final token is exactly `chunked`.
+- **Thread-safe rate limiter** — `RateLimiter` guards its bucket table with a
+  lock, so it can be shared across multi-threaded server workers.
+- **TLS reflection guards** — the TLS `sendv` coalesce buffer is capped
+  (1 MB), so an attacker-controlled response echoed over TLS cannot force an
+  arbitrarily large allocation.
 
-**Fuzzing** — [`t-reqs`](https://github.com/openpeeps/treqs) is a grammar-based
+[Smuggler](https://github.com/openpeeps/smuggler) is a grammar-based
 HTTP/1.x request-smuggling fuzzer built for this library: it generates and
 mutates requests from a context-free grammar, detects CL/TE desyncs with an
 in-process oracle, and drives live servers with the two-request
@@ -150,17 +162,21 @@ response-pairing technique.
 #### Security roadmap
 
 - [ ] Coverage-guided fuzzing of the HTTP / WebSocket / multipart parsers
-      (libFuzzer & nim-drchaos adapters in `treqs`)
+      (libFuzzer & nim-drchaos adapters in `smuggler`)
 - [ ] ASan/UBSan sanitizer build wired into CI
 - [ ] Stream body bytes before first-packet buffering (avoid peak RAM on large
       single-packet uploads)
-- [ ] Multipart per-file size limits wired to server configuration
-- [ ] Symlink-safe static serving (realpath checks)
-- [ ] WebSocket handshake timeout and handshake-session bound
-- [ ] Rate-limiter thread-safety in multi-threaded mode
-- [ ] Strict header parsing (reject obs-fold/leading-whitespace header lines,
+- [x] Multipart per-file size limits wired to server configuration
+- [x] Symlink-safe static serving (realpath checks)
+- [x] WebSocket handshake timeout and handshake-session bound
+- [x] Rate-limiter thread-safety in multi-threaded mode
+- [x] Strict header parsing (reject obs-fold/leading-whitespace header lines,
       non-`chunked` `Transfer-Encoding` tokens)
-- [ ] Response-reflection guards for large attacker-controlled echoes under TLS
+- [x] Response-reflection guards for large attacker-controlled echoes under TLS
+
+### ❤ Contributions & Support
+- 🐛 Found a bug? [Create a new Issue](https://github.com/openpeeps/powpow/issues)
+- 👋 Wanna help? [Fork it!](https://github.com/openpeeps/powpow/fork)
 
 |  |  |
 |---|---|

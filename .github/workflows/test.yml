@@ -28,6 +28,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
+      # tests/config.nims compiles tests against the local multipart checkout
+      # (per-file size-limit enforcement); make it available at that path.
+      - run: |
+          mkdir -p "$HOME/Development/packages"
+          git clone --depth 1 https://github.com/openpeeps/multipart \
+            "$HOME/Development/packages/multipart"
       - run: nimble test -d:release
 
   smuggler:
@@ -45,6 +51,9 @@ jobs:
       # binary for the live two-request desync campaign.
       - run: nimble install https://github.com/openpeeps/smuggler
       - run: |
+          mkdir -p "$HOME/Development/packages"
           git clone --depth 1 https://github.com/openpeeps/smuggler \
             "$HOME/Development/packages/smuggler"
+          git clone --depth 1 https://github.com/openpeeps/multipart \
+            "$HOME/Development/packages/multipart"
       - run: nimble testSmuggler

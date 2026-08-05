@@ -68,6 +68,10 @@ type
     resPool:   seq[HttpResponse]
     keepAliveMs: int
     maxBodySize*: int64
+    maxFileSize*: int64
+      ## Per-file upload cap for multipart bodies (0 = fall back to
+      ## maxBodySize's effective cap). Bounds disk usage of a single part
+      ## independently of the total body size.
     maxConnections*: int
     maxPipelineDepth*: int
     readTimeoutMs*: int
@@ -889,10 +893,13 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     let uploadCap = if server.maxBodySize > 0: server.maxBodySize
                     else: int64(MaxStreamBodySize)
     if ct.startsWith("multipart/form-data") and p.contentLength > 0:
+      let fileCap = if server.maxFileSize > 0: server.maxFileSize
+                    else: uploadCap
+      echo "[dbg] multipart streamer: maxBodySize=", uploadCap, " maxFileSize=", fileCap
       ctx.streamer = newMultipartStreamerRef(ct,
         bodySize = p.contentLength.int64,
         sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
-                                       maxFileSize: uploadCap))
+                                       maxFileSize: fileCap))
       let ms = ctx.streamer
       p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
         ms[].feed(data)
@@ -1032,6 +1039,29 @@ proc getLoop*(server: HttpServer): Loop {.inline.} =
   ## Get the event loop associated with this server.
   server.loop
 
+when not defined(windows):
+  proc c_realpath(path: cstring, resolved: cstring): cstring {.
+    importc: "realpath", header: "<stdlib.h>".}
+
+proc resolveReal*(path: string): string =
+  ## Canonical absolute path with symlinks resolved. A symlink inside a
+  ## serve root that points outside must not escape the root, so static file
+  ## serving verifies the resolved path. Falls back to absolutePath when the
+  ## path does not exist or on Windows (best-effort).
+  when not defined(windows):
+    var buf: array[4096, char]
+    let r = c_realpath(path.cstring, cast[cstring](addr buf[0]))
+    if r != nil:
+      result = $cast[cstring](addr buf[0])
+      if result.len > 0: return
+    result = absolutePath(path)
+  else:
+    result = absolutePath(path)
+
+proc withinRoot*(root, path: string): bool =
+  ## True when `path` is `root` itself or sits directly under it.
+  path == root or path.startsWith(root & "/")
+
 proc serveStatic*(res: HttpResponse, req: HttpRequest,
                   urlPrefix: string, fsRoot: string,
                   indexFiles: seq[string] = @["index.html", "index.htm"]): bool =
@@ -1047,6 +1077,11 @@ proc serveStatic*(res: HttpResponse, req: HttpRequest,
     res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
     return true
   let fullPath = fsRoot / relPath
+  # Reject symlink escapes: a symlink inside fsRoot pointing outside would
+  # otherwise be served. Resolve both and require the real path under the root.
+  if not withinRoot(resolveReal(fsRoot), resolveReal(fullPath)):
+    res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
+    return true
   if dirExists(fullPath):
     for index in indexFiles:
       let indexPath = fullPath / index
@@ -1092,6 +1127,11 @@ proc serveFile*(res: HttpResponse, req: HttpRequest, path: string;
       # check would also accept sibling dirs sharing the prefix (e.g.
       # fsRoot="/var/www" matching "/var/www2/..."), a path-confusion escape.
       if path != fsRoot and not path.startsWith(fsRoot & "/"):
+        res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
+        return true
+      # Symlink escape: a symlink inside fsRoot pointing outside must not be
+      # served. Resolve both sides and verify the real path stays under the root.
+      if not withinRoot(resolveReal(fsRoot), resolveReal(path)):
         res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
         return true
 

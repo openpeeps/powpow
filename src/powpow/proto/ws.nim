@@ -114,6 +114,13 @@ type
     loop:      Loop
     conns:     Table[int, WsConnection]  ## fd → connection
     maxFrameSize*: int
+    handshakeSessions: Table[int, HttpParser]  ## fd → pre-upgrade HTTP parser
+    handshakeTimers:   Table[int, TimerId]     ## fd → handshake timeout timer
+    handshakeTimeoutMs*: int
+      ## Close connections that never complete the HTTP→WebSocket handshake
+      ## within this many ms (0 = disabled). Prevents handshake-stall DoS.
+    maxHandshakeSessions*: int
+      ## Hard cap on in-flight handshake sessions (0 = unlimited).
     # User callbacks (applied to all connections)
     defaultOpen:    WsOpenCb
     defaultMessage: WsMessageCb
@@ -553,6 +560,10 @@ proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer
     loop:      loop,
     conns:     initTable[int, WsConnection](64),
     maxFrameSize: maxFrameSize,
+    handshakeSessions: initTable[int, HttpParser](64),
+    handshakeTimers:   initTable[int, TimerId](64),
+    handshakeTimeoutMs: 0,   # set to DefaultHandshakeTimeoutMs at listen()
+    maxHandshakeSessions: 0,
   )
 
 proc newWsServer*(maxFrameSize: int = DefaultMaxFrameSize): WsServer =
@@ -579,14 +590,49 @@ proc onError*(wss: WsServer, cb: WsErrorCb) =
   ## Set the callback for errors.
   wss.defaultError = cb
 
+const DefaultHandshakeTimeoutMs = 10_000
+
+proc handshakeCount*(wss: WsServer): int {.inline.} =
+  ## Number of connections currently in the HTTP→WebSocket handshake phase.
+  wss.handshakeSessions.len
+
+proc armHandshakeTimeout(wss: WsServer, conn: Connection) =
+  ## Arm a timer that closes the connection if the HTTP→WebSocket handshake
+  ## does not complete in time (slowloris-style handshake-stall defense).
+  let fd = conn.fd.int
+  if wss.handshakeTimeoutMs <= 0: return
+  if fd in wss.handshakeTimers:
+    wss.loop.cancelTimer(wss.handshakeTimers[fd])
+  wss.handshakeTimers[fd] = wss.loop.addTimer(wss.handshakeTimeoutMs) do (id: int):
+    wss.handshakeTimers.del(fd)
+    if fd notin wss.handshakeSessions:
+      return  # handshake already completed
+    wss.handshakeSessions.del(fd)
+    conn.close()
+
+proc endHandshake(wss: WsServer, fd: int) =
+  ## Tear down a handshake session (and its timeout timer).
+  wss.handshakeSessions.del(fd)
+  if fd in wss.handshakeTimers:
+    wss.loop.cancelTimer(wss.handshakeTimers[fd])
+    wss.handshakeTimers.del(fd)
+
 proc listen*(wss: WsServer, address: string, port: int) =
   ## Bind and start accepting WebSocket connections on a dedicated port.
   # We need per-connection HTTP parsers for the handshake phase.
-  var handshakeSessions = initTable[int, HttpParser](64)
+  if wss.handshakeTimeoutMs == 0:
+    wss.handshakeTimeoutMs = DefaultHandshakeTimeoutMs
 
   wss.tcpServer = newTcpServer(wss.loop,
     onAccept = proc(conn: Connection) =
-      handshakeSessions[conn.fd.int] = newHttpParser()
+      let fd = conn.fd.int
+      # Bound the number of in-flight handshakes (handshake-stall DoS defense)
+      if wss.maxHandshakeSessions > 0 and
+         wss.handshakeSessions.len >= wss.maxHandshakeSessions:
+        conn.close()
+        return
+      wss.handshakeSessions[fd] = newHttpParser()
+      wss.armHandshakeTimeout(conn)
     ,
     onData = proc(conn: Connection, data: openArray[byte]) =
       let fd = conn.fd.int
@@ -597,10 +643,11 @@ proc listen*(wss: WsServer, address: string, port: int) =
         return
 
       # Not yet upgraded — feed into HTTP parser for handshake
-      if fd notin handshakeSessions:
-        handshakeSessions[fd] = newHttpParser()
+      if fd notin wss.handshakeSessions:
+        wss.handshakeSessions[fd] = newHttpParser()
+        wss.armHandshakeTimeout(conn)
 
-      let parser = addr handshakeSessions[fd]
+      let parser = addr wss.handshakeSessions[fd]
       let phase = parser[].feed(data)
 
       if parser[].isComplete():
@@ -614,14 +661,14 @@ proc listen*(wss: WsServer, address: string, port: int) =
            wsVersion != "13":
           discard conn.send("HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request")
           conn.close()
-          handshakeSessions.del(fd)
+          wss.endHandshake(fd)
           return
 
         # Check if there are remaining bytes after the HTTP headers
         let remaining = parser[].getRemainingData()
 
         # Clean up the HTTP parser session
-        handshakeSessions.del(fd)
+        wss.endHandshake(fd)
 
         # Send 101 Switching Protocols
         conn.sendHandshake(clientKey)
@@ -696,11 +743,11 @@ proc listen*(wss: WsServer, address: string, port: int) =
         let badRequest = "Bad Request"
         discard conn.send("HTTP/1.1 400 Bad Request\r\nContent-Length: "& $(badRequest.len) & "\r\n\r\n" & badRequest)
         conn.close()
-        handshakeSessions.del(fd)
+        wss.endHandshake(fd)
     ,
     onClose = proc(conn: Connection) =
       let fd = conn.fd.int
-      handshakeSessions.del(fd)
+      wss.endHandshake(fd)
       if fd in wss.conns:
         let ws = wss.conns[fd]
         if not ws.onClose.isNil:
@@ -714,6 +761,10 @@ proc close*(wss: WsServer) =
   ## Shut down the WebSocket server.
   if wss.tcpServer != nil:
     wss.tcpServer.close()
+  for fd, id in wss.handshakeTimers:
+    wss.loop.cancelTimer(id)
+  wss.handshakeTimers.clear()
+  wss.handshakeSessions.clear()
   wss.conns.clear()
 
 # ── HTTP → WebSocket upgrade ─────────────────────────────────────────────────

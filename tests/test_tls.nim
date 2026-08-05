@@ -159,3 +159,58 @@ when not defined(windows):
     doAssert gotEcho, "STARTTLS upgrade echo should have completed"
     doAssert received == "hello after tls", "echo mismatch: " & received
     loop.close()
+
+  test "tls_sendv_large_echo":
+    # A payload larger than the TLS sendv coalesce cap (1 MB) must be accepted
+    # without an unbounded allocation (reflection guard) — sendv returns the
+    # full length and does not crash. (Full delivery of very large TLS bodies
+    # is a separate pre-existing write-path limitation.)
+    let (cert, key) = writeTestCert()
+    let serverCtx = newServerTlsContext(cert, key)
+    let loop = newLoop()
+    const PayloadLen = 2 * 1024 * 1024
+
+    let server = newTcpServer(loop,
+      onAccept = proc(conn: Connection) =
+        conn.wrapTls(serverCtx)
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        discard conn.send(data)
+      ,
+    )
+    server.listen("127.0.0.1", 29880)
+
+    var gotData = false
+    discard loop.addTimer(50) do (id: int):
+      let clientCtx = newClientTlsContext()
+      loop.connect("127.0.0.1", 29880,
+        onConnect = proc(conn: Connection) =
+          conn.wrapTls(clientCtx)
+          var payload = newSeq[byte](PayloadLen)
+          for i in 0 ..< PayloadLen:
+            payload[i] = byte(ord('A') + (i mod 26))
+          let n = conn.sendv([
+            (cast[ptr UncheckedArray[byte]](addr payload[0]), 1024 * 1024),
+            (cast[ptr UncheckedArray[byte]](addr payload[1024 * 1024]),
+             PayloadLen - 1024 * 1024),
+          ])
+          doAssert n == PayloadLen, "sendv should accept the full payload"
+        ,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          gotData = true   # echo arrives for at least the first TLS records
+        ,
+        onClose = proc(conn: Connection) =
+          server.close()
+          loop.stop()
+        ,
+      )
+
+    discard loop.addTimer(3000) do (id: int):
+      server.close()
+      loop.stop()
+
+    loop.run()
+    # The bounded-coalesce path accepted the full payload without defect and
+    # produced data (sendv return checked in onConnect).
+    doAssert gotData, "large TLS sendv should have produced data"
+    loop.close()

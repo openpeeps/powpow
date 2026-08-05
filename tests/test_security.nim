@@ -265,6 +265,59 @@ test "test_no_auto_multipart_streaming":
   assert streamerWasNil, "streamer should be nil until getMultipart() is called"
   assert multipartWorked, "getMultipart() should work when called explicitly"
 
+when not defined(windows):
+  test "test_multipart_per_file_limit_413":
+    # A multipart upload whose file part exceeds server.maxFileSize must be
+    # rejected with 413 (independently of the total body cap).
+    var responseData: seq[byte] = @[]
+    let loop = newLoop()
+  
+    let server = newHttpServer(loop)
+    server.maxFileSize = 100
+    server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+      res.status(Http200).send("OK")
+  
+    server.listen("127.0.0.1", 20097)
+  
+    let boundary = "MyBoundary"
+    let fileContent = repeat('X', 5000)  # 5 KB file part, cap is 100 bytes
+    let body = "--" & boundary & "\r\n" &
+               "Content-Disposition: form-data; name=\"file\"; filename=\"big.bin\"\r\n" &
+               "Content-Type: application/octet-stream\r\n\r\n" &
+               fileContent & "\r\n" &
+               "--" & boundary & "--\r\n"
+    let headers = "POST /upload HTTP/1.1\r\nHost: localhost\r\n" &
+                  "Content-Type: multipart/form-data; boundary=" & boundary & "\r\n" &
+                  "Content-Length: " & $body.len & "\r\n\r\n"
+  
+    discard loop.addTimer(50) do (id: int):
+      loop.connect("127.0.0.1", 20097,
+        onConnect = proc(conn: Connection) =
+          # First chunk: headers + partial body, so the body is still incoming
+          # and the auto-streaming (with the per-file cap) activates.
+          discard conn.send(headers & body[0 ..< 512])
+          discard loop.addTimer(20) do (id: int):
+            discard conn.send(body[512 .. ^1])
+        ,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          responseData.add(@data)
+          conn.close()
+        ,
+        onClose = proc(conn: Connection) =
+          server.close()
+          loop.stop()
+      )
+  
+    discard loop.addTimer(3000) do (id: int):
+      server.close()
+      loop.stop()
+  
+    loop.run()
+    loop.close()
+    let resp = cast[string](responseData)
+    assert "413" in resp,
+      "oversized multipart file part should be rejected with 413, got: '" & resp & "'"
+
 test "test_no_server_header_in_response":
   var responseData: seq[byte] = @[]
   let loop = newLoop()
@@ -445,6 +498,54 @@ test "test_send_file_huge_header_no_overflow":
   assert "200 OK" in resp,
     "should serve file with huge header, got: '" & resp[0 ..< min(resp.len, 120)] & "'"
   assert "X-Huge" in resp, "huge custom header must be present in response"
+
+when not defined(windows):
+  test "test_serve_file_rejects_symlink_escape":
+    # A symlink inside fsRoot pointing outside must be rejected (403).
+    let tmpRoot = getTempDir() / "powpow_symlink_root"
+    removeDir(tmpRoot)
+    createDir(tmpRoot)
+    let outside = getTempDir() / "powpow_symlink_secret.txt"
+    writeFile(outside, "SECRET-OUTSIDE")
+    createSymlink(outside, tmpRoot / "leak.txt")
+    defer:
+      removeDir(tmpRoot)
+      removeFile(outside)
+
+    var responseData: seq[byte] = @[]
+    let loop = newLoop()
+    let server = newHttpServer(loop)
+    server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+      {.gcsafe.}:
+        if not serveFile(res, req, tmpRoot / "leak.txt", fsRoot = tmpRoot):
+          res.sendError(Http404, "Not Found")
+    server.listen("127.0.0.1", 20100)
+
+    discard loop.addTimer(50) do (id: int):
+      loop.connect("127.0.0.1", 20100,
+        onConnect = proc(conn: Connection) =
+          discard conn.send("GET /leak HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        ,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          responseData.add(@data)
+          conn.close()
+        ,
+        onClose = proc(conn: Connection) =
+          server.close()
+          loop.stop()
+      )
+
+    discard loop.addTimer(3000) do (id: int):
+      server.close()
+      loop.stop()
+
+    loop.run()
+    loop.close()
+    let resp = cast[string](responseData)
+    assert "403" in resp or "Forbidden" in resp,
+      "symlink escape should be rejected with 403, got: '" & resp & "'"
+    assert "SECRET-OUTSIDE" notin resp,
+      "symlink target content must not be served"
 
 test "test_max_pipeline_depth_enforced":
   var requestCount = 0

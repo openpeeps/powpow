@@ -16,6 +16,8 @@
 
 import std/[tables, monotimes, httpcore]
 
+import std/[tables, monotimes, httpcore, locks]
+
 import ../loop
 import ../types
 import ./http
@@ -32,6 +34,7 @@ type
     maxRequests: int
     windowMs: int64
     cleanupTimer: TimerId
+    lock: Lock   # guards `buckets` — the limiter may be shared across workers
 
 proc newRateLimiter*(loop: Loop; maxRequests: int; windowMs: int;
                      enableCleanup = true): RateLimiter =
@@ -44,31 +47,41 @@ proc newRateLimiter*(loop: Loop; maxRequests: int; windowMs: int;
     windowMs: windowMs.int64,
     buckets: initTable[string, Bucket](64),
   )
+  initLock(rl.lock)
   if enableCleanup and windowMs > 0:
     let sweepMs = windowMs div 2
     rl.cleanupTimer = loop.addInterval(max(sweepMs, 1000)) do (id: int):
-      let now = monoMs()
-      let maxAge = rl.windowMs * 2
-      var stale: seq[string]
-      for ip, bucket in rl.buckets:
-        if now - bucket.start > maxAge:
-          stale.add(ip)
-      for ip in stale:
-        rl.buckets.del(ip)
+      withLock rl.lock:
+        let now = monoMs()
+        let maxAge = rl.windowMs * 2
+        var stale: seq[string]
+        for ip, bucket in rl.buckets:
+          if now - bucket.start > maxAge:
+            stale.add(ip)
+        for ip in stale:
+          rl.buckets.del(ip)
   result = rl
+
+proc close*(rl: RateLimiter) =
+  ## Stop the cleanup timer and release the limiter's lock.
+  if rl.cleanupTimer != TimerId(0):
+    rl.loop.cancelTimer(rl.cleanupTimer)
+    rl.cleanupTimer = TimerId(0)
+  deinitLock(rl.lock)
 
 proc allow*(rl: RateLimiter; ip: string): bool =
   if ip.len == 0 or rl.maxRequests <= 0:
     return true
-  let now = monoMs()
-  var bucket = rl.buckets.getOrDefault(ip, (now, 0))
-  if now - bucket.start > rl.windowMs:
-    bucket = (now, 0)
-  inc bucket.count
-  if bucket.count > rl.maxRequests:
-    return false
-  rl.buckets[ip] = bucket
-  return true
+  withLock rl.lock:
+    let now = monoMs()
+    var bucket = rl.buckets.getOrDefault(ip, (now, 0))
+    if now - bucket.start > rl.windowMs:
+      bucket = (now, 0)
+    inc bucket.count
+    if bucket.count > rl.maxRequests:
+      return false
+    rl.buckets[ip] = bucket
+    return true
 
 proc check*(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool {.inline.} =
   if not rl.allow(req.getClientIp()):
