@@ -28,7 +28,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
-      - run: nimble test -d:release
+      - run: nimble test
 
   smuggler:
     runs-on: ubuntu-latest
