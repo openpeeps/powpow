@@ -62,8 +62,18 @@ when defined(windows):
       iov_base*: pointer
       iov_len*: int
 
-  proc socket*(af, typ, protocol: cint): SocketHandle {.
-    importc: "socket", stdcall, dynlib: "ws2_32.dll".}
+  const WSA_FLAG_OVERLAPPED = 0x01'u32
+
+  proc wsaSocket(af, typ, protocol: cint, protocolInfo: pointer,
+                 group, flags: cuint): SocketHandle {.
+    importc: "WSASocketA", stdcall, dynlib: "ws2_32.dll".}
+
+  proc socket*(af, typ, protocol: cint): SocketHandle =
+    ## Create a socket with the WSA_FLAG_OVERLAPPED flag so it can be
+    ## associated with an I/O completion port (the iocp backend). Plain
+    ## socket() sockets are not overlapped-capable and CreateIoCompletionPort()
+    ## rejects them.
+    wsaSocket(af, typ, protocol, nil, 0, WSA_FLAG_OVERLAPPED)
   proc bindSocket*(s: SocketHandle, name: pointer, namelen: SockLen): cint {.
     importc: "bind", stdcall, dynlib: "ws2_32.dll".}
   proc listen*(s: SocketHandle, backlog: cint): cint {.
