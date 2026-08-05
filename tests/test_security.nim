@@ -270,6 +270,7 @@ when not defined(windows):
     # A multipart upload whose file part exceeds server.maxFileSize must be
     # rejected with 413 (independently of the total body cap).
     var responseData: seq[byte] = @[]
+    var clientConn: Connection = nil
     let loop = newLoop()
   
     let server = newHttpServer(loop)
@@ -293,6 +294,7 @@ when not defined(windows):
     discard loop.addTimer(50) do (id: int):
       loop.connect("127.0.0.1", 20097,
         onConnect = proc(conn: Connection) =
+          clientConn = conn
           # First chunk: headers + partial body, so the body is still incoming
           # and the auto-streaming (with the per-file cap) activates.
           discard conn.send(headers & body[0 ..< 512])
@@ -301,18 +303,24 @@ when not defined(windows):
         ,
         onData = proc(conn: Connection, data: openArray[byte]) =
           responseData.add(@data)
-          conn.close()
         ,
-        onClose = proc(conn: Connection) =
-          server.close()
-          loop.stop()
       )
   
-    discard loop.addTimer(3000) do (id: int):
+    discard loop.addTimer(5000) do (id: int):
+      if clientConn != nil: clientConn.close()
       server.close()
       loop.stop()
   
-    loop.run()
+    # Poll until we have response data or timeout. Driving the loop with
+    # poll(0) (instead of run()) avoids stopping on the connection-close
+    # event before the pending read data is drained, which differs between
+    # kqueue (macOS) and epoll (Linux).
+    var polls = 0
+    while responseData.len == 0 and polls < 500000:
+      loop.poll(0)
+      inc polls
+    if clientConn != nil: clientConn.close()
+    server.close()
     loop.close()
     let resp = cast[string](responseData)
     assert "413" in resp,

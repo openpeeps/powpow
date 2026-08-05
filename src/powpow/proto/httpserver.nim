@@ -895,7 +895,6 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     if ct.startsWith("multipart/form-data") and p.contentLength > 0:
       let fileCap = if server.maxFileSize > 0: server.maxFileSize
                     else: uploadCap
-      echo "[dbg] multipart streamer: maxBodySize=", uploadCap, " maxFileSize=", fileCap
       ctx.streamer = newMultipartStreamerRef(ct,
         bodySize = p.contentLength.int64,
         sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
