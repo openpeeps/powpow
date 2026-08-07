@@ -76,6 +76,7 @@ type
     headerEnd*: int             ## Byte offset past \r\n\r\n
     headerCount: int            ## Number of headers parsed
     contentLength*: int          ## From Content-Length header (-1 if absent)
+    transferEncoded: bool       ## Any Transfer-Encoding header present
     transferChunked: bool       ## Transfer-Encoding: chunked
     connectionClose*: bool      ## Connection: close seen
     contentTypeStart: int       ## -1 if no Content-Type (lazy materialization)
@@ -200,13 +201,18 @@ proc reset*(p: HttpParser) =
   p.headerEnd     = -1
   p.headerCount   = 0
   p.contentLength = -1
+  p.transferEncoded = false
   p.transferChunked = false
+  p.connectionClose = false
+  p.expectContinue = false
   p.chunkStart    = 0
   p.chunkSize     = -1
   p.chunkParsed   = 0
   p.bodyStart     = 0
   p.bodyLen       = 0
   p.chunkBodyLen  = 0
+  p.bodyStreamed  = 0
+  p.streamingBody = false
   p.phase         = PhaseRequestLine
   p.errorCode     = Http200
   p.methodCache   = HttpGet
@@ -247,6 +253,7 @@ proc resetForNext*(p: HttpParser) =
   p.httpMinor     = 1
   p.headerCount   = 0
   p.contentLength = -1
+  p.transferEncoded = false
   p.transferChunked = false
   p.connectionClose = false
   p.expectContinue = false
@@ -445,6 +452,7 @@ proc scanHeaders(p: HttpParser): bool =
                   break
               if isTE:
                 matched = true
+                p.transferEncoded = true
                 var valStart = lineStart + teKey.len
                 while valStart < i and char(buf[valStart]) == ' ':
                   inc valStart
@@ -556,6 +564,15 @@ proc scanHeaders(p: HttpParser): bool =
       lineStart = i
     else:
       inc i
+
+  # Reject ambiguous framing: a message carrying BOTH Content-Length and
+  # Transfer-Encoding is a request-smuggling vector (RFC 7230 §3.3.3 / RFC 9112
+  # §6.3). The two interpretations cannot coincide, so a proxy front-end that
+  # honours one and a back-end that honours the other would desync. Reject it.
+  if p.transferEncoded and p.contentLength >= 0:
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
 
   # Determine body presence
   if p.contentLength > 0 or p.transferChunked:
