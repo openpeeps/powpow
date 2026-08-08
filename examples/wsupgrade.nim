@@ -37,7 +37,7 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
 <html>
 <head><title>powpow WebSocket</title></head>
 <body>
-  <h1>⚡ powpow HTTP + WebSocket server</h1>
+  <h1>💥 powpow HTTP + WebSocket server</h1>
   <p>Both HTTP and WebSocket on the same port!</p>
   <ul>
     <li><a href="/time">GET /time</a> — plain HTTP</li>
@@ -88,7 +88,7 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
 
 # ── Start ────────────────────────────────────────────────────────────────────
 
-echo "⚡ powpow HTTP + WS server listening on http://localhost:9000"
+echo "💥 powpow HTTP + WS server listening on http://localhost:9000"
 echo "  HTTP:       curl http://localhost:9000/"
 echo "  WebSocket:  websocat ws://localhost:9000/ws"
 echo "  Press Ctrl+C to stop"

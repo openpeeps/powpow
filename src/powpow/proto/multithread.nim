@@ -122,7 +122,7 @@ when not defined(windows):
         arg.address = address
         arg.port    = port
         createThread(srv.threads[i], workerMain, arg)
-      echo "⚡ powpow accepting on ", address, ":", port,
+      echo "💥 powpow accepting on ", address, ":", port,
            " with ", srv.numThreads, " workers (SO_REUSEPORT)"
       for i in 0 ..< srv.numThreads:
         joinThread(srv.threads[i])

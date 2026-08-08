@@ -32,7 +32,7 @@
 - FileSystem Monitoring via `inotify` (Linux) and `kqueue` (BSD, macOS) (Windows - not yet implemented)
 
 > [!NOTE]
-> 💥 PowPow is now available in [Supranim](https://github.com/supranim/supranim) as a backend. Just switch to `-d:supraNative` when compiling your Supranim app!
+> 💥 PowPow is now available in [Supranim](https://github.com/supranim/supranim) as a backend. Just switch `--features:powpow` when compiling your Supranim app!
 
 > [!WARNING]
 > 💥 This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms. **Use it, test it, and do not hesitate to report any issues you find!** 💥 
@@ -46,7 +46,7 @@ Check examples in the `examples/` directory, or see the [API reference](https://
 
 - Single-threaded (keep-alive)
 ```
-⚡ powpow HTTP server listening on http://localhost:9000
+💥 powpow HTTP server listening on http://localhost:9000
   Press Ctrl+C to stop
 Running 5s test @ http://127.0.0.1:9000/
   4 threads and 100 connections
@@ -60,7 +60,7 @@ Transfer/sec:     55.50MB
 
 - Single-threaded (connection close)
 ```
-⚡ powpow HTTP server listening on http://localhost:9000
+💥 powpow HTTP server listening on http://localhost:9000
   Press Ctrl+C to stop
 Running 5s test @ http://127.0.0.1:9000/
   4 threads and 100 connections
@@ -76,7 +76,7 @@ Transfer/sec:     20.32MB
 ```
   worker #0 ready
   worker #2 ready
-⚡ powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
+💥 powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
   worker #1 ready
   worker #3 ready
 Running 5s test @ http://127.0.0.1:9000/
@@ -94,7 +94,7 @@ Transfer/sec:    104.80MB
 ```
   worker #0 ready
   worker #2 ready
-⚡ powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
+💥 powpow accepting on 0.0.0.0:9000 with 4 workers (SO_REUSEPORT)
   worker #3 ready
   worker #1 ready
 Running 5s test @ http://127.0.0.1:9000/

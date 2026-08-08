@@ -37,9 +37,9 @@ proc grammarPaths(): seq[string] =
   result.add(dir / "headers.cfg")
   result.add(dir / "body.cfg")
 
-# ══════════════════════════════════════════════════════════════════════
+#
 # Expected-classification helper (shared by Part A and Part B)
-# ══════════════════════════════════════════════════════════════════════
+#
 
 type Expected* = enum
   expComplete    ## the request is fully framed on its own
@@ -59,9 +59,9 @@ proc classifyExpected(raw: string): Expected =
   if parser.isComplete(): return expComplete
   expIncomplete
 
-# ══════════════════════════════════════════════════════════════════════
+#
 # Part A — in-process parser safety + hardening (deterministic, all platforms)
-# ══════════════════════════════════════════════════════════════════════
+#
 
 test "parser survives generated requests without defects or desync primitives":
   for cfgPath in grammarPaths():
@@ -176,9 +176,9 @@ test "LF-only chunked line endings never crash the parser":
   check not crashed
   check parser.buf.len < 64 * 1024
 
-# ══════════════════════════════════════════════════════════════════════
+#
 # Part B — two-server differential (T-Reqs Stage 1)
-# ══════════════════════════════════════════════════════════════════════
+#
 
 when not defined(windows):
   import std/typedthreads

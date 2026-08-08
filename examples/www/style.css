@@ -1,0 +1,48 @@
+:root {
+  --bg: #0f1115;
+  --fg: #e6e9ef;
+  --accent: #ffcc00;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  font-size: 18px;
+  place-items: center;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", Helvetica, Arial, sans-serif;
+}
+
+main {
+  max-width: 34rem;
+  padding: 3.2rem;
+  border: 1px solid #262a33;
+  border-radius: 34px;
+  background: #161922;
+}
+
+h1 { color: #fff; margin-top: 0; }
+
+code {
+  background: #0b0d12;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  color: #8fc7ff;
+}
+
+button {
+  margin-top: 1rem;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0,0,0,.6);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover { background: rgba(0,0,0,1)}

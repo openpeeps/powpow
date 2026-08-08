@@ -12,3 +12,5 @@ testresults/
 !/examples/*.nim
 !/examples/*.nims
 !/examples/*.html
+!/examples/www/
+!/examples/www/*

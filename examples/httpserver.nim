@@ -32,7 +32,7 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
     <html>
     <head><title>powpow</title></head>
     <body>
-      <h1>⚡ powpow HTTP server</h1>
+      <h1>💥 powpow HTTP server</h1>
       <p>A high-performance, non-blocking HTTP/1.1 server in Nim.</p>
       <ul>
         <li><a href="/hello">GET /hello</a></li>
@@ -92,6 +92,6 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
 
 # ── Start ────────────────────────────────────────────────────────────────────
 
-echo "⚡ powpow HTTP server listening on http://localhost:9000"
+echo "💥 powpow HTTP server listening on http://localhost:9000"
 echo "  Press Ctrl+C to stop"
 server.start(handler, Port(9000))

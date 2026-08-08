@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>powpow WebSocket chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: #0f1115; color: #e6e9ef;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    main { width: min(36rem, 92vw); padding: 1.5rem; border: 1px solid #262a33;
+           border-radius: 12px; background: #161922; }
+    h1 { color: #ffcc00; margin: 0 0 .5rem; font-size: 1.3rem; }
+    #log { height: 22rem; overflow-y: auto; border: 1px solid #262a33;
+           border-radius: 8px; padding: .6rem; background: #0b0d12;
+           white-space: pre-wrap; font-size: .85rem; }
+    form { display: flex; gap: .5rem; margin-top: .8rem; }
+    input { flex: 1; padding: .55rem; font: inherit; border-radius: 8px;
+            border: 1px solid #333a45; background: #0b0d12; color: #e6e9ef; }
+    button { padding: .55rem 1rem; font: inherit; border-radius: 8px;
+             border: 1px solid #ffcc00; background: transparent;
+             color: #ffcc00; cursor: pointer; }
+    button:hover { background: #ffcc00; color: #0f1115; }
+    .sys { color: #8fc7ff; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>💥 powpow WebSocket chat</h1>
+    <div id="log"></div>
+    <form id="form">
+      <input id="msg" placeholder="Type a message…" autocomplete="off">
+      <button type="submit">Send</button>
+    </form>
+  </main>
+  <script>
+    const log = document.getElementById('log');
+    const form = document.getElementById('form');
+    const msg = document.getElementById('msg');
+
+    function append(line, cls) {
+      const d = document.createElement('div');
+      d.textContent = line;
+      if (cls) d.className = cls;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const ws = new WebSocket('ws://' + location.host + '/ws');
+    ws.onopen = () => append('Connected to the powpow chat server.', 'sys');
+    ws.onmessage = (e) => append(e.data);
+    ws.onclose = () => append('Disconnected.', 'sys');
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = msg.value.trim();
+      if (text) { ws.send(text); msg.value = ''; }
+    });
+  </script>
+</body>
+</html>
