@@ -37,9 +37,33 @@
 > [!WARNING]
 > 💥 This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms. **Use it, test it, and do not hesitate to report any issues you find!** 💥 
 
-## Examples
-Check examples in the `examples/` directory, or see the [API reference](https://openpeeps.github.io/powpow) for more details.
+## Example of web servers (the fun part)
+Most web servers out there are all rainbows and flowers, until you upload or stream a file, and it transforms into a nightmare at runtime. Check examples in the `examples/` directory, or see the [API reference](https://openpeeps.github.io/powpow) for more details.
 
+- `httpserver.nim` the classic. A tiny, functional HTTP/1.1 server
+- `httpserver_threads.nim` the same server, but it spawns **one event loop per CPU core** and binds them all to the same port via `SO_REUSEPORT`. The kernel load-balances connections across workers for you
+- `upload_server.nim` file uploads done right, using `pkg/multipart` two ways:
+  - `/upload/raw` raw body streamed straight to disk via `streamToFile()`
+  - `/upload/stream` multipart parsed on the fly with `getMultipart()`
+  - Both keep RAM low and your hard drive honest. Runnable example: [upload_server.nim](https://github.com/openpeeps/powpow/blob/main/examples/upload_server.nim)
+- `stream_server.nim`, it streams and serves a **2.76 GB** `Big_Buck_Bunny_4K.webm` (get it from here > https://en.wikipedia.org/wiki/File:Big_Buck_Bunny_4K.webm) with three different APIs:
+  - `/video` zero-copy media streaming with chunk limiting (1 MB per response), always keep-alive, always Range-aware
+  - `/download` `Content-Disposition: attachment`, optional Range support
+  - `/resume` full `serveFile` with `If-None-Match`, `If-Modified-Since`, `If-Range` and Range handling, `304`/`206` and all. Resume support built in, because your users *will* close the laptop lid mid-download
+- `wsserver.nim` a standalone WebSocket server. The upgrade handshake is handled internally; there are no HTTP routes at all
+- `wsupgrade.nim` HTTP **and** WebSocket on the same port. `curl localhost:9000/` for HTML, `websocat ws://localhost:9000/ws` for real-time. One process, one port, two protocols. The browser test page (`wsclient.html`) is included so you can watch it work live
+- `ratelimit_server.nim` built-in sliding-window rate limiting per client IP
+- `fswatch.nim` file system monitoring via the same event loop (`inotify` on Linux, `kqueue` on macOS/BSD)
+- `tcp_chat.nim` a real multi-client chat room on the raw TCP layer, no HTTP in sight. The server broadcasts every client's bytes to everyone else; `nc 127.0.0.1 9010` and start arguing with yourself in two terminals
+- `tcp_client.nim` the chat's better half an interactive stdin client for `tcp_chat.nim`. Stdin is polled non-blockingly on the loop, so replies print while you are still typing
+- `tcp_proxy.nim` a TCP reverse proxy / load balancer: it accepts clients on `:9020`, opens an upstream connection to a backend on `:9021`, and pipes bytes both ways, buffering anything that arrives before the upstream is ready. `nc 127.0.0.1 9020`, type, watch the backend echo come back
+- `udp_echo.nim` UDP done politely: a bound socket that echoes every datagram back to its sender (`bindUdp` + `sendTo`), plus a `--client` mode that pings the server with `connectUdp`. `nc -u` works too
+- `static_server.nim` a static site server: `serveStatic` from `examples/www/` (zero-copy `sendFile`, path-traversal and symlink-escape safe), CORS headers on everything, and a tiny `/api/time` JSON endpoint. A whole website, served from one process and a folder of files
+- `uds_server.nim` HTTP over a Unix domain socket, no TCP stack involved. The whole request stays on the machine, which is great if you and your microservice have agreed to never speak over the network again. `curl --unix-socket /tmp/powpow.sock http://localhost/hello`
+- `tls_server.nim` an HTTPS server with an embedded self-signed certificate. `curl -k https://localhost:9443/hello` and the TLS handshake happens before your coffee does
+- `signal_bus.nim` an in-process pub/sub event bus (`SignalRelay`): an HTTP endpoint emits named events and subscribers react to them, including `listenOnce` and manual `unlisten`. Server-side events without a server-side framework
+- `timers_scheduler.nim` a guided tour of the timer wheel: one-shot timers, repeating intervals, deferred callbacks, and idle handlers, all ticking on the same loop for ~8 seconds before politely stopping
+- `ws_chat.nim` a multi-client WebSocket chat with broadcast. Open `http://localhost:9006` in two browser tabs, type in one, and enjoy the other one agreeing with you. The browser page lives in `ws_chat.html`
 
 ## Dummy Benchmarks
 **Pow Pow is the #1 fastest HTTP server** from [Web Framework Benchmarks](https://web-frameworks-benchmark.netlify.app/result). Find the wrk-based benchmark I manually ran via Github Actions ([see bench.yml](https://github.com/openpeeps/powpow/blob/main/.github/workflows/bench.yml))
