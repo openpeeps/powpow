@@ -50,7 +50,11 @@ func findDoubleCRLFScalar*(buf: ptr UncheckedArray[byte], start, maxLen: int): i
 when hasSse2:
   func findCRLFSse2*(buf: ptr UncheckedArray[byte], start, scanLen: int): int {.inline.} =
     ## SSE2-accelerated \r\n scanner. Scans up to scanLen bytes.
-    ## Falls back to full scalar scan to catch \r\n straddling two chunks.
+    ## When a match is found, a bounded scalar prefix scan guarantees the
+    ## earliest \r\n is returned: a \r\n whose \r is the last byte of one
+    ## 16-byte chunk and whose \n is the first byte of the next is invisible
+    ## to both chunk-aligned SSE2 loads, so a later (wrong) match must not be
+    ## reported as the first one.
     let crVec = mm_set1_epi8(cast[int8](0x0D))
     let lfVec = mm_set1_epi8(cast[int8](0x0A))
     var i = start
@@ -62,14 +66,14 @@ when hasSse2:
       let combined = mm_and_si128(crMask, lfShifted)
       let mask = cast[uint16](mm_movemask_epi8(combined))
       if mask != 0:
-        return i + countTrailingZeroBits(mask)
+        # Validate against an earlier match straddling the chunk boundary.
+        return findCRLFScalar(buf, start, i + countTrailingZeroBits(mask) + 2)
       i += 16
-    # Scalar fallback catches patterns spanning two 16-byte chunks
     findCRLFScalar(buf, start, scanLen)
 
   func findDoubleCRLFSse2*(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.inline.} =
     ## SSE2-accelerated \r\n\r\n scanner.
-    ## Falls back to full scalar scan to catch \r\n\r\n straddling two chunks.
+    ## Same boundary-straddle correction as findCRLFSse2.
     let limit = maxLen - 3
     let crVec = mm_set1_epi8(cast[int8](0x0D))
     let lfVec = mm_set1_epi8(cast[int8](0x0A))
@@ -84,9 +88,10 @@ when hasSse2:
       let doubleMask = mm_and_si128(crlfMask, crlfShifted)
       let mask = cast[uint16](mm_movemask_epi8(doubleMask))
       if mask != 0:
-        return i + countTrailingZeroBits(mask) + 4
+        # Validate against an earlier \r\n\r\n straddling the chunk boundary.
+        return findDoubleCRLFScalar(buf, start,
+                                    i + countTrailingZeroBits(mask) + 4)
       i += 16
-    # Scalar fallback catches patterns spanning two 16-byte chunks
     findDoubleCRLFScalar(buf, start, maxLen)
 
 # ── Unified dispatch ─────────────────────────────────────────────────────────

@@ -206,6 +206,23 @@ re-applied audit fixes vs. unmodified origin/main (`7e29a8a`):
 
 The audit fixes are pure hardening and do not slow the request path.
 
+## Round 2 — follow-ups (fixed, see plans/audit-round2.md)
+
+| Item | Fix |
+|---|---|
+| Configurable size backstop | `HttpServer.maxStreamBodySize` / `HttpParser.maxStreamBodySize` lower the 512 MB hard cap when `maxBodySize == 0`; README production-config section added |
+| WS post-upgrade idle/read timeout | `WsConnection.lastActive/idleTimer/idleTimeoutMs`, re-armed after each frame; `WsServer.idleTimeoutMs*` + `HttpServer.wsIdleTimeoutMs*`; silent upgraded conns are closed |
+| `parseRange` strictness | trailing garbage / second range after the end number → 416; trailing OWS tolerated |
+| UDP empty-send | `send`/`sendTo` return 0 for empty payloads (no `unsafeAddr data[0]`) |
+| `WsServer.close()` | closes active connections (fires `onClose`, cancels idle timers) instead of only clearing tables |
+| Strict request line | empty request-target, non-digit version, trailing garbage after `HTTP/x.y` → 400 |
+| **SSE2 `\r\n` boundary bug** | `findCRLFSse2`/`findDoubleCRLFSse2` missed a `\r\n` spanning the 16-byte chunk boundary and could return a *later* match; a bounded scalar prefix scan now guarantees the earliest match (broke pipelining / stricter request-line parsing) |
+| Windows junction escape | `resolveReal` now uses `GetFinalPathNameByHandleW` (via new `proto/winpath.nim`) to resolve junctions/symlinks; `when defined(windows)` junction regression test for the windows CI |
+
+Verification: full powpow suite, audit harness, and the smuggler differential
+(1161 requests, 0 discrepancies) all green; macOS keep-alive ~136K req/s,
+`Connection: close` ~24-26K req/s.
+
 ## How to re-run
 
 ```sh

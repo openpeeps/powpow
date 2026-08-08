@@ -61,6 +61,9 @@ type
     buf*:      seq[byte]       ## Accumulation buffer
     bufLen*:   int              ## Current buffer length
     maxBodySize*: int64         ## Max body size (0 = unlimited)
+    maxStreamBodySize*: int64   ## Hard cap for streamed/chunked bodies when
+      ## maxBodySize == 0 (0 = use MaxStreamBodySize). Lets an operator lower
+      ## the 512 MB backstop without changing code.
 
     # Request line fields (byte offsets into buf)
     methodStr:  array[10, char] ## Raw method bytes (fast path)
@@ -142,6 +145,14 @@ func contentEnd(p: HttpParser): int {.inline.} =
   else:
     p.headerEnd + p.contentLength
 
+func streamCap(p: HttpParser): int64 {.inline.} =
+  ## Effective cap for buffered/streamed/chunked bodies: maxBodySize when set,
+  ## otherwise the operator-configurable maxStreamBodySize, otherwise
+  ## MaxStreamBodySize.
+  if p.maxBodySize > 0: p.maxBodySize
+  elif p.maxStreamBodySize > 0: p.maxStreamBodySize
+  else: int64(MaxStreamBodySize)
+
 func parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.} =
   # Parse HTTP method from raw bytes. Switch on first char for speed.
   if len == 0: return HttpGet  # default
@@ -177,6 +188,7 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     bodyLen:       0,
     chunkBodyLen:  0,
     maxBodySize:   0,
+    maxStreamBodySize: 0,
     methodCache:   HttpGet,
     pathCache:     "",
     queryCache:    "",
@@ -322,6 +334,12 @@ proc parseRequestLine(p: HttpParser): bool =
   else:
     p.pathEnd = i
 
+  # An empty request-target (`GET  HTTP/1.1` or `GET HTTP/1.1`) is malformed.
+  if p.pathEnd == p.pathStart:
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
+
   p.methodCache = parseMethod(cast[ptr UncheckedArray[byte]](addr p.buf[0]), p.methodLen)
 
   if i >= crlf:
@@ -337,8 +355,23 @@ proc parseRequestLine(p: HttpParser): bool =
     p.phase = PhaseError
     p.errorCode = Http400
     return false
-  p.httpMajor = int(char(buf[i+5])) - ord('0')
-  p.httpMinor = int(char(buf[i+7])) - ord('0')
+  let majCh = char(buf[i+5])
+  let minCh = char(buf[i+7])
+  if majCh < '0' or majCh > '9' or minCh < '0' or minCh > '9':
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
+  p.httpMajor = int(majCh) - ord('0')
+  p.httpMinor = int(minCh) - ord('0')
+  # Reject trailing garbage after the version token (`HTTP/1.1x`, extra spaces
+  # are tolerated since some clients send them).
+  var k = i + 8
+  while k < crlf and (char(buf[k]) == ' ' or char(buf[k]) == '\t'):
+    inc k
+  if k < crlf:
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
 
   # Advance past the request line \r\n
   p.phase = PhaseHeaders
@@ -655,7 +688,7 @@ proc parseChunkedBody(p: HttpParser): bool =
   ## Parse chunked transfer encoding. Returns true when complete.
   ## The decoded-body cap is enforced even when maxBodySize == 0 (a hostile
   ## client must not drive unbounded RAM/disk through a chunked upload).
-  let cap = if p.maxBodySize > 0: p.maxBodySize else: int64(MaxStreamBodySize)
+  let cap = p.streamCap()
   let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
   var pos = p.bodyStart
 
@@ -823,8 +856,7 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
       p.phase = PhaseComplete
       return p.phase
     let bodyBytes = min(data.len, remaining)
-    let streamCap = if p.maxBodySize > 0: p.maxBodySize
-                    else: int64(MaxStreamBodySize)
+    let streamCap = p.streamCap()
     if p.bodyStreamed + int64(bodyBytes) > streamCap:
       # Upload exceeds the cap — reject before writing more to disk/RAM.
       p.phase = PhaseError

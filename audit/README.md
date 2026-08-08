@@ -35,3 +35,8 @@ we actually patch (not a stale nimble-installed copy).
 | `tempfile_permissions.nim` | P2 — uploaded temp files world-readable (0644) + symlink-following open | `fpOthersRead` set |
 | `serve_static.nim` | P1 — `serveStatic` broken prefix handling: `/staticx` leaked, `/static` 403 | `/staticx/file` → 200, `/static/file` → 403 |
 | `timer_cancel_regression.nim` | regression pin — cancelled timers never fire | (guards a confirmed false positive) |
+| `ws_idle_timeout.nim` | R2 — post-upgrade WS idle/read timeout | silent upgraded conn never closes |
+| `parse_range.nim` | R2 — `parseRange` trailing-garbage / multi-range strictness | `bytes=0-5x` silently truncated |
+| `udp_empty_send.nim` | R2 — UDP empty payload `unsafeAddr data[0]` | OOB read on empty send |
+| `request_line_strict.nim` | R2 — strict request line + SSE2 `\r\n` boundary bug | pipelined requests misparse (400) |
+| `size_backstop.nim` | R2 — configurable `maxStreamBodySize` hard cap | 512 MB backstop not tunable |

@@ -28,6 +28,7 @@ import ../net/common
 import ../loop
 import ../types
 import ./http
+import ./winpath
 
 import pkg/[mimedb, multipart]
 export Port
@@ -68,6 +69,10 @@ type
     resPool:   seq[HttpResponse]
     keepAliveMs: int
     maxBodySize*: int64
+    maxStreamBodySize*: int64
+      ## Operator-configurable hard cap for streamed/chunked/multipart bodies
+      ## when maxBodySize == 0 (0 = use MaxStreamBodySize). Lets an operator
+      ## lower the 512 MB per-connection backstop without changing code.
     maxFileSize*: int64
       ## Per-file upload cap for multipart bodies (0 = fall back to
       ## maxBodySize's effective cap). Bounds disk usage of a single part
@@ -78,6 +83,10 @@ type
     maxConnections*: int
     maxPipelineDepth*: int
     readTimeoutMs*: int
+    wsIdleTimeoutMs*: int
+      ## Post-upgrade WebSocket idle timeout (ms, 0 = disabled). Applied when a
+      ## route upgrades a connection via `websocketUpgrade`; closes upgraded
+      ## connections that send no frames within the window.
     timeoutSweepMs*: int
       ## How often the lazy timeout sweep runs (ms). The sweep closes
       ## connections that exceed readTimeoutMs (mid-request) or keepAliveMs
@@ -138,6 +147,13 @@ func parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, l
       num = num * 10 + digit
       inc i
     rangeEnd = num
+    # Strict: after the end number only trailing OWS is allowed. Trailing
+    # garbage (`bytes=0-5x`) or a second range (`bytes=0-1,3-4`) must be
+    # rejected, not silently truncated (two servers would disagree on the
+    # range).
+    while i < hlen and (rangeHeader[i] == ' ' or rangeHeader[i] == '\t'):
+      inc i
+    if i < hlen: return (false, 0, 0)
 
   if hasStart and hasEnd:
     if rangeStart > rangeEnd or rangeStart < 0: return (false, 0, 0)
@@ -733,11 +749,13 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     sslCtx:    nil,
     keepAliveMs: DefaultKeepAliveMs,
     maxBodySize: 0,
+    maxStreamBodySize: 0,
     maxFileSize: 0,
     maxFieldSize: 0,
     maxConnections: 0,
     maxPipelineDepth: 0,
     readTimeoutMs: 30_000,
+    wsIdleTimeoutMs: 0,
     timeoutSweepMs: 200,
     sweepTimer: TimerId(0)
   )
@@ -766,6 +784,7 @@ proc acquireParser(server: HttpServer): HttpParser =
   else:
     result = newHttpParser()
   result.maxBodySize = server.maxBodySize
+  result.maxStreamBodySize = server.maxStreamBodySize
 
 proc releaseParser(server: HttpServer, parser: HttpParser) {.inline.} =
   if server.parserPool.len < MaxParserPoolSize:
@@ -905,6 +924,7 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     # hard cap — a client must not be able to fill the disk/temp dir with an
     # unbounded upload. (Previously maxBodySize=0 meant unlimited disk writes.)
     let uploadCap = if server.maxBodySize > 0: server.maxBodySize
+                    elif server.maxStreamBodySize > 0: server.maxStreamBodySize
                     else: int64(MaxStreamBodySize)
     if ct.startsWith("multipart/form-data") and p.contentLength > 0:
       let fileCap = if server.maxFileSize > 0: server.maxFileSize
@@ -1075,18 +1095,18 @@ when not defined(windows):
     importc: "realpath", header: "<stdlib.h>".}
 
 proc resolveReal*(path: string): string =
-  ## Canonical absolute path with symlinks resolved. A symlink inside a
-  ## serve root that points outside must not escape the root, so static file
-  ## serving verifies the resolved path. Falls back to absolutePath when the
-  ## path does not exist or on Windows (best-effort).
-  when not defined(windows):
+  ## Canonical absolute path with symlinks resolved. A symlink (or, on Windows,
+  ## a junction/reparse point) inside a serve root that points outside must not
+  ## escape the root, so static file serving verifies the resolved path. Falls
+  ## back to absolutePath when the path does not exist.
+  when defined(windows):
+    result = winpath.resolveRealWindows(path)
+  else:
     var buf: array[4096, char]
     let r = c_realpath(path.cstring, cast[cstring](addr buf[0]))
     if r != nil:
       result = $cast[cstring](addr buf[0])
       if result.len > 0: return
-    result = absolutePath(path)
-  else:
     result = absolutePath(path)
 
 proc withinRoot*(root, path: string): bool =
