@@ -408,7 +408,7 @@ proc scanHeaders(p: HttpParser): bool =
             if isCL:
               matched = true
               var valStart = lineStart + clKey.len
-              while valStart < i and char(buf[valStart]) == ' ':
+              while valStart < i and (char(buf[valStart]) == ' ' or char(buf[valStart]) == '\t'):
                 inc valStart
               if valStart < i and char(buf[valStart]) == '-':
                 p.phase = PhaseError
@@ -425,6 +425,18 @@ proc scanHeaders(p: HttpParser): bool =
                 num = num * 10 + digit
                 inc j
               if j == valStart:
+                p.phase = PhaseError
+                p.errorCode = Http400
+                return false
+              # The entire field-value after leading OWS must be digits
+              # (trailing OWS allowed). A value like `5x`, `1e3` or `5.0`
+              # is not a valid Content-Length and must be rejected — silently
+              # truncating it (e.g. to 5/1) would make two servers disagree on
+              # the message boundary.
+              var k = j
+              while k < i and (char(buf[k]) == ' ' or char(buf[k]) == '\t'):
+                inc k
+              if k < i:
                 p.phase = PhaseError
                 p.errorCode = Http400
                 return false
