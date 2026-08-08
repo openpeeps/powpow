@@ -39,6 +39,11 @@ proc formatIp(saAddr: Sockaddr_storage): string =
 const
   MaxBufPoolSize* = 1024
   MaxConnPoolSize* = 1024
+  MaxWriteBufferSize = 32 * 1024 * 1024
+    ## Per-connection cap on the queued write buffer. A client that stops
+    ## reading while the server writes a large response (e.g. a TLS file
+    ## download) must not make the server accumulate the whole payload in RAM
+    ## per connection (slow-read memory DoS).
 
 proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] {.inline.} =
   if loop.bufPool.len > 0:
@@ -138,6 +143,19 @@ proc close*(conn: Connection) =
   sockClose(conn.fd)
   conn.writeBuf.setLen(0)
   conn.writePos = 0
+
+proc queueWrite(conn: Connection, data: openArray[byte]): bool =
+  ## Append `data` to the connection's write buffer, closing the connection if
+  ## the buffer would exceed `MaxWriteBufferSize`. Returns true on success.
+  if data.len == 0:
+    return true
+  if conn.writeBuf.len + data.len > MaxWriteBufferSize:
+    conn.close()
+    return false
+  let oldLen = conn.writeBuf.len
+  conn.writeBuf.setLen(oldLen + data.len)
+  copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
+  true
 
 proc flushWriteBuffer(conn: Connection): bool =
   while conn.writePos < conn.writeBuf.len:
@@ -281,9 +299,8 @@ proc send*(conn: Connection, data: openArray[byte]): int =
     return data.len
 
   if conn.writeBuf.len > 0:
-    let oldLen = conn.writeBuf.len
-    conn.writeBuf.setLen(oldLen + data.len)
-    copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
+    if not conn.queueWrite(data):
+      return 0
     return data.len
 
   let n = sockSend(conn.fd, unsafeAddr data[0], data.len)
@@ -358,9 +375,9 @@ proc sendv*(conn: Connection,
 
   if conn.writeBuf.len > 0:
     for part in parts:
-      let oldLen = conn.writeBuf.len
-      conn.writeBuf.setLen(oldLen + part.len)
-      copyMem(addr conn.writeBuf[oldLen], part.data, part.len)
+      if part.len > 0:
+        if not conn.queueWrite(part.data.toOpenArray(0, part.len - 1)):
+          return 0
     return totalLen
 
   const MaxStackIovs = 128
@@ -442,15 +459,23 @@ proc shutdown*(conn: Connection) =
 proc closeAfterDrain*(conn: Connection) {.inline.} =
   if conn.state == Closed: return
   if conn.writeBuf.len == 0:
-    if conn.tlsState == TlsOff:
-      # The response was already handed to the kernel. Shut the write side down
-      # gracefully (FIN) instead of the SO_LINGER=0 RST close: an immediate RST
-      # discards the peer's unread receive buffer on Linux, silently dropping
+    when defined(linux):
+      # Graceful close: send FIN via shutdown() and let the peer drain the
+      # response before closing. An immediate SO_LINGER=0 RST on Linux
+      # discards the peer's unread receive buffer, silently dropping
       # just-sent responses. The connection is reclaimed when the peer closes
       # (handleClientRead sees EOF) or by the timeout sweep.
-      conn.shutdown()
-      conn.loop.modify(conn.fd.int, {Read})
+      if conn.tlsState == TlsOff:
+        conn.shutdown()
+        conn.loop.modify(conn.fd.int, {Read})
+      else:
+        conn.close()
     else:
+      # macOS/BSD/Windows: a graceful FIN close collapses `Connection: close`
+      # throughput ~8x under a wrk-style load generator on macOS/kqueue (even
+      # though well-behaved clients are unaffected). Use the fast SO_LINGER=0
+      # RST close here; it does not drop just-sent responses on these
+      # platforms the way it can on Linux.
       conn.close()
   else:
     conn.closeAfterFlush = true
