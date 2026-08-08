@@ -232,7 +232,7 @@ proc resetForNext*(p: HttpParser) =
   ## For streaming mode, the buffer has already been rearranged to contain
   ## only leftover bytes from the next request — no copy needed.
   let consumed = if p.streamingBody: 0  # buffer already contains only next-request bytes
-                 elif p.transferChunked: p.headerEnd + p.chunkBodyLen
+                 elif p.transferChunked: p.bodyStart  # past the final CRLF (set by parseChunkedBody)
                  elif p.contentLength > 0: p.contentEnd
                  else: p.headerEnd
   let leftover = p.bufLen - consumed
@@ -653,6 +653,9 @@ proc parseChunkSize(buf: ptr UncheckedArray[byte], start, maxLen: int): int {.in
 
 proc parseChunkedBody(p: HttpParser): bool =
   ## Parse chunked transfer encoding. Returns true when complete.
+  ## The decoded-body cap is enforced even when maxBodySize == 0 (a hostile
+  ## client must not drive unbounded RAM/disk through a chunked upload).
+  let cap = if p.maxBodySize > 0: p.maxBodySize else: int64(MaxStreamBodySize)
   let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
   var pos = p.bodyStart
 
@@ -665,6 +668,10 @@ proc parseChunkedBody(p: HttpParser): bool =
       if pos < p.bufLen and char(buf[pos]) == '\r':
         if pos + 1 < p.bufLen and char(buf[pos + 1]) == '\n':
           p.phase = PhaseComplete
+          # Advance past the final CRLF so resetForNext/getRemainingData know
+          # the exact end of the chunked message (previously the framing bytes
+          # were left behind and the next keep-alive request was misparsed).
+          p.bodyStart = pos + 2
           return true
         else:
           # Incomplete - need more data
@@ -673,6 +680,7 @@ proc parseChunkedBody(p: HttpParser): bool =
       elif pos < p.bufLen and char(buf[pos]) == '\n':
         # Handle LF-only line ending
         p.phase = PhaseComplete
+        p.bodyStart = pos + 1
         return true
       else:
         # Incomplete - need more data
@@ -702,7 +710,7 @@ proc parseChunkedBody(p: HttpParser): bool =
         p.bodyStart = pos
         return false
 
-      if p.maxBodySize > 0 and (p.chunkBodyLen + chunkSize) > p.maxBodySize:
+      if int64(p.chunkBodyLen) + chunkSize > cap:
         p.phase = PhaseError
         p.errorCode = Http413
         return false
@@ -728,6 +736,10 @@ proc parseChunkedBody(p: HttpParser): bool =
       # Copy chunk data to body buffer
       let oldBodyLen = p.chunkBodyLen
       p.chunkBodyLen += remaining
+      if int64(p.chunkBodyLen) > cap:
+        p.phase = PhaseError
+        p.errorCode = Http413
+        return false
 
       # Ensure body buffer capacity
       if p.buf.len < p.headerEnd + p.chunkBodyLen:
@@ -762,6 +774,10 @@ proc parseChunkedBody(p: HttpParser): bool =
       if available > 0:
         let oldBodyLen = p.chunkBodyLen
         p.chunkBodyLen += available
+        if int64(p.chunkBodyLen) > cap:
+          p.phase = PhaseError
+          p.errorCode = Http413
+          return false
 
         # Ensure body buffer capacity
         if p.buf.len < p.headerEnd + p.chunkBodyLen:
@@ -795,21 +811,11 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
   if p.phase == PhaseComplete or p.phase == PhaseError:
     return p.phase
 
-  # Streaming mode: after headers are parsed, body bytes go to callback
+  # Streaming mode: after headers are parsed, body bytes go to callback.
+  # Note: chunked bodies are NOT streamed here — they are buffered and decoded
+  # (see the PhaseBody branch) so the callback receives decoded bytes and a
+  # terminal `done=true` (raw chunk framing is never forwarded).
   if p.streamingBody and p.phase == PhaseBody:
-    if p.transferChunked:
-      # Chunked streaming: forward all data; chunk boundaries handle splitting.
-      # Enforce the body cap here too (chunked bodies are otherwise uncounted).
-      if data.len > 0 and p.onBodyData != nil:
-        let streamCap = if p.maxBodySize > 0: p.maxBodySize
-                        else: int64(MaxStreamBodySize)
-        if p.bodyStreamed + int64(data.len) > streamCap:
-          p.phase = PhaseError
-          p.errorCode = Http413
-          return p.phase
-        p.bodyStreamed += int64(data.len)
-        p.onBodyData(data, false)
-      return p.phase
     # Content-Length streaming: only forward body bytes, buffer leftover for next request
     let remaining = p.contentLength - p.bodyStreamed
     if remaining <= 0:
@@ -887,20 +893,22 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
       return p.phase
 
   if p.phase == PhaseBody:
-    if p.onBodyData != nil and not p.streamingBody:
+    if p.onBodyData != nil and not p.streamingBody and not p.transferChunked:
       # Activate streaming mode instead of buffering the body.
       # This must happen before the buffered body completion check
       # so that even a fully-arrived body is streamed via callback.
+      # Chunked bodies are excluded: they are buffered and decoded so the
+      # callback receives decoded bytes with a terminal done=true.
       p.streamingBody = true
       let bodyStart = p.headerEnd
       let bodyInBuf = p.bufLen - bodyStart
       if bodyInBuf > 0:
-        let bytesToStream = if not p.transferChunked and p.contentLength > 0:
+        let bytesToStream = if p.contentLength > 0:
                               min(bodyInBuf, p.contentLength)
                             else:
                               bodyInBuf
         if bytesToStream > 0:
-          let doneAfter = not p.transferChunked and p.contentLength > 0 and p.bodyStreamed + bytesToStream >= p.contentLength
+          let doneAfter = p.contentLength > 0 and p.bodyStreamed + bytesToStream >= p.contentLength
           p.onBodyData(p.buf.toOpenArray(bodyStart, bodyStart + bytesToStream - 1), doneAfter)
         p.bodyStreamed = bytesToStream
         # Move leftover bytes (from next pipelined request) to start of buffer
@@ -914,18 +922,22 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
       else:
         p.bufLen = 0
       # For Content-Length, check if we already have all the body
-      if not p.transferChunked and p.contentLength > 0:
+      if p.contentLength > 0:
         if p.bodyStreamed >= p.contentLength:
           p.bodyLen = p.contentLength
           p.phase = PhaseComplete
       return p.phase
 
     if p.transferChunked:
-      # Chunked transfer encoding
+      # Chunked transfer encoding: decode into the buffer, then deliver the
+      # decoded body to onBodyData (if set) when the terminating chunk arrives.
       if p.bodyStart == 0:
         p.bodyStart = p.headerEnd
       if p.parseChunkedBody():
         p.phase = PhaseComplete
+        if p.onBodyData != nil and p.chunkBodyLen > 0:
+          p.onBodyData(p.buf.toOpenArray(p.headerEnd, p.headerEnd + p.chunkBodyLen - 1), true)
+        p.bodyStreamed = p.chunkBodyLen.int64
     else:
       # Content-Length based
       let expected = p.contentEnd
@@ -949,17 +961,17 @@ proc tryAdvance*(p: HttpParser) =
   if p.phase == PhaseHeaders:
     if not p.scanHeaders(): return
   if p.phase == PhaseBody:
-    if p.onBodyData != nil and not p.streamingBody:
+    if p.onBodyData != nil and not p.streamingBody and not p.transferChunked:
       p.streamingBody = true
       let bodyStart = p.headerEnd
       let bodyInBuf = p.bufLen - bodyStart
       if bodyInBuf > 0:
-        let bytesToStream = if not p.transferChunked and p.contentLength > 0:
+        let bytesToStream = if p.contentLength > 0:
                               min(bodyInBuf, p.contentLength)
                             else:
                               bodyInBuf
         if bytesToStream > 0 and p.onBodyData != nil:
-          let doneAfter = not p.transferChunked and p.contentLength > 0 and p.bodyStreamed + bytesToStream >= p.contentLength
+          let doneAfter = p.contentLength > 0 and p.bodyStreamed + bytesToStream >= p.contentLength
           p.onBodyData(p.buf.toOpenArray(bodyStart, bodyStart + bytesToStream - 1), doneAfter)
         p.bodyStreamed = bytesToStream
         let leftoverStart = bodyStart + bytesToStream
@@ -971,7 +983,7 @@ proc tryAdvance*(p: HttpParser) =
           p.bufLen = 0
       else:
         p.bufLen = 0
-      if not p.transferChunked and p.contentLength > 0:
+      if p.contentLength > 0:
         if p.bodyStreamed >= p.contentLength:
           p.bodyLen = p.contentLength
           p.phase = PhaseComplete
@@ -981,6 +993,9 @@ proc tryAdvance*(p: HttpParser) =
         p.bodyStart = p.headerEnd
       if p.parseChunkedBody():
         p.phase = PhaseComplete
+        if p.onBodyData != nil and p.chunkBodyLen > 0:
+          p.onBodyData(p.buf.toOpenArray(p.headerEnd, p.headerEnd + p.chunkBodyLen - 1), true)
+        p.bodyStreamed = p.chunkBodyLen.int64
     elif p.contentLength > 0:
       let expected = p.contentEnd
       if p.bufLen >= expected:
@@ -1270,18 +1285,27 @@ proc getMultipart*(req: HttpRequest; tmpDir = ""): MultipartStreamerRef =
   let ct = headers.getOrDefault("Content-Type", @[""].HttpHeaderValues)
   if not string(ct).startsWith("multipart/form-data"):
     return nil
-  var ms = newMultipartStreamerRef(string(ct), tmpDir = tmpDir)
-  let (data, totalLen) = req.bodyView()
-  if totalLen > 0 and data != nil:
-    const ChunkSize = 65536
-    var pos = 0
-    while pos < totalLen:
-      let chunkLen = min(ChunkSize, totalLen - pos)
-      let chunk = cast[ptr UncheckedArray[byte]](cast[int](data) + pos)
-      ms[].feed(chunk, chunkLen)
-      pos += chunkLen
-  req.streamer = ms
-  return ms
+  try:
+    var ms = newMultipartStreamerRef(string(ct), tmpDir = tmpDir)
+    let (data, totalLen) = req.bodyView()
+    if totalLen > 0 and data != nil:
+      const ChunkSize = 65536
+      var pos = 0
+      while pos < totalLen:
+        let chunkLen = min(ChunkSize, totalLen - pos)
+        let chunk = cast[ptr UncheckedArray[byte]](cast[int](data) + pos)
+        ms[].feed(chunk, chunkLen)
+        pos += chunkLen
+    req.streamer = ms
+    return ms
+  except MultipartSizeLimitError:
+    # Body exceeded a configured size limit — return nil so the handler can
+    # decide (the server's auto-stream path replies 413 itself).
+    return nil
+  except MultipartInvalidHeader:
+    # Malformed part headers — never let a CatchableError escape into the
+    # handler's call stack as an unhandled exception.
+    return nil
 
 # ── Stream raw body to file (on-demand) ────────────────────────────────────
 
@@ -1305,8 +1329,20 @@ proc streamToFile*(req: HttpRequest; tmpDir = ""): string =
     return ""
   let dir = if tmpDir.len > 0: tmpDir else: getTempDir()
   discard existsOrCreateDir(dir)
-  let filePath = dir / $genOid()
-  var f = open(filePath, fmWrite)
+  # Private (0600), O_EXCL temp file: world-readable uploads and the temp-file
+  # symlink race are both prevented. Retry on the astronomically unlikely
+  # chance the generated name already exists (e.g. attacker pre-created it).
+  var filePath = ""
+  var f: File
+  for attempt in 0 ..< 8:
+    filePath = dir / $genOid()
+    try:
+      f = openPrivateFile(filePath)
+      break
+    except IOError:
+      filePath = ""
+  if filePath.len == 0:
+    return ""
   defer: f.close()
   const StreamChunk = 65536
   var pos = 0
@@ -1325,7 +1361,7 @@ proc getRemainingData*(p: HttpParser): seq[byte] =
   ## Return any unconsumed bytes after the HTTP headers (and body, if present).
   ## Useful after an HTTP/1.1 upgrade (e.g. WebSocket) where extra bytes
   ## from the initial TCP read may contain the first protocol frames.
-  let consumed = if p.transferChunked: p.headerEnd + p.chunkBodyLen
+  let consumed = if p.transferChunked: p.bodyStart  # past the final CRLF
                  elif p.contentLength > 0: p.contentEnd
                  else: p.headerEnd
   let leftover = p.bufLen - consumed

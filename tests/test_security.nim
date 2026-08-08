@@ -54,7 +54,8 @@ test "test_max_body_size_chunked_at_limit":
 test "test_streaming_body_enforces_max_size":
   # Chunked streaming bodies were previously forwarded to onBodyData with no
   # size accounting — an attacker could stream unbounded data to disk/RAM.
-  # Verify maxBodySize is now enforced (413) in streaming mode.
+  # Verify maxBodySize is now enforced (413) for a chunked body whose declared
+  # chunk size exceeds the cap.
   let rawHeaders = "POST /x HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
   var streamed = 0
   let parser = newHttpParser()
@@ -63,7 +64,7 @@ test "test_streaming_body_enforces_max_size":
     streamed += data.len
   parser.feed(rawHeaders)
   assert parser.phase == PhaseBody, "headers should parse into the body phase"
-  parser.feed(repeat('X', 200))
+  parser.feed("FF\r\n")   # valid chunk size of 255 > maxBodySize=100
   assert parser.isError(), "chunked streaming must enforce maxBodySize"
   assert parser.error() == Http413
 
@@ -209,6 +210,49 @@ test "test_malformed_content_length_rejected":
   parser.feed(raw)
   assert parser.isError(), "malformed CL should be rejected"
   assert parser.error() == Http400
+
+test "test_chunked_streaming_delivers_decoded_data":
+  # A chunked body streamed via onBodyData must complete, deliver DECODED bytes
+  # (never raw chunk framing), and finish with done=true.
+  var received: seq[byte] = @[]
+  var doneSeen = false
+  let parser = newHttpParser()
+  parser.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+    for b in data: received.add(b)
+    if done: doneSeen = true
+  parser.feed("POST /x HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n")
+  parser.feed("5\r\nhello\r\n")
+  parser.feed("6\r\n world\r\n")
+  parser.feed("0\r\n\r\n")
+  assert parser.isComplete(), "chunked streaming body should reach PhaseComplete"
+  assert doneSeen, "onBodyData should be called with done=true"
+  assert cast[string](received) == "hello world",
+    "callback must receive decoded bytes, got: " & cast[string](received)
+
+test "test_chunked_keepalive_next_request_parses":
+  # A chunked request followed by a keep-alive/pipelined request: resetForNext
+  # must not leave the chunk terminator framing in the buffer (previously the
+  # next request was misparsed as 400).
+  let parser = newHttpParser()
+  parser.feed("POST /a HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" &
+              "5\r\nhello\r\n0\r\n\r\n")
+  assert parser.isComplete(), "chunked request should complete"
+  parser.resetForNext()
+  parser.feed("GET /b HTTP/1.1\r\nHost: localhost\r\n\r\n")
+  assert parser.isComplete(), "next keep-alive request should parse cleanly"
+  let req = parser.getRequest()
+  assert req.getPath() == "/b", "expected /b, got " & req.getPath()
+
+test "test_chunked_body_unlimited_capped":
+  # With maxBodySize == 0, a chunked upload must still be capped by
+  # MaxStreamBodySize (a hostile client cannot drive unbounded RAM/disk).
+  let parser = newHttpParser()
+  parser.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} = discard
+  parser.feed("POST /x HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n")
+  let hugeChunk = "80000000\r\n"   # 2^31-byte chunk, way over the hard cap
+  parser.feed(hugeChunk)
+  assert parser.isError(), "huge chunked size must be rejected even when maxBodySize==0"
+  assert parser.error() == Http413
 
 # ══════════════════════════════════════════════════════════════════════
 # Section 2: HTTP Server Security
@@ -362,6 +406,56 @@ test "test_no_server_header_in_response":
   loop.close()
   let response = cast[string](responseData)
   assert "Server:" notin response, "response should not contain Server header"
+
+test "test_malformed_multipart_part_does_not_crash_server":
+  # A multipart part header missing its value (e.g. `Content-Disposition:
+  # form-data; name`) previously raised an unhandled IndexDefect that aborted
+  # the process. The server must respond 400/413 and keep running.
+  var responseData: seq[byte] = @[]
+  var clientConn: Connection = nil
+  let loop = newLoop()
+
+  let server = newHttpServer(loop)
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    {.gcsafe.}:
+      let mp = req.getMultipart()
+      if mp != nil:
+        mp.cleanup()
+      res.status(Http200).send("OK")
+
+  server.listen("127.0.0.1", 20101)
+
+  discard loop.addTimer(50) do (id: int):
+    loop.connect("127.0.0.1", 20101,
+      onConnect = proc(conn: Connection) =
+        clientConn = conn
+        let body = "--X\r\nContent-Disposition: form-data; name\r\n\r\nvalue\r\n--X--\r\n"
+        let headers = "POST /up HTTP/1.1\r\nHost: localhost\r\n" &
+                      "Content-Type: multipart/form-data; boundary=X\r\n" &
+                      "Content-Length: " & $body.len & "\r\n\r\n"
+        discard conn.send(headers & body)
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        responseData.add(@data)
+      ,
+    )
+
+  discard loop.addTimer(3000) do (id: int):
+    if clientConn != nil: clientConn.close()
+    server.close()
+    loop.stop()
+
+  var polls = 0
+  while responseData.len == 0 and polls < 20000:
+    loop.poll(1)
+    inc polls
+  if clientConn != nil: clientConn.close()
+  server.close()
+  loop.close()
+  let resp = cast[string](responseData)
+  assert resp.len > 0, "server must respond, not crash/hang on malformed multipart"
+  assert " 4" in resp or " 2" in resp,
+    "expected a 2xx/4xx response, got: '" & resp[0 ..< min(resp.len, 80)] & "'"
 
 proc testServeStaticRejects(port: int, path: string): string =
   var responseData: seq[byte] = @[]

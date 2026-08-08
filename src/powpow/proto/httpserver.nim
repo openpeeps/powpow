@@ -72,6 +72,9 @@ type
       ## Per-file upload cap for multipart bodies (0 = fall back to
       ## maxBodySize's effective cap). Bounds disk usage of a single part
       ## independently of the total body size.
+    maxFieldSize*: int64
+      ## Per-text-field cap for multipart bodies (0 = fall back to
+      ## maxBodySize's effective cap). Bounds per-field RAM usage.
     maxConnections*: int
     maxPipelineDepth*: int
     readTimeoutMs*: int
@@ -730,6 +733,8 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     sslCtx:    nil,
     keepAliveMs: DefaultKeepAliveMs,
     maxBodySize: 0,
+    maxFileSize: 0,
+    maxFieldSize: 0,
     maxConnections: 0,
     maxPipelineDepth: 0,
     readTimeoutMs: 30_000,
@@ -879,6 +884,9 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     # handling below cleans up streaming state and replies 413 instead of
     # letting the exception crash the event loop.
     p.setError(Http413)
+  except MultipartInvalidHeader:
+    # Malformed multipart part headers — same handling, respond 400.
+    p.setError(Http400)
 
   if p.expectContinue and p.phase == PhaseBody:
     let continueResp = "HTTP/1.1 100 Continue\r\n\r\n"
@@ -901,10 +909,13 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     if ct.startsWith("multipart/form-data") and p.contentLength > 0:
       let fileCap = if server.maxFileSize > 0: server.maxFileSize
                     else: uploadCap
+      let fieldCap = if server.maxFieldSize > 0: server.maxFieldSize
+                     else: uploadCap
       ctx.streamer = newMultipartStreamerRef(ct,
         bodySize = p.contentLength.int64,
         sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
-                                       maxFileSize: fileCap))
+                                       maxFileSize: fileCap,
+                                       maxFieldSize: fieldCap))
       let ms = ctx.streamer
       p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
         ms[].feed(data)
@@ -912,16 +923,31 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
         p.tryAdvance()
       except MultipartSizeLimitError:
         p.setError(Http413)
+      except MultipartInvalidHeader:
+        p.setError(Http400)
     elif p.contentLength > 0:
       let dir = getTempDir()
       discard existsOrCreateDir(dir)
       ctx.sessionStreamPath = dir / $genOid()
-      ctx.sessionStreamFile = open(ctx.sessionStreamPath, fmWrite)
-      p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
-        discard ctx.sessionStreamFile.writeBuffer(unsafeAddr data[0], data.len)
-        if done:
-          ctx.sessionStreamFile.close()
-      p.tryAdvance()
+      var f: File
+      var opened = false
+      for attempt in 0 ..< 8:
+        ctx.sessionStreamPath = dir / $genOid()
+        try:
+          f = openPrivateFile(ctx.sessionStreamPath)
+          opened = true
+          break
+        except IOError:
+          ctx.sessionStreamPath = ""
+      if not opened:
+        p.setError(Http500)
+      else:
+        ctx.sessionStreamFile = f
+        p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+          discard ctx.sessionStreamFile.writeBuffer(unsafeAddr data[0], data.len)
+          if done:
+            ctx.sessionStreamFile.close()
+        p.tryAdvance()
 
   var pipelineCount = 0
   while p.isComplete():
@@ -1074,11 +1100,31 @@ proc serveStatic*(res: HttpResponse, req: HttpRequest,
   ## Path traversal protection: rejects paths containing ".." or "~".
   ## Returns true if the file was served, false if not found (caller should send 404).
   ## Zero-copy: uses `sendFile` internally, no body buffering.
+  ##
+  ## The prefix is matched at a path-component boundary: urlPrefix="/static"
+  ## serves "/static/..." but NOT the sibling-prefix path "/staticx/...".
+  ## Both "/static" and "/static/" are accepted as the prefix.
   let path = req.getPath()
-  if not path.startsWith(urlPrefix):
+  # Normalize the prefix: drop a trailing slash so the boundary check is uniform.
+  let prefix = if urlPrefix.len > 0 and urlPrefix[^1] == '/':
+                 urlPrefix[0 .. ^2]
+               else:
+                 urlPrefix
+  if path != prefix and not path.startsWith(prefix & "/"):
     return false
-  let relPath = path[urlPrefix.len .. ^1]
-  if relPath.contains("..") or relPath.contains("~") or relPath.len == 0 or relPath[0] == '/':
+  var relPath = path[prefix.len .. ^1]
+  # Strip the single separating slash (relPath is "/file" or "/dir/file").
+  if relPath.len > 0 and relPath[0] == '/':
+    relPath = relPath[1 .. ^1]
+  if relPath.len == 0:
+    # Request for the static root itself — try index files.
+    for index in indexFiles:
+      let indexPath = fsRoot / index
+      if fileExists(indexPath):
+        res.sendFile(indexPath, req, closeConn = false, contentDisposition = false)
+        return true
+    return false
+  if relPath.contains("..") or relPath.contains("~"):
     res.status(Http403).header("Content-Type", "text/plain; charset=utf-8").send("Forbidden")
     return true
   let fullPath = fsRoot / relPath
