@@ -459,15 +459,23 @@ proc shutdown*(conn: Connection) =
 proc closeAfterDrain*(conn: Connection) {.inline.} =
   if conn.state == Closed: return
   if conn.writeBuf.len == 0:
-    if conn.tlsState == TlsOff:
-      # The response was already handed to the kernel. Shut the write side down
-      # gracefully (FIN) instead of the SO_LINGER=0 RST close: an immediate RST
-      # discards the peer's unread receive buffer on Linux, silently dropping
+    when defined(linux):
+      # Graceful close: send FIN via shutdown() and let the peer drain the
+      # response before closing. An immediate SO_LINGER=0 RST on Linux
+      # discards the peer's unread receive buffer, silently dropping
       # just-sent responses. The connection is reclaimed when the peer closes
       # (handleClientRead sees EOF) or by the timeout sweep.
-      conn.shutdown()
-      conn.loop.modify(conn.fd.int, {Read})
+      if conn.tlsState == TlsOff:
+        conn.shutdown()
+        conn.loop.modify(conn.fd.int, {Read})
+      else:
+        conn.close()
     else:
+      # macOS/BSD/Windows: a graceful FIN close collapses `Connection: close`
+      # throughput ~8x under a wrk-style load generator on macOS/kqueue (even
+      # though well-behaved clients are unaffected). Use the fast SO_LINGER=0
+      # RST close here; it does not drop just-sent responses on these
+      # platforms the way it can on Linux.
       conn.close()
   else:
     conn.closeAfterFlush = true

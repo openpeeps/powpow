@@ -193,6 +193,28 @@ covered by regression tests in [`tests/test_security.nim`](tests/test_security.n
   (1 MB), so an attacker-controlled response echoed over TLS cannot force an
   arbitrarily large allocation.
 
+#### Recommended production configuration
+
+For publicly reachable endpoints, set explicit caps instead of relying on the
+defaults (the `maxBodySize = 0` backstop is `MaxStreamBodySize`, 512 MB per
+connection — a lot for one client):
+
+```nim
+let server = newHttpServer(loop)
+server.maxBodySize    = 50 * 1024 * 1024      # 50 MB total request body
+server.maxStreamBodySize = 64 * 1024 * 1024   # hard cap even when maxBodySize=0
+server.maxFileSize    = 10 * 1024 * 1024      # 10 MB per uploaded file
+server.maxFieldSize   = 64 * 1024             # 64 KB per text field
+server.maxConnections = 4096                  # cap concurrent connections
+server.maxPipelineDepth = 4                   # cap pipelined requests
+server.readTimeoutMs  = 5_000                 # slowloris / partial-request close
+server.setKeepAliveTimeout(5_000)             # idle keep-alive close
+```
+
+The same caps apply to the standalone `WsServer` via `maxFrameSize`,
+`handshakeTimeoutMs`, `maxHandshakeSessions`, and (once enabled) a
+post-upgrade `idleTimeoutMs`.
+
 [Smuggler](https://github.com/openpeeps/smuggler) is a grammar-based
 HTTP/1.x request-smuggling fuzzer built for this library: it generates and
 mutates requests from a context-free grammar, detects CL/TE desyncs with an

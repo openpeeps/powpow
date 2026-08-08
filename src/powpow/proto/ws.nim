@@ -76,6 +76,13 @@ type
     assembling:  bool
     fragOpcode:  int
     assembleBuf: seq[byte]
+    # Post-upgrade idle/read timeout (0 = disabled). Bumped on every parsed
+    # frame; a sweep/one-shot timer closes the connection if no frame arrives
+    # within `idleTimeoutMs` — an upgraded but silent client must not hold the
+    # connection + fd forever.
+    lastActive: int64
+    idleTimer:  TimerId
+    idleTimeoutMs: int
 
   WsMessageCb* = proc(ws: WsConnection, kind: WsFrameKind,
                        data: openArray[byte]) {.closure.}
@@ -119,6 +126,10 @@ type
     handshakeTimeoutMs*: int
       ## Close connections that never complete the HTTP→WebSocket handshake
       ## within this many ms (0 = disabled). Prevents handshake-stall DoS.
+    idleTimeoutMs*: int
+      ## Close upgraded connections that send no frames within this many ms
+      ## (0 = disabled). Prevents post-upgrade idle connections from holding a
+      ## connection + fd forever.
     maxHandshakeSessions*: int
       ## Hard cap on in-flight handshake sessions (0 = unlimited).
     # User callbacks (applied to all connections)
@@ -267,6 +278,9 @@ proc sendPong*(ws: WsConnection, data: openArray[byte] = []) {.inline.} =
 
 proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
   ## Send a close frame and shut down the connection.
+  if ws.idleTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.idleTimer)
+    ws.idleTimer = TimerId(0)
   var payload: seq[byte] = @[]
   if code != 0:
     payload.setLen(2 + reason.len)
@@ -369,6 +383,7 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
 proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
   ## Feed incoming TCP data into the WebSocket frame parser.
   ## Dispatches complete frames to the appropriate callbacks.
+  ws.lastActive = monoMs()
   var i = 0
   let dataLen = data.len
 
@@ -542,7 +557,27 @@ proc newWsConnection*(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize)
     assembling: false,
     fragOpcode: 0,
     assembleBuf: @[],
+    lastActive: monoMs(),
+    idleTimer: TimerId(0),
+    idleTimeoutMs: 0,
   )
+
+proc armIdleTimeout(ws: WsConnection) =
+  ## Arm (or re-arm) the post-upgrade idle timer so it fires `idleTimeoutMs`
+  ## after the last received frame. The timer only re-arms when it fires, so a
+  ## busy connection does not churn the timer wheel on every frame.
+  let timeout = ws.idleTimeoutMs
+  if timeout <= 0: return
+  if ws.idleTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.idleTimer)
+  let elapsed = int(min(int64(timeout), monoMs() - ws.lastActive))
+  ws.idleTimer = ws.conn.loop.addTimer(max(timeout - elapsed, 1)) do (id: int):
+    ws.idleTimer = TimerId(0)
+    if ws.conn.state != Connected: return
+    if monoMs() - ws.lastActive >= ws.idleTimeoutMs:
+      ws.closeWs(1001, "Idle timeout")
+    else:
+      ws.armIdleTimeout()
 
 # ── Standalone WsServer ──────────────────────────────────────────────────────
 
@@ -679,6 +714,8 @@ proc listen*(wss: WsServer, address: string, port: int) =
         ws.onMessage = wss.defaultMessage
         ws.onClose   = wss.defaultClose
         ws.onError   = wss.defaultError
+        ws.idleTimeoutMs = wss.idleTimeoutMs
+        ws.armIdleTimeout()
 
         wss.conns[fd] = ws
 
@@ -765,6 +802,12 @@ proc close*(wss: WsServer) =
     wss.loop.cancelTimer(id)
   wss.handshakeTimers.clear()
   wss.handshakeSessions.clear()
+  for fd, ws in wss.conns:
+    if ws.idleTimer != TimerId(0):
+      wss.loop.cancelTimer(ws.idleTimer)
+    if not ws.onClose.isNil:
+      ws.onClose(ws, 1001, "Server shutting down")
+    ws.conn.close()
   wss.conns.clear()
 
 # ── HTTP → WebSocket upgrade ─────────────────────────────────────────────────
@@ -822,6 +865,9 @@ proc websocketUpgrade*(
     ws.onMessage = onMessage
     ws.onClose   = onClose
     ws.onError   = onError
+    if server != nil:
+      ws.idleTimeoutMs = server.wsIdleTimeoutMs
+      ws.armIdleTimeout()
 
     # Re-register the fd for raw WebSocket frame handling.
     # We need to unregister the old HTTP handler first.

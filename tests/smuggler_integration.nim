@@ -242,8 +242,10 @@ when not defined(windows):
       i = lineEnd + 2
 
   proc refRequestLineOk(buf: string; rlEnd: int): bool =
-    ## Mirrors powpow's parseRequestLine: "METHOD SP PATH SP HTTP/x.y...".
-    ## Multiple spaces or tabs between tokens make the request line invalid.
+    ## Mirrors powpow's parseRequestLine: "METHOD SP PATH SP HTTP/x.y".
+    ## Multiple spaces or tabs between tokens make the request line invalid;
+    ## an empty request-target, non-digit version numbers, or trailing garbage
+    ## after the version are rejected too (both parsers must agree).
     var i = 0
     while i < rlEnd and buf[i] != ' ':
       if i >= 10:
@@ -252,16 +254,27 @@ when not defined(windows):
     if i >= rlEnd:
       return false                    # no space after method
     inc i                             # skip exactly one space
+    let pathStart = i
     while i < rlEnd and buf[i] != ' ':
       inc i
     if i >= rlEnd:
       return false                    # no space after path
+    if i == pathStart:
+      return false                    # empty request-target
     inc i                             # skip exactly one space
     if i + 8 > rlEnd:
       return false
     if buf[i] != 'H' or buf[i + 1] != 'T' or buf[i + 2] != 'T' or
        buf[i + 3] != 'P' or buf[i + 4] != '/':
       return false
+    if buf[i + 5] < '0' or buf[i + 5] > '9' or
+       buf[i + 7] < '0' or buf[i + 7] > '9':
+      return false
+    var k = i + 8
+    while k < rlEnd and (buf[k] == ' ' or buf[k] == '\t'):
+      inc k
+    if k < rlEnd:
+      return false                    # trailing garbage after HTTP/x.y
     true
 
   proc refParseOne(buf: string): tuple[status: int; bodyLen: int; done: bool] =

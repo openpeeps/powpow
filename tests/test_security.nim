@@ -211,6 +211,24 @@ test "test_malformed_content_length_rejected":
   assert parser.isError(), "malformed CL should be rejected"
   assert parser.error() == Http400
 
+test "test_request_line_strict":
+  # Empty request-target, non-digit version, and trailing garbage after the
+  # version token are all malformed (previously tolerated).
+  for raw in [
+    "GET  HTTP/1.1\r\nHost: localhost\r\n\r\n",        # empty path
+    "GET / HTTP/1.x\r\nHost: localhost\r\n\r\n",       # non-digit minor version
+    "GET / HTTP/1.1x\r\nHost: localhost\r\n\r\n",      # trailing garbage
+    "GET / HTTP/1.1garbage\r\nHost: localhost\r\n\r\n",
+  ]:
+    let parser = newHttpParser()
+    parser.feed(raw)
+    assert parser.isError(), "malformed request line must be rejected: " & raw.escape()
+    assert parser.error() == Http400
+  # trailing OWS after the version is tolerated
+  let ok = newHttpParser()
+  ok.feed("GET / HTTP/1.1 \r\nHost: localhost\r\n\r\n")
+  assert ok.isComplete(), "trailing OWS after version should still parse"
+
 test "test_chunked_streaming_delivers_decoded_data":
   # A chunked body streamed via onBodyData must complete, deliver DECODED bytes
   # (never raw chunk framing), and finish with done=true.
@@ -252,6 +270,16 @@ test "test_chunked_body_unlimited_capped":
   let hugeChunk = "80000000\r\n"   # 2^31-byte chunk, way over the hard cap
   parser.feed(hugeChunk)
   assert parser.isError(), "huge chunked size must be rejected even when maxBodySize==0"
+  assert parser.error() == Http413
+
+test "test_configurable_stream_cap_honored":
+  # maxStreamBodySize lets an operator lower the hard backstop when
+  # maxBodySize == 0 (e.g. to keep a 64 KB chunk from being buffered).
+  let parser = newHttpParser()
+  parser.maxStreamBodySize = 100
+  parser.feed("POST /x HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n")
+  parser.feed("100\r\n")   # 256-byte chunk > maxStreamBodySize=100
+  assert parser.isError(), "configurable maxStreamBodySize must be enforced"
   assert parser.error() == Http413
 
 # ══════════════════════════════════════════════════════════════════════
@@ -652,6 +680,57 @@ when not defined(windows):
     assert "SECRET-OUTSIDE" notin resp,
       "symlink target content must not be served"
 
+when defined(windows):
+  test "test_serve_file_rejects_junction_escape_windows":
+    # A directory junction inside fsRoot pointing outside must be rejected
+    # (403) — resolveReal resolves junctions via GetFinalPathNameByHandleW.
+    let tmpRoot = getTempDir() / "powpow_junction_root"
+    let outside = getTempDir() / "powpow_junction_secret"
+    removeDir(tmpRoot)
+    removeDir(outside)
+    createDir(tmpRoot)
+    createDir(outside)
+    writeFile(outside / "secret.txt", "SECRET-OUTSIDE")
+    defer:
+      removeDir(tmpRoot)
+      removeDir(outside)
+    discard execShellCmd("cmd /c mklink /J \"" & tmpRoot / "leak" & "\" \"" & outside & "\"")
+
+    var responseData: seq[byte] = @[]
+    let loop = newLoop()
+    let server = newHttpServer(loop)
+    server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+      {.gcsafe.}:
+        if not serveFile(res, req, tmpRoot / "leak" / "secret.txt", fsRoot = tmpRoot):
+          res.sendError(Http404, "Not Found")
+    server.listen("127.0.0.1", 20103)
+
+    discard loop.addTimer(50) do (id: int):
+      loop.connect("127.0.0.1", 20103,
+        onConnect = proc(conn: Connection) =
+          discard conn.send("GET /leak/secret.txt HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        ,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          responseData.add(@data)
+          conn.close()
+        ,
+        onClose = proc(conn: Connection) =
+          server.close()
+          loop.stop()
+      )
+
+    discard loop.addTimer(3000) do (id: int):
+      server.close()
+      loop.stop()
+
+    loop.run()
+    loop.close()
+    let resp = cast[string](responseData)
+    assert "403" in resp or "Forbidden" in resp,
+      "junction escape should be rejected with 403, got: '" & resp & "'"
+    assert "SECRET-OUTSIDE" notin resp,
+      "junction target content must not be served"
+
 test "test_max_pipeline_depth_enforced":
   var requestCount = 0
   let loop = newLoop()
@@ -691,6 +770,19 @@ test "test_max_pipeline_depth_enforced":
   loop.close()
   assert requestCount == 2,
     "only 2 requests should be dispatched with maxPipelineDepth=2, got " & $requestCount
+
+test "test_parse_range_strict":
+  # Trailing garbage or a second range must be rejected (416), not silently
+  # truncated; trailing OWS is tolerated.
+  check parseRange("bytes=0-5", 100).ok
+  check parseRange("bytes=0-5 ", 100).ok
+  check parseRange("bytes=0-5\t", 100).ok
+  check parseRange("bytes=5-", 100).ok
+  check parseRange("bytes=-5", 100).ok
+  check not parseRange("bytes=0-5x", 100).ok
+  check not parseRange("bytes=0-5garbage", 100).ok
+  check not parseRange("bytes=0-1,3-4", 100).ok
+  check not parseRange("bytes=0- 5", 100).ok
 
 # ══════════════════════════════════════════════════════════════════════
 # Section 3: WebSocket Security
@@ -825,6 +917,111 @@ test "test_ws_handshake_sessions_bounded":
   # the cap is 2, so at most 2 sessions survive at once
   assert wss.handshakeCount() <= 2,
     "handshake sessions must be bounded, got " & $wss.handshakeCount()
+  wss.close()
+  loop.close()
+
+proc makeMaskedFrame(opcode: int; payload: seq[byte]): seq[byte] =
+  ## Build a masked client frame (RFC 6455) for sending over a live connection.
+  result.add(uint8(0x80 or (opcode and 0x0F)))
+  let mask = [0x11'u8, 0x22, 0x33, 0x44]
+  if payload.len < 126:
+    result.add(uint8(0x80 or payload.len))
+  elif payload.len <= 0xFFFF:
+    result.add(uint8(0x80 or 126))
+    result.add(uint8((payload.len shr 8) and 0xFF))
+    result.add(uint8(payload.len and 0xFF))
+  else:
+    result.add(uint8(0x80 or 127))
+    let n = uint64(payload.len)
+    for i in 0 ..< 8:
+      result.add(uint8((n shr (8 * (7 - i))) and 0xFF))
+  for m in mask: result.add(m)
+  for i, b in payload: result.add(b xor mask[i mod 4])
+
+test "test_ws_post_upgrade_idle_timeout_closes_silent_connection":
+  # After a completed upgrade, a client that sends no frames must be closed by
+  # idleTimeoutMs (previously an upgraded but silent connection held the
+  # connection + fd forever).
+  let loop = newLoop()
+  var wss = newWsServer(loop)
+  wss.handshakeTimeoutMs = 2000
+  wss.idleTimeoutMs = 120
+  wss.listen("127.0.0.1", 29962)
+
+  var opened = false
+  var closed = false
+  loop.connect("127.0.0.1", 29962,
+    onConnect = proc(conn: Connection) =
+      discard conn.send("GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n" &
+                        "Connection: Upgrade\r\n" &
+                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" &
+                        "Sec-WebSocket-Version: 13\r\n\r\n")
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      opened = true   # 101 Switching Protocols received
+    ,
+    onClose = proc(conn: Connection) = closed = true,
+  )
+
+  var polls = 0
+  while not closed and polls < 10000:
+    loop.poll(1)
+    inc polls
+  assert opened, "handshake should complete (101)"
+  assert closed, "silent upgraded connection should be closed by idle timeout"
+  assert polls < 1500,
+    "must be closed by idleTimeoutMs (120ms), not handshakeTimeout (2000ms): " & $polls
+  wss.close()
+  loop.close()
+
+test "test_ws_idle_timeout_activity_keeps_connection_open":
+  # Sending frames resets the idle window; only after traffic stops is the
+  # connection closed.
+  let loop = newLoop()
+  var wss = newWsServer(loop)
+  wss.handshakeTimeoutMs = 2000
+  wss.idleTimeoutMs = 150
+  wss.listen("127.0.0.1", 29963)
+
+  var clientConn: Connection = nil
+  var opened = false
+  var closed = false
+  var trafficTimer: TimerId
+
+  loop.connect("127.0.0.1", 29963,
+    onConnect = proc(conn: Connection) =
+      clientConn = conn
+      discard conn.send("GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n" &
+                        "Connection: Upgrade\r\n" &
+                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" &
+                        "Sec-WebSocket-Version: 13\r\n\r\n")
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      if not opened:
+        opened = true
+        # after upgrade, keep the connection alive with a masked ping every 40ms
+        trafficTimer = loop.addInterval(40) do (id: int):
+          if clientConn != nil and clientConn.state == Connected:
+            discard clientConn.send(makeMaskedFrame(0x9, @[0x00'u8]))
+    ,
+    onClose = proc(conn: Connection) = closed = true,
+  )
+
+  var polls = 0
+  # keep sending pings for ~400ms (well past idleTimeoutMs=150), then stop
+  while polls < 400 and not closed:
+    loop.poll(1)
+    inc polls
+  assert opened, "handshake should complete"
+  assert not closed, "connection must stay open while frames arrive"
+  if trafficTimer != TimerId(0):
+    loop.cancelTimer(trafficTimer)
+  # now stop sending; the idle timer must close it
+  while not closed and polls < 10000:
+    loop.poll(1)
+    inc polls
+  assert closed, "connection must be closed once traffic stops"
+  if clientConn != nil: clientConn.close()
   wss.close()
   loop.close()
 

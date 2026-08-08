@@ -41,6 +41,7 @@ proc close*(sock: UdpSocket) =
 
 proc sendTo*(sock: UdpSocket, data: openArray[byte],
              address: string, port: int): int {.inline.} =
+  if data.len == 0: return 0
   let addrBuf = resolveAddr(address, port, SOCK_DGRAM)
   let sLen = getSockLen(addr addrBuf)
   let n = sendto(sock.fd,
@@ -54,9 +55,11 @@ proc sendTo*(sock: UdpSocket, data: openArray[byte],
 
 proc sendTo*(sock: UdpSocket, data: string,
              address: string, port: int): int {.inline.} =
+  if data.len == 0: return 0
   sock.sendTo(data.toOpenArrayByte(0, data.high), address, port)
 
 proc send*(sock: UdpSocket, data: openArray[byte]): int {.inline.} =
+  if data.len == 0: return 0
   let n = sockSend(sock.fd, unsafeAddr data[0], data.len)
   if n < 0:
     if sockWouldBlock():
@@ -65,6 +68,7 @@ proc send*(sock: UdpSocket, data: openArray[byte]): int {.inline.} =
   return n
 
 proc send*(sock: UdpSocket, data: string): int {.inline.} =
+  if data.len == 0: return 0
   sock.send(data.toOpenArrayByte(0, data.high))
 
 # ── Internal read handler ────────────────────────────────────────────────────
