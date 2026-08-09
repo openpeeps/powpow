@@ -20,7 +20,7 @@
 ##   , Port(9000)
 ##   ```
 
-import std/[httpcore, tables, options, net, strutils, os, times, oids]
+import std/[httpcore, tables, options, net, strutils, os, times, oids, paths]
 
 import ../net/tcp
 import ../net/tls
@@ -101,12 +101,11 @@ const
 
 
 func getFileExt*(path: string): string {.inline.} =
-  let dotPos = path.rfind('.')
-  if dotPos < 0: return ""
-  result = newString(path.len - dotPos)
-  for i in dotPos ..< path.len:
-    let c = path[i]
-    result[i - dotPos] = if c >= 'A' and c <= 'Z': char(ord(c) + 32) else: c
+  ## Return the lowercased file extension without the leading dot
+  ## (e.g. `png`), or "" when the path has no extension.
+  result = splitFile(Path(path)).ext
+  if result.len > 0:
+    result = result[1..^1].toLowerAscii()
 
 func parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, length: int64] =
   if not rangeHeader.startsWith("bytes="): return (false, 0, 0)
@@ -469,7 +468,7 @@ proc sendFile*(res: HttpResponse, path: string;
 
     hdrAdd(hdrBuf, p, "Accept-Ranges: bytes\r\n", 22)
 
-    let ext = getFileExt(path)[1..^1]
+    let ext = getFileExt(path)
     let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
     hdrAdd(hdrBuf, p, "Content-Type: ", 14)
     hdrAdd(hdrBuf, p, mimeType)
@@ -608,7 +607,7 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
 
     hdrAdd(hdrBuf, p, "Accept-Ranges: bytes\r\n", 22)
 
-    let ext = getFileExt(path)[1..^1]
+    let ext = getFileExt(path)
     let mimeType = if isExtension(ext): getMimeType(ext).get() else: "application/octet-stream"
     hdrAdd(hdrBuf, p, "Content-Type: ", 14)
     hdrAdd(hdrBuf, p, mimeType)
@@ -1259,7 +1258,7 @@ proc serveFile*(res: HttpResponse, req: HttpRequest, path: string;
       if not matchesEtag and not matchesMtime:
         honorRange = false
 
-    let ext = getFileExt(path)[1..^1]
+    let ext = getFileExt(path)
     let mimeType = if contentType.len > 0: contentType
                    elif isExtension(ext): getMimeType(ext).get()
                    else: "application/octet-stream"
