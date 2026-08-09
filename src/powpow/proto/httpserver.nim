@@ -67,6 +67,8 @@ type
     parserPool: seq[HttpParser]
     reqPool:   seq[HttpRequest]
     resPool:   seq[HttpResponse]
+    wsPool:    seq[pointer]   ## Idle WsConnection refs recycled by websocketUpgrade
+      ## (kept opaque to avoid an httpserver↔ws import cycle).
     keepAliveMs: int
     maxBodySize*: int64
     maxStreamBodySize*: int64
@@ -98,6 +100,10 @@ const
   DefaultKeepAliveMs* = 5_000
   MaxParserPoolSize = 2048
   MaxResPoolSize = 4048
+  MaxWsPoolSize* = 2048
+    ## Idle WebSocket connections recycled by websocketUpgrade. Reusing the
+    ## object keeps its 64KB frame-parser payload and assembly buffer alive, so
+    ## WS connection churn does not re-allocate them.
 
 
 func getFileExt*(path: string): string {.inline.} =
@@ -455,7 +461,7 @@ proc sendFile*(res: HttpResponse, path: string;
     let connHeader = if closeConn: "close" else: "keep-alive"
 
     res.sent = true
-    var hdrBuf = newSeq[byte](768)
+    var hdrBuf = res.bodyBytes
     var p = 0
 
     if status == Http200:
@@ -597,7 +603,7 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
         return
 
     res.sent = true
-    var hdrBuf = newSeq[byte](768)
+    var hdrBuf = res.bodyBytes
     var p = 0
 
     hdrAdd(hdrBuf, p, "HTTP/1.1 206 Partial Content\r\n", 30)
@@ -737,7 +743,11 @@ proc releaseRequest(server: HttpServer, req: HttpRequest) =
 
 proc populatePools*(server: HttpServer; poolSize = 256)
 
-proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
+proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
+  ## Create an HTTP server on the given event loop. Pools (parsers,
+  ## responses, connections, read buffers) are prewarmed by default so the
+  ## request hot path performs no allocations; pass `populate = false` to
+  ## defer ~1 MB of startup allocations.
   let srv = HttpServer(
     tcpServer: nil,
     loop:      loop,
@@ -746,6 +756,7 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     parserPool: @[],
     reqPool:   @[],
     resPool:   @[],
+    wsPool:    @[],
     sslCtx:    nil,
     keepAliveMs: DefaultKeepAliveMs,
     maxBodySize: 0,
@@ -763,7 +774,7 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     srv.populatePools()
   srv
 
-proc newHttpServer*(populate: bool = false): HttpServer =
+proc newHttpServer*(populate: bool = true): HttpServer =
   var eventLoop = newLoop()
   newHttpServer(eventLoop, populate)
 
@@ -790,6 +801,16 @@ proc releaseParser(server: HttpServer, parser: HttpParser) {.inline.} =
   if server.parserPool.len < MaxParserPoolSize:
     parser.reset()
     server.parserPool.add(parser)
+
+proc wsPoolPop*(server: HttpServer): pointer {.inline.} =
+  ## Pop an idle WebSocket connection from the pool, or nil when empty.
+  ## Kept opaque (`pointer`) so httpserver does not need to know WsConnection.
+  if server.wsPool.len > 0: server.wsPool.pop() else: nil
+
+proc wsPoolAdd*(server: HttpServer, ws: pointer) {.inline.} =
+  ## Return an idle WebSocket connection to the pool (dropped when full).
+  if server.wsPool.len < MaxWsPoolSize:
+    server.wsPool.add(ws)
 
 proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
   ## Set the keep-alive idle timeout in milliseconds. 0 disables it.

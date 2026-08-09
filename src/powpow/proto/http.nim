@@ -776,11 +776,7 @@ proc parseChunkedBody(p: HttpParser): bool =
 
       # Ensure body buffer capacity
       if p.buf.len < p.headerEnd + p.chunkBodyLen:
-        let newCap = max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen)
-        var newBuf = newSeq[byte](newCap)
-        if p.bufLen > 0:
-          copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
-        p.buf = newBuf
+        p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
 
       # Copy chunk data to body area
       if remaining > 0:
@@ -814,11 +810,7 @@ proc parseChunkedBody(p: HttpParser): bool =
 
         # Ensure body buffer capacity
         if p.buf.len < p.headerEnd + p.chunkBodyLen:
-          let newCap = max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen)
-          var newBuf = newSeq[byte](newCap)
-          if p.bufLen > 0:
-            copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
-          p.buf = newBuf
+          p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
 
         # Copy partial chunk data
         copyMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], available)
