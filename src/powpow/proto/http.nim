@@ -170,6 +170,20 @@ func parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.}
   of 'T': HttpTrace
   else:   HttpGet  # fallback for unknown methods
 
+func methodToken(m: HttpMethod): cstring {.inline.} =
+  ## Canonical wire token for a resolved method, used to reject near-miss
+  ## tokens like "GETTY" that the first-byte fast path would otherwise accept.
+  case m
+  of HttpHead:    "HEAD"
+  of HttpGet:     "GET"
+  of HttpPost:    "POST"
+  of HttpPut:     "PUT"
+  of HttpDelete:  "DELETE"
+  of HttpTrace:   "TRACE"
+  of HttpOptions: "OPTIONS"
+  of HttpConnect: "CONNECT"
+  of HttpPatch:   "PATCH"
+
 # ── Parser lifecycle ─────────────────────────────────────────────────────────
 
 proc newHttpParser*(initialBufSize = 4096): HttpParser =
@@ -341,6 +355,14 @@ proc parseRequestLine(p: HttpParser): bool =
     return false
 
   p.methodCache = parseMethod(cast[ptr UncheckedArray[byte]](addr p.buf[0]), p.methodLen)
+  # parseMethod is a first-byte fast path, not a validator — reject tokens that
+  # merely share a prefix with a known method ("GETTY", "GIT", "PET", "get").
+  let mToken = methodToken(p.methodCache)
+  if p.methodLen == 0 or p.methodLen != mToken.len or
+     not equalMem(addr p.methodStr[0], mToken, p.methodLen):
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
 
   if i >= crlf:
     p.phase = PhaseError
@@ -363,6 +385,12 @@ proc parseRequestLine(p: HttpParser): bool =
     return false
   p.httpMajor = int(majCh) - ord('0')
   p.httpMinor = int(minCh) - ord('0')
+  # Reject well-formed but unsupported versions (HTTP/1.3, HTTP/0.2, HTTP/2.0)
+  # with 505 (RFC 7230 §2.6). Malformed versions are already 400 above.
+  if p.httpMajor != 1 or p.httpMinor > 1:
+    p.phase = PhaseError
+    p.errorCode = Http505
+    return false
   # Reject trailing garbage after the version token (`HTTP/1.1x`, extra spaces
   # are tolerated since some clients send them).
   var k = i + 8
@@ -416,6 +444,16 @@ proc scanHeaders(p: HttpParser): bool =
         # a header whose name begins with SP/HTAB is a smuggling/parsing hazard.
         let lc = char(buf[lineStart])
         if lc == ' ' or lc == '\t':
+          p.phase = PhaseError
+          p.errorCode = Http400
+          return false
+        # Reject header lines without a colon, or with an empty field name
+        # (RFC 7230 §3.2): a name-less or colon-less line is malformed and a
+        # proxy/back-end desync hazard.
+        var colonPos = lineStart
+        while colonPos < i and char(buf[colonPos]) != ':':
+          inc colonPos
+        if colonPos == lineStart or colonPos >= i:
           p.phase = PhaseError
           p.errorCode = Http400
           return false

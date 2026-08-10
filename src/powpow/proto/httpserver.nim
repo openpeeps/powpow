@@ -108,6 +108,27 @@ const
     ## object keeps its 64KB frame-parser payload and assembly buffer alive, so
     ## WS connection churn does not re-allocate them.
 
+var httpDateCache {.threadvar.}: string
+var httpDateSec {.threadvar.}: int64
+
+proc cachedHttpDate(): string {.inline.} =
+  ## RFC 7231 IMF-fixdate ("Sun, 06 Nov 1994 08:49:37 GMT"), cached once per
+  ## second per thread so the response hot path never re-formats it.
+  let sec = getTime().toUnix()
+  if sec != httpDateSec:
+    httpDateSec = sec
+    let dt = fromUnix(sec).utc()
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    httpDateCache = days[dt.weekday.ord] & ", " &
+                    align($dt.monthday, 2, '0') & " " &
+                    months[dt.month.ord - 1] & " " & $dt.year & " " &
+                    align($dt.hour, 2, '0') & ":" &
+                    align($dt.minute, 2, '0') & ":" &
+                    align($dt.second, 2, '0') & " GMT"
+  httpDateCache
+
 
 func getFileExt*(path: string): string {.inline.} =
   ## Return the lowercased file extension without the leading dot
@@ -274,6 +295,11 @@ proc send*(res: HttpResponse, body: string = "") =
   copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
+  copyMem(addr hdrBuf[p], "Date: ".cstring, 6); p += 6
+  let httpDate = cachedHttpDate()
+  copyMem(addr hdrBuf[p], httpDate.cstring, httpDate.len); p += httpDate.len
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
   copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
   p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), body.len)
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
@@ -335,6 +361,11 @@ proc send*(res: HttpResponse, body: seq[byte]) =
   hdrBuf[p] = byte(' '); p += 1
   let stext = statusText(HttpCode(res.statusCode))
   copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
+  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+
+  copyMem(addr hdrBuf[p], "Date: ".cstring, 6); p += 6
+  let httpDate = cachedHttpDate()
+  copyMem(addr hdrBuf[p], httpDate.cstring, httpDate.len); p += httpDate.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
   copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
@@ -405,6 +436,11 @@ template hdrAdd(buf: var seq[byte]; p: var int; src: string; n: int) =
 template hdrAdd(buf: var seq[byte]; p: var int; s: string) =
   hdrAdd(buf, p, s, s.len)
 
+template hdrDate(buf: var seq[byte]; p: var int) =
+  hdrAdd(buf, p, "Date: ")
+  hdrAdd(buf, p, cachedHttpDate())
+  hdrAdd(buf, p, "\r\n")
+
 template hdrByte(buf: var seq[byte]; p: var int; b: byte) =
   hdrEnsure(buf, p, 1)
   buf[p] = b
@@ -470,6 +506,8 @@ proc sendFile*(res: HttpResponse, path: string;
       hdrAdd(hdrBuf, p, "HTTP/1.1 200 OK\r\n", 17)
     else:
       hdrAdd(hdrBuf, p, "HTTP/1.1 206 Partial Content\r\n", 30)
+
+    hdrDate(hdrBuf, p)
 
     hdrAdd(hdrBuf, p, "Content-Length: ", 16)
     hdrUint(hdrBuf, p, rangeLen)
@@ -610,6 +648,8 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
     var p = 0
 
     hdrAdd(hdrBuf, p, "HTTP/1.1 206 Partial Content\r\n", 30)
+
+    hdrDate(hdrBuf, p)
 
     hdrAdd(hdrBuf, p, "Content-Length: ", 16)
     hdrUint(hdrBuf, p, rangeLen)
