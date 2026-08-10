@@ -256,6 +256,7 @@ func statusText(code: HttpCode): string {.inline.} =
   of 415: "Unsupported Media Type"
   of 416: "Range Not Satisfiable"
   of 429: "Too Many Requests"
+  of 431: "Request Header Fields Too Large"
   of 500: "Internal Server Error"
   of 501: "Not Implemented"
   of 502: "Bad Gateway"
@@ -725,11 +726,12 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
     closeFile(fileFd)
 
 proc sendError*(res: HttpResponse, code: HttpCode, msg: string = "") =
-  ## Send an error response and close the connection.
+  ## Send an error response and close the connection. When no `msg` is given,
+  ## the body defaults to the status code's reason phrase (statusText).
   res.status(code)
   res.header("Content-Type", "text/plain; charset=utf-8")
   res.close()
-  res.send(msg)
+  res.send(if msg.len > 0: msg else: statusText(code))
 
 proc getConn*(res: HttpResponse): Connection {.inline.} =
   ## Get the underlying TCP connection. Used by protocol upgrade
@@ -1078,7 +1080,7 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     p.onBodyData = nil
     let errCode = p.error()
     let res = acquireHttpResponse(server, conn)
-    res.sendError(errCode, "Bad Request")
+    res.sendError(errCode)
     ctx.parser.reset()
 
 # ── Listen ───────────────────────────────────────────────────────────────────
