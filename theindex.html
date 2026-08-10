@@ -28,10 +28,14 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">Index</h1>
-      Modules: <a href="index.html">powpow</a>, <a href="powpow/fswatch.html">powpow/fswatch</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/ratelimit.html">powpow/proto/ratelimit</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/types.html">powpow/types</a>.<br/><p /><h2>API symbols</h2>
+      Modules: <a href="index.html">powpow</a>, <a href="powpow/fswatch.html">powpow/fswatch</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/tls.html">powpow/net/tls</a>, <a href="powpow/net/tlsapi.html">powpow/net/tlsapi</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/ratelimit.html">powpow/proto/ratelimit</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/winpath.html">powpow/proto/winpath</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/signal.html">powpow/signal</a>, <a href="powpow/types.html">powpow/types</a>.<br/><p /><h2>API symbols</h2>
 <dl><dt><a name="%60%3D%3D%60" href="#%60%3D%3D%60"><span>`==`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="types: proc `==`(a, b: TimerId): bool" href="powpow/types.html#%3D%3D%2CTimerId%2CTimerId">types: proc `==`(a, b: TimerId): bool</a></li>
+          </ul></dd>
+<dt><a name="acquireBuf" href="#acquireBuf"><span>acquireBuf:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc acquireBuf(loop: Loop): ptr UncheckedArray[byte]" href="powpow/net/tcp.html#acquireBuf%2CLoop">tcp: proc acquireBuf(loop: Loop): ptr UncheckedArray[byte]</a></li>
           </ul></dd>
 <dt><a name="add" href="#add"><span>add:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -110,6 +114,8 @@
           data-doc-search-tag="httpserver: proc close(server: HttpServer)" href="powpow/proto/httpserver.html#close%2CHttpServer">httpserver: proc close(server: HttpServer)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="multithread: proc close(srv: MultiThreadHttpServer)" href="powpow/proto/multithread.html#close%2CMultiThreadHttpServer">multithread: proc close(srv: MultiThreadHttpServer)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="ratelimit: proc close(rl: RateLimiter)" href="powpow/proto/ratelimit.html#close%2CRateLimiter">ratelimit: proc close(rl: RateLimiter)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="ws: proc close(wss: WsServer)" href="powpow/proto/ws.html#close%2CWsServer">ws: proc close(wss: WsServer)</a></li>
           </ul></dd>
@@ -217,6 +223,14 @@
 <li><a class="reference external"
           data-doc-search-tag="http: proc drainChunk(stream: var BodyStream; len: Natural)" href="powpow/proto/http.html#drainChunk%2CBodyStream%2CNatural">http: proc drainChunk(stream: var BodyStream; len: Natural)</a></li>
           </ul></dd>
+<dt><a name="driveHandshake" href="#driveHandshake"><span>driveHandshake:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc driveHandshake(conn: Connection): bool" href="powpow/net/tcp.html#driveHandshake%2CConnection">tcp: proc driveHandshake(conn: Connection): bool</a></li>
+          </ul></dd>
+<dt><a name="emit" href="#emit"><span>emit:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="signal: proc emit(relay: SignalRelay; signalId: int)" href="powpow/signal.html#emit%2CSignalRelay%2Cint">signal: proc emit(relay: SignalRelay; signalId: int)</a></li>
+          </ul></dd>
 <dt><a name="ensureCapacity" href="#ensureCapacity"><span>ensureCapacity:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="epoll: proc ensureCapacity(p: Platform; fdCount: int)" href="powpow/platform/epoll.html#ensureCapacity%2CPlatform%2Cint">epoll: proc ensureCapacity(p: Platform; fdCount: int)</a></li>
@@ -224,6 +238,14 @@
 <dt><a name="ensureTcpServer" href="#ensureTcpServer"><span>ensureTcpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc ensureTcpServer(server: HttpServer)" href="powpow/proto/httpserver.html#ensureTcpServer%2CHttpServer">httpserver: proc ensureTcpServer(server: HttpServer)</a></li>
+          </ul></dd>
+<dt><a name="ERR_error_string" href="#ERR_error_string"><span>ERR_error_string:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc ERR_error_string(e: culong; buf: cstring): cstring" href="powpow/net/tlsapi.html#ERR_error_string%2Cculong%2Ccstring">tlsapi: proc ERR_error_string(e: culong; buf: cstring): cstring</a></li>
+          </ul></dd>
+<dt><a name="ERR_get_error" href="#ERR_get_error"><span>ERR_get_error:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc ERR_get_error(): culong" href="powpow/net/tlsapi.html#ERR_get_error">tlsapi: proc ERR_get_error(): culong</a></li>
           </ul></dd>
 <dt><a name="error" href="#error"><span>error:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -339,6 +361,10 @@
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc getClientIp(res: HttpResponse): string" href="powpow/proto/httpserver.html#getClientIp%2CHttpResponse">httpserver: proc getClientIp(res: HttpResponse): string</a></li>
           </ul></dd>
+<dt><a name="getClientSockAddr" href="#getClientSockAddr"><span>getClientSockAddr:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc getClientSockAddr(conn: Connection): Sockaddr_storage" href="powpow/net/tcp.html#getClientSockAddr%2CConnection">tcp: proc getClientSockAddr(conn: Connection): Sockaddr_storage</a></li>
+          </ul></dd>
 <dt><a name="getConn" href="#getConn"><span>getConn:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc getConn(res: HttpResponse): Connection" href="powpow/proto/httpserver.html#getConn%2CHttpResponse">httpserver: proc getConn(res: HttpResponse): Connection</a></li>
@@ -398,6 +424,10 @@
 <dt><a name="getUrl" href="#getUrl"><span>getUrl:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getUrl(req: HttpRequest): lent string" href="powpow/proto/http.html#getUrl%2CHttpRequest">http: proc getUrl(req: HttpRequest): lent string</a></li>
+          </ul></dd>
+<dt><a name="handshakeCount" href="#handshakeCount"><span>handshakeCount:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: proc handshakeCount(wss: WsServer): int" href="powpow/proto/ws.html#handshakeCount%2CWsServer">ws: proc handshakeCount(wss: WsServer): int</a></li>
           </ul></dd>
 <dt><a name="hasSse2" href="#hasSse2"><span>hasSse2:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -459,6 +489,10 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc isRunning(loop: Loop): bool" href="powpow/loop.html#isRunning%2CLoop">loop: proc isRunning(loop: Loop): bool</a></li>
           </ul></dd>
+<dt><a name="isTlsActive" href="#isTlsActive"><span>isTlsActive:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: proc isTlsActive(conn: Connection): bool" href="powpow/net/tls.html#isTlsActive%2CConnection">tls: proc isTlsActive(conn: Connection): bool</a></li>
+          </ul></dd>
 <dt><a name="lastSocketError" href="#lastSocketError"><span>lastSocketError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc lastSocketError(): cint" href="powpow/net/common.html#lastSocketError">common: proc lastSocketError(): cint</a></li>
@@ -472,6 +506,16 @@
           data-doc-search-tag="multithread: proc listen(srv: MultiThreadHttpServer; address: string; port: int)" href="powpow/proto/multithread.html#listen%2CMultiThreadHttpServer%2Cstring%2Cint">multithread: proc listen(srv: MultiThreadHttpServer; address: string; port: int)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="ws: proc listen(wss: WsServer; address: string; port: int)" href="powpow/proto/ws.html#listen%2CWsServer%2Cstring%2Cint">ws: proc listen(wss: WsServer; address: string; port: int)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="signal: proc listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle" href="powpow/signal.html#listen%2CSignalRelay%2Cint%2CCallback">signal: proc listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle</a></li>
+          </ul></dd>
+<dt><a name="ListenerHandle" href="#ListenerHandle"><span>ListenerHandle:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="signal: type ListenerHandle" href="powpow/signal.html#ListenerHandle">signal: type ListenerHandle</a></li>
+          </ul></dd>
+<dt><a name="listenOnce" href="#listenOnce"><span>listenOnce:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="signal: proc listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle" href="powpow/signal.html#listenOnce%2CSignalRelay%2Cint%2CCallback">signal: proc listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle</a></li>
           </ul></dd>
 <dt><a name="listenUnix" href="#listenUnix"><span>listenUnix:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -509,6 +553,14 @@
           <li><a class="reference external"
           data-doc-search-tag="simdscan: const MaxRequestLine" href="powpow/proto/simdscan.html#MaxRequestLine">simdscan: const MaxRequestLine</a></li>
           </ul></dd>
+<dt><a name="MaxStreamBodySize" href="#MaxStreamBodySize"><span>MaxStreamBodySize:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: const MaxStreamBodySize" href="powpow/proto/http.html#MaxStreamBodySize">http: const MaxStreamBodySize</a></li>
+          </ul></dd>
+<dt><a name="MaxWsPoolSize" href="#MaxWsPoolSize"><span>MaxWsPoolSize:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: const MaxWsPoolSize" href="powpow/proto/httpserver.html#MaxWsPoolSize">httpserver: const MaxWsPoolSize</a></li>
+          </ul></dd>
 <dt><a name="modify" href="#modify"><span>modify:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="loop: proc modify(loop: Loop; fd: int; events: set[EventType])" href="powpow/loop.html#modify%2CLoop%2Cint%2Cset%5BEventType%5D">loop: proc modify(loop: Loop; fd: int; events: set[EventType])</a></li>
@@ -517,6 +569,10 @@
        udata: pointer = nil)" href="powpow/platform/epoll.html#modify%2CPlatform%2Cint%2Cset%5BEventType%5D%2Cpointer">epoll: proc modify(p: Platform; fd: int; events: set[EventType]; edgeTriggered = false;
        udata: pointer = nil)</a></li>
           </ul></dd>
+<dt><a name="monoMs" href="#monoMs"><span>monoMs:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: proc monoMs(): int64" href="powpow/loop.html#monoMs">loop: proc monoMs(): int64</a></li>
+          </ul></dd>
 <dt><a name="MultiThreadHttpServer" href="#MultiThreadHttpServer"><span>MultiThreadHttpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="multithread: type MultiThreadHttpServer" href="powpow/proto/multithread.html#MultiThreadHttpServer">multithread: type MultiThreadHttpServer</a></li>
@@ -524,6 +580,10 @@
 <dt><a name="NetError" href="#NetError"><span>NetError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: object NetError" href="powpow/net/common.html#NetError">common: object NetError</a></li>
+          </ul></dd>
+<dt><a name="newClientTlsContext" href="#newClientTlsContext"><span>newClientTlsContext:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: proc newClientTlsContext(): SslContext" href="powpow/net/tls.html#newClientTlsContext">tls: proc newClientTlsContext(): SslContext</a></li>
           </ul></dd>
 <dt><a name="newConnection" href="#newConnection"><span>newConnection:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -541,9 +601,9 @@
           </ul></dd>
 <dt><a name="newHttpServer" href="#newHttpServer"><span>newHttpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc newHttpServer(populate: bool = false): HttpServer" href="powpow/proto/httpserver.html#newHttpServer%2Cbool">httpserver: proc newHttpServer(populate: bool = false): HttpServer</a></li>
+          data-doc-search-tag="httpserver: proc newHttpServer(populate: bool = true): HttpServer" href="powpow/proto/httpserver.html#newHttpServer%2Cbool">httpserver: proc newHttpServer(populate: bool = true): HttpServer</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpserver: proc newHttpServer(loop: Loop; populate: bool = false): HttpServer" href="powpow/proto/httpserver.html#newHttpServer%2CLoop%2Cbool">httpserver: proc newHttpServer(loop: Loop; populate: bool = false): HttpServer</a></li>
+          data-doc-search-tag="httpserver: proc newHttpServer(loop: Loop; populate: bool = true): HttpServer" href="powpow/proto/httpserver.html#newHttpServer%2CLoop%2Cbool">httpserver: proc newHttpServer(loop: Loop; populate: bool = true): HttpServer</a></li>
           </ul></dd>
 <dt><a name="newLoop" href="#newLoop"><span>newLoop:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -556,6 +616,14 @@
 <dt><a name="newRateLimiter" href="#newRateLimiter"><span>newRateLimiter:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ratelimit: proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter" href="powpow/proto/ratelimit.html#newRateLimiter%2CLoop%2Cint%2Cint">ratelimit: proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter</a></li>
+          </ul></dd>
+<dt><a name="newServerTlsContext" href="#newServerTlsContext"><span>newServerTlsContext:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: proc newServerTlsContext(certFile, keyFile: string): SslContext" href="powpow/net/tls.html#newServerTlsContext%2Cstring%2Cstring">tls: proc newServerTlsContext(certFile, keyFile: string): SslContext</a></li>
+          </ul></dd>
+<dt><a name="newSignalRelay" href="#newSignalRelay"><span>newSignalRelay:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="signal: proc newSignalRelay(loop: Loop; maxSignals: int): SignalRelay" href="powpow/signal.html#newSignalRelay%2CLoop%2Cint">signal: proc newSignalRelay(loop: Loop; maxSignals: int): SignalRelay</a></li>
           </ul></dd>
 <dt><a name="newTcpServer" href="#newTcpServer"><span>newTcpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -572,6 +640,10 @@
           data-doc-search-tag="ws: proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer" href="powpow/proto/ws.html#newWsServer%2Cint">ws: proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
           <li><a class="reference external"
           data-doc-search-tag="ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer" href="powpow/proto/ws.html#newWsServer%2CLoop%2Cint">ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
+          </ul></dd>
+<dt><a name="O_BINARY" href="#O_BINARY"><span>O_BINARY:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="common: const O_BINARY" href="powpow/net/common.html#O_BINARY">common: const O_BINARY</a></li>
           </ul></dd>
 <dt><a name="observe" href="#observe"><span>observe:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -624,6 +696,10 @@
 <dt><a name="openFileRead" href="#openFileRead"><span>openFileRead:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc openFileRead(path: string): int" href="powpow/net/common.html#openFileRead%2Cstring">common: proc openFileRead(path: string): int</a></li>
+          </ul></dd>
+<dt><a name="opensslError" href="#opensslError"><span>opensslError:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc opensslError(): string" href="powpow/net/tlsapi.html#opensslError">tlsapi: proc opensslError(): string</a></li>
           </ul></dd>
 <dt><a name="O_RDONLY" href="#O_RDONLY"><span>O_RDONLY:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -741,6 +817,10 @@
          edgeTriggered = false)" href="powpow/loop.html#register%2CLoop%2Cint%2Cset%5BEventType%5D%2CFdCallback">loop: proc register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;
          edgeTriggered = false)</a></li>
           </ul></dd>
+<dt><a name="releaseBuf" href="#releaseBuf"><span>releaseBuf:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc releaseBuf(loop: Loop; buf: ptr UncheckedArray[byte])" href="powpow/net/tcp.html#releaseBuf%2CLoop%2Cptr.UncheckedArray%5Bbyte%5D">tcp: proc releaseBuf(loop: Loop; buf: ptr UncheckedArray[byte])</a></li>
+          </ul></dd>
 <dt><a name="remove" href="#remove"><span>remove:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="epoll: proc remove(p: Platform; fd: int)" href="powpow/platform/epoll.html#remove%2CPlatform%2Cint">epoll: proc remove(p: Platform; fd: int)</a></li>
@@ -766,6 +846,10 @@
 <dt><a name="resolveAddr" href="#resolveAddr"><span>resolveAddr:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage" href="powpow/net/common.html#resolveAddr%2Cstring%2Cint%2Cint">common: proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage</a></li>
+          </ul></dd>
+<dt><a name="resolveReal" href="#resolveReal"><span>resolveReal:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc resolveReal(path: string): string" href="powpow/proto/httpserver.html#resolveReal%2Cstring">httpserver: proc resolveReal(path: string): string</a></li>
           </ul></dd>
 <dt><a name="resumeTimer" href="#resumeTimer"><span>resumeTimer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -875,9 +959,17 @@
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;
             fsRoot: string;
-            indexFiles: seq[string] = @[&quot;index.html&quot;, &quot;index.htm&quot;]): bool" href="powpow/proto/httpserver.html#serveStatic%2CHttpResponse%2CHttpRequest%2Cstring%2Cstring%2Cseq%5Bstring%5D">httpserver: proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;
+            indexFiles: openArray[string] = [&quot;index.html&quot;, &quot;index.htm&quot;]): bool" href="powpow/proto/httpserver.html#serveStatic%2CHttpResponse%2CHttpRequest%2Cstring%2Cstring%2CopenArray%5Bstring%5D">httpserver: proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;
             fsRoot: string;
-            indexFiles: seq[string] = @[&quot;index.html&quot;, &quot;index.htm&quot;]): bool</a></li>
+            indexFiles: openArray[string] = [&quot;index.html&quot;, &quot;index.htm&quot;]): bool</a></li>
+          </ul></dd>
+<dt><a name="setError" href="#setError"><span>setError:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc setError(p: HttpParser; code: HttpCode)" href="powpow/proto/http.html#setError%2CHttpParser%2CHttpCode">http: proc setError(p: HttpParser; code: HttpCode)</a></li>
+          </ul></dd>
+<dt><a name="setIpv6Only" href="#setIpv6Only"><span>setIpv6Only:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="common: proc setIpv6Only(fd: SocketHandle)" href="powpow/net/common.html#setIpv6Only%2CSocketHandle">common: proc setIpv6Only(fd: SocketHandle)</a></li>
           </ul></dd>
 <dt><a name="setKeepAliveTimeout" href="#setKeepAliveTimeout"><span>setKeepAliveTimeout:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -906,6 +998,10 @@
 <dt><a name="shutdown" href="#shutdown"><span>shutdown:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: proc shutdown(conn: Connection)" href="powpow/net/tcp.html#shutdown%2CConnection">tcp: proc shutdown(conn: Connection)</a></li>
+          </ul></dd>
+<dt><a name="SignalRelay" href="#SignalRelay"><span>SignalRelay:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="signal: type SignalRelay" href="powpow/signal.html#SignalRelay">signal: type SignalRelay</a></li>
           </ul></dd>
 <dt><a name="sockClose" href="#sockClose"><span>sockClose:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -938,6 +1034,118 @@
 <dt><a name="sockWritev" href="#sockWritev"><span>sockWritev:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc sockWritev(fd: SocketHandle; iov: ptr IOVec; iovcnt: int): int" href="powpow/net/common.html#sockWritev%2CSocketHandle%2Cptr.IOVec%2Cint">common: proc sockWritev(fd: SocketHandle; iov: ptr IOVec; iovcnt: int): int</a></li>
+          </ul></dd>
+<dt><a name="SslContext" href="#SslContext"><span>SslContext:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: type SslContext" href="powpow/net/tls.html#SslContext">tls: type SslContext</a></li>
+          </ul></dd>
+<dt><a name="SslCtx" href="#SslCtx"><span>SslCtx:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: type SslCtx" href="powpow/net/tlsapi.html#SslCtx">tlsapi: type SslCtx</a></li>
+          </ul></dd>
+<dt><a name="SSL_CTX_check_private_key" href="#SSL_CTX_check_private_key"><span>SSL_CTX_check_private_key:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_CTX_check_private_key(c: SslCtx): cint" href="powpow/net/tlsapi.html#SSL_CTX_check_private_key%2CSslCtx">tlsapi: proc SSL_CTX_check_private_key(c: SslCtx): cint</a></li>
+          </ul></dd>
+<dt><a name="SSL_CTX_free" href="#SSL_CTX_free"><span>SSL_CTX_free:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_CTX_free(c: SslCtx)" href="powpow/net/tlsapi.html#SSL_CTX_free%2CSslCtx">tlsapi: proc SSL_CTX_free(c: SslCtx)</a></li>
+          </ul></dd>
+<dt><a name="SSL_CTX_new" href="#SSL_CTX_new"><span>SSL_CTX_new:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_CTX_new(m: pointer): SslCtx" href="powpow/net/tlsapi.html#SSL_CTX_new%2Cpointer">tlsapi: proc SSL_CTX_new(m: pointer): SslCtx</a></li>
+          </ul></dd>
+<dt><a name="SSL_CTX_set_verify" href="#SSL_CTX_set_verify"><span>SSL_CTX_set_verify:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_CTX_set_verify(c: SslCtx; mode: cint; cb: pointer)" href="powpow/net/tlsapi.html#SSL_CTX_set_verify%2CSslCtx%2Ccint%2Cpointer">tlsapi: proc SSL_CTX_set_verify(c: SslCtx; mode: cint; cb: pointer)</a></li>
+          </ul></dd>
+<dt><a name="SSL_CTX_use_certificate_file" href="#SSL_CTX_use_certificate_file"><span>SSL_CTX_use_certificate_file:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_CTX_use_certificate_file(c: SslCtx; file: cstring; typ: cint): cint" href="powpow/net/tlsapi.html#SSL_CTX_use_certificate_file%2CSslCtx%2Ccstring%2Ccint">tlsapi: proc SSL_CTX_use_certificate_file(c: SslCtx; file: cstring; typ: cint): cint</a></li>
+          </ul></dd>
+<dt><a name="SSL_CTX_use_PrivateKey_file" href="#SSL_CTX_use_PrivateKey_file"><span>SSL_CTX_use_PrivateKey_file:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_CTX_use_PrivateKey_file(c: SslCtx; file: cstring; typ: cint): cint" href="powpow/net/tlsapi.html#SSL_CTX_use_PrivateKey_file%2CSslCtx%2Ccstring%2Ccint">tlsapi: proc SSL_CTX_use_PrivateKey_file(c: SslCtx; file: cstring; typ: cint): cint</a></li>
+          </ul></dd>
+<dt><a name="SSL_do_handshake" href="#SSL_do_handshake"><span>SSL_do_handshake:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_do_handshake(s: SslPtr): cint" href="powpow/net/tlsapi.html#SSL_do_handshake%2CSslPtr">tlsapi: proc SSL_do_handshake(s: SslPtr): cint</a></li>
+          </ul></dd>
+<dt><a name="SslError" href="#SslError"><span>SslError:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: object SslError" href="powpow/net/tls.html#SslError">tls: object SslError</a></li>
+          </ul></dd>
+<dt><a name="SSL_ERROR_NONE" href="#SSL_ERROR_NONE"><span>SSL_ERROR_NONE:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_ERROR_NONE" href="powpow/net/tlsapi.html#SSL_ERROR_NONE">tlsapi: const SSL_ERROR_NONE</a></li>
+          </ul></dd>
+<dt><a name="SSL_ERROR_SSL" href="#SSL_ERROR_SSL"><span>SSL_ERROR_SSL:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_ERROR_SSL" href="powpow/net/tlsapi.html#SSL_ERROR_SSL">tlsapi: const SSL_ERROR_SSL</a></li>
+          </ul></dd>
+<dt><a name="SSL_ERROR_SYSCALL" href="#SSL_ERROR_SYSCALL"><span>SSL_ERROR_SYSCALL:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_ERROR_SYSCALL" href="powpow/net/tlsapi.html#SSL_ERROR_SYSCALL">tlsapi: const SSL_ERROR_SYSCALL</a></li>
+          </ul></dd>
+<dt><a name="SSL_ERROR_WANT_READ" href="#SSL_ERROR_WANT_READ"><span>SSL_ERROR_WANT_READ:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_ERROR_WANT_READ" href="powpow/net/tlsapi.html#SSL_ERROR_WANT_READ">tlsapi: const SSL_ERROR_WANT_READ</a></li>
+          </ul></dd>
+<dt><a name="SSL_ERROR_WANT_WRITE" href="#SSL_ERROR_WANT_WRITE"><span>SSL_ERROR_WANT_WRITE:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_ERROR_WANT_WRITE" href="powpow/net/tlsapi.html#SSL_ERROR_WANT_WRITE">tlsapi: const SSL_ERROR_WANT_WRITE</a></li>
+          </ul></dd>
+<dt><a name="SSL_ERROR_ZERO_RETURN" href="#SSL_ERROR_ZERO_RETURN"><span>SSL_ERROR_ZERO_RETURN:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_ERROR_ZERO_RETURN" href="powpow/net/tlsapi.html#SSL_ERROR_ZERO_RETURN">tlsapi: const SSL_ERROR_ZERO_RETURN</a></li>
+          </ul></dd>
+<dt><a name="SSL_FILETYPE_PEM" href="#SSL_FILETYPE_PEM"><span>SSL_FILETYPE_PEM:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_FILETYPE_PEM" href="powpow/net/tlsapi.html#SSL_FILETYPE_PEM">tlsapi: const SSL_FILETYPE_PEM</a></li>
+          </ul></dd>
+<dt><a name="SSL_free" href="#SSL_free"><span>SSL_free:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_free(s: SslPtr)" href="powpow/net/tlsapi.html#SSL_free%2CSslPtr">tlsapi: proc SSL_free(s: SslPtr)</a></li>
+          </ul></dd>
+<dt><a name="SSL_get_error" href="#SSL_get_error"><span>SSL_get_error:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_get_error(s: SslPtr; ret: cint): cint" href="powpow/net/tlsapi.html#SSL_get_error%2CSslPtr%2Ccint">tlsapi: proc SSL_get_error(s: SslPtr; ret: cint): cint</a></li>
+          </ul></dd>
+<dt><a name="SSL_new" href="#SSL_new"><span>SSL_new:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_new(c: SslCtx): SslPtr" href="powpow/net/tlsapi.html#SSL_new%2CSslCtx">tlsapi: proc SSL_new(c: SslCtx): SslPtr</a></li>
+          </ul></dd>
+<dt><a name="SslPtr" href="#SslPtr"><span>SslPtr:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: type SslPtr" href="powpow/net/tlsapi.html#SslPtr">tlsapi: type SslPtr</a></li>
+          </ul></dd>
+<dt><a name="SSL_read" href="#SSL_read"><span>SSL_read:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_read(s: SslPtr; buf: pointer; num: cint): cint" href="powpow/net/tlsapi.html#SSL_read%2CSslPtr%2Cpointer%2Ccint">tlsapi: proc SSL_read(s: SslPtr; buf: pointer; num: cint): cint</a></li>
+          </ul></dd>
+<dt><a name="SSL_set_accept_state" href="#SSL_set_accept_state"><span>SSL_set_accept_state:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_set_accept_state(s: SslPtr)" href="powpow/net/tlsapi.html#SSL_set_accept_state%2CSslPtr">tlsapi: proc SSL_set_accept_state(s: SslPtr)</a></li>
+          </ul></dd>
+<dt><a name="SSL_set_connect_state" href="#SSL_set_connect_state"><span>SSL_set_connect_state:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_set_connect_state(s: SslPtr)" href="powpow/net/tlsapi.html#SSL_set_connect_state%2CSslPtr">tlsapi: proc SSL_set_connect_state(s: SslPtr)</a></li>
+          </ul></dd>
+<dt><a name="SSL_set_fd" href="#SSL_set_fd"><span>SSL_set_fd:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_set_fd(s: SslPtr; fd: cint): cint" href="powpow/net/tlsapi.html#SSL_set_fd%2CSslPtr%2Ccint">tlsapi: proc SSL_set_fd(s: SslPtr; fd: cint): cint</a></li>
+          </ul></dd>
+<dt><a name="SSL_shutdown" href="#SSL_shutdown"><span>SSL_shutdown:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_shutdown(s: SslPtr): cint" href="powpow/net/tlsapi.html#SSL_shutdown%2CSslPtr">tlsapi: proc SSL_shutdown(s: SslPtr): cint</a></li>
+          </ul></dd>
+<dt><a name="SSL_VERIFY_NONE" href="#SSL_VERIFY_NONE"><span>SSL_VERIFY_NONE:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: const SSL_VERIFY_NONE" href="powpow/net/tlsapi.html#SSL_VERIFY_NONE">tlsapi: const SSL_VERIFY_NONE</a></li>
+          </ul></dd>
+<dt><a name="SSL_write" href="#SSL_write"><span>SSL_write:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint" href="powpow/net/tlsapi.html#SSL_write%2CSslPtr%2Cpointer%2Ccint">tlsapi: proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint</a></li>
           </ul></dd>
 <dt><a name="start" href="#start"><span>start:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -981,6 +1189,54 @@
 <li><a class="reference external"
           data-doc-search-tag="types: type TimerId" href="powpow/types.html#TimerId">types: type TimerId</a></li>
           </ul></dd>
+<dt><a name="TlsActive" href="#TlsActive"><span>TlsActive:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="types: TlsState.TlsActive" href="powpow/types.html#TlsActive">types: TlsState.TlsActive</a></li>
+          </ul></dd>
+<dt><a name="TlsClient" href="#TlsClient"><span>TlsClient:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: TlsRole.TlsClient" href="powpow/net/tls.html#TlsClient">tls: TlsRole.TlsClient</a></li>
+          </ul></dd>
+<dt><a name="TLS_client_method" href="#TLS_client_method"><span>TLS_client_method:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc TLS_client_method(): pointer" href="powpow/net/tlsapi.html#TLS_client_method">tlsapi: proc TLS_client_method(): pointer</a></li>
+          </ul></dd>
+<dt><a name="tlsFree" href="#tlsFree"><span>tlsFree:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc tlsFree(conn: Connection)" href="powpow/net/tcp.html#tlsFree%2CConnection">tcp: proc tlsFree(conn: Connection)</a></li>
+          </ul></dd>
+<dt><a name="TlsHandshaking" href="#TlsHandshaking"><span>TlsHandshaking:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="types: TlsState.TlsHandshaking" href="powpow/types.html#TlsHandshaking">types: TlsState.TlsHandshaking</a></li>
+          </ul></dd>
+<dt><a name="TlsOff" href="#TlsOff"><span>TlsOff:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="types: TlsState.TlsOff" href="powpow/types.html#TlsOff">types: TlsState.TlsOff</a></li>
+          </ul></dd>
+<dt><a name="tlsRead" href="#tlsRead"><span>tlsRead:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc tlsRead(conn: Connection; buf: pointer; count: int): int" href="powpow/net/tcp.html#tlsRead%2CConnection%2Cpointer%2Cint">tcp: proc tlsRead(conn: Connection; buf: pointer; count: int): int</a></li>
+          </ul></dd>
+<dt><a name="TlsRole" href="#TlsRole"><span>TlsRole:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: enum TlsRole" href="powpow/net/tls.html#TlsRole">tls: enum TlsRole</a></li>
+          </ul></dd>
+<dt><a name="TlsServer" href="#TlsServer"><span>TlsServer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: TlsRole.TlsServer" href="powpow/net/tls.html#TlsServer">tls: TlsRole.TlsServer</a></li>
+          </ul></dd>
+<dt><a name="TLS_server_method" href="#TLS_server_method"><span>TLS_server_method:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tlsapi: proc TLS_server_method(): pointer" href="powpow/net/tlsapi.html#TLS_server_method">tlsapi: proc TLS_server_method(): pointer</a></li>
+          </ul></dd>
+<dt><a name="TlsState" href="#TlsState"><span>TlsState:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="types: enum TlsState" href="powpow/types.html#TlsState">types: enum TlsState</a></li>
+          </ul></dd>
+<dt><a name="tlsWrite" href="#tlsWrite"><span>tlsWrite:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc tlsWrite(conn: Connection; buf: pointer; count: int): int" href="powpow/net/tcp.html#tlsWrite%2CConnection%2Cpointer%2Cint">tcp: proc tlsWrite(conn: Connection; buf: pointer; count: int): int</a></li>
+          </ul></dd>
 <dt><a name="tryAdvance" href="#tryAdvance"><span>tryAdvance:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc tryAdvance(p: HttpParser)" href="powpow/proto/http.html#tryAdvance%2CHttpParser">http: proc tryAdvance(p: HttpParser)</a></li>
@@ -992,6 +1248,10 @@
 <dt><a name="UNIX_PATH_MAX" href="#UNIX_PATH_MAX"><span>UNIX_PATH_MAX:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: const UNIX_PATH_MAX" href="powpow/net/common.html#UNIX_PATH_MAX">common: const UNIX_PATH_MAX</a></li>
+          </ul></dd>
+<dt><a name="unlisten" href="#unlisten"><span>unlisten:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="signal: proc unlisten(li: ListenerHandle)" href="powpow/signal.html#unlisten%2CListenerHandle">signal: proc unlisten(li: ListenerHandle)</a></li>
           </ul></dd>
 <dt><a name="unregister" href="#unregister"><span>unregister:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1014,6 +1274,14 @@
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
                  onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
                  maxFrameSize: int = DefaultMaxFrameSize): WsConnection</a></li>
+          </ul></dd>
+<dt><a name="withinRoot" href="#withinRoot"><span>withinRoot:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc withinRoot(root, path: string): bool" href="powpow/proto/httpserver.html#withinRoot%2Cstring%2Cstring">httpserver: proc withinRoot(root, path: string): bool</a></li>
+          </ul></dd>
+<dt><a name="wrapTls" href="#wrapTls"><span>wrapTls:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tls: proc wrapTls(conn: Connection; ctx: SslContext)" href="powpow/net/tls.html#wrapTls%2CConnection%2CSslContext">tls: proc wrapTls(conn: Connection; ctx: SslContext)</a></li>
           </ul></dd>
 <dt><a name="Write" href="#Write"><span>Write:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1077,6 +1345,14 @@
 <li><a class="reference external"
           data-doc-search-tag="ws: WsFrameKind.wsPong" href="powpow/proto/ws.html#wsPong">ws: WsFrameKind.wsPong</a></li>
           </ul></dd>
+<dt><a name="wsPoolAdd" href="#wsPoolAdd"><span>wsPoolAdd:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc wsPoolAdd(server: HttpServer; ws: pointer)" href="powpow/proto/httpserver.html#wsPoolAdd%2CHttpServer%2Cpointer">httpserver: proc wsPoolAdd(server: HttpServer; ws: pointer)</a></li>
+          </ul></dd>
+<dt><a name="wsPoolPop" href="#wsPoolPop"><span>wsPoolPop:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc wsPoolPop(server: HttpServer): pointer" href="powpow/proto/httpserver.html#wsPoolPop%2CHttpServer">httpserver: proc wsPoolPop(server: HttpServer): pointer</a></li>
+          </ul></dd>
 <dt><a name="WsServer" href="#WsServer"><span>WsServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ws: type WsServer" href="powpow/proto/ws.html#WsServer">ws: type WsServer</a></li>
@@ -1089,7 +1365,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-14 10:23:06 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:56 UTC</small>
       </div>
     </div>
   </div>

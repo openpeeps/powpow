@@ -67,6 +67,9 @@
   buf*: seq[byte]            ## Accumulation buffer
   bufLen*: int               ## Current buffer length
   maxBodySize*: int64        ## Max body size (0 = unlimited)
+  maxStreamBodySize*: int64 ## Hard cap for streamed/chunked bodies when
+                            ## maxBodySize == 0 (0 = use MaxStreamBodySize). Lets an operator lower
+                            ## the 512 MB backstop without changing code.
   headerEnd*: int            ## Byte offset past \r\n\r\n
   contentLength*: int        ## From Content-Length header (-1 if absent)
   connectionClose*: bool     ## Connection: close seen
@@ -105,6 +108,7 @@
 <li><a class="reference" href="#MaxHeaders" title="MaxHeaders = 100">MaxHeaders</a></li>
 <li><a class="reference" href="#MaxHeaderSize" title="MaxHeaderSize = 8192">MaxHeaderSize</a></li>
 <li><a class="reference" href="#MaxRequestLine" title="MaxRequestLine = 8192">MaxRequestLine</a></li>
+<li><a class="reference" href="#MaxStreamBodySize" title="MaxStreamBodySize = 536870912">MaxStreamBodySize</a></li>
 
     </ul>
   </details>
@@ -252,6 +256,10 @@
   <li><a class="reference" href="#resetForNext%2CHttpParser" title="resetForNext(p: HttpParser)">resetForNext(p: HttpParser)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">setError
+  <li><a class="reference" href="#setError%2CHttpParser%2CHttpCode" title="setError(p: HttpParser; code: HttpCode)">setError(p: HttpParser; code: HttpCode)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">streamToFile
   <li><a class="reference" href="#streamToFile%2CHttpRequest%2Cstring" title="streamToFile(req: HttpRequest; tmpDir = &quot;&quot;): string">streamToFile(req: HttpRequest; tmpDir = &quot;&quot;): string</a></li>
 
@@ -311,6 +319,9 @@
   <span class="Identifier">buf</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span>            <span class="Comment">## Accumulation buffer</span>
   <span class="Identifier">bufLen</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>               <span class="Comment">## Current buffer length</span>
   <span class="Identifier">maxBodySize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>        <span class="Comment">## Max body size (0 = unlimited)</span>
+  <span class="Identifier">maxStreamBodySize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span> <span class="Comment">## Hard cap for streamed/chunked bodies when</span>
+                            <span class="Comment">## maxBodySize == 0 (0 = use MaxStreamBodySize). Lets an operator lower</span>
+                            <span class="Comment">## the 512 MB backstop without changing code.</span>
   <span class="Identifier">headerEnd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>            <span class="Comment">## Byte offset past \r\n\r\n</span>
   <span class="Identifier">contentLength</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>        <span class="Comment">## From Content-Length header (-1 if absent)</span>
   <span class="Identifier">connectionClose</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>     <span class="Comment">## Connection: close seen</span>
@@ -392,6 +403,14 @@
   <dd>
     
     Max request line size
+    
+  </dd>
+</div>
+<div id="MaxStreamBodySize">
+  <dt><pre><a href="#MaxStreamBodySize"><span class="Identifier">MaxStreamBodySize</span></a> <span class="Other">=</span> <span class="DecNumber">536870912</span></pre></dt>
+  <dd>
+    
+    Absolute cap for streamed bodies (onBodyData) when maxBodySize == 0: a hostile client can't drive unbounded disk/RAM via a streaming upload.
     
   </dd>
 </div>
@@ -571,7 +590,7 @@
 <div id="getMultipart-procs-all">
   <div id="getMultipart,HttpRequest,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#getMultipart%2CHttpRequest%2Cstring"><span class="Identifier">getMultipart</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">tmpDir</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">MultipartStreamerRef</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span>
-    <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">MultipartSizeLimitError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">MultipartConfigError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
     <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span>
     <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -821,6 +840,18 @@
 </div>
 
 </div>
+<div id="setError-procs-all">
+  <div id="setError,HttpParser,HttpCode">
+  <dt><pre><span class="Keyword">proc</span> <a href="#setError%2CHttpParser%2CHttpCode"><span class="Identifier">setError</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">;</span> <span class="Identifier">code</span><span class="Other">:</span> <span class="Identifier">HttpCode</span><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Put the parser into the error state with the given HTTP status code.
+    
+  </dd>
+</div>
+
+</div>
 <div id="streamToFile-procs-all">
   <div id="streamToFile,HttpRequest,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#streamToFile%2CHttpRequest%2Cstring"><span class="Identifier">streamToFile</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">tmpDir</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
@@ -860,7 +891,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-14 10:23:05 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:56 UTC</small>
       </div>
     </div>
   </div>

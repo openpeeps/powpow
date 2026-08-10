@@ -79,6 +79,10 @@
   <li><a class="reference" href="#check%2CRateLimiter%2CHttpRequest%2CHttpResponse" title="check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool">check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">close
+  <li><a class="reference" href="#close%2CRateLimiter" title="close(rl: RateLimiter)">close(rl: RateLimiter)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">newRateLimiter
   <li><a class="reference" href="#newRateLimiter%2CLoop%2Cint%2Cint" title="newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter">newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter</a></li>
 
@@ -137,10 +141,22 @@
 <div id="check-procs-all">
   <div id="check,RateLimiter,HttpRequest,HttpResponse">
   <dt><pre><span class="Keyword">proc</span> <a href="#check%2CRateLimiter%2CHttpRequest%2CHttpResponse"><span class="Identifier">check</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="close-procs-all">
+  <div id="close,RateLimiter">
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CRateLimiter"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Stop the cleanup timer and release the limiter's lock.
     
   </dd>
 </div>
@@ -169,7 +185,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-14 10:23:06 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:56 UTC</small>
       </div>
     </div>
   </div>

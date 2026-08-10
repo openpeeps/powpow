@@ -1,0 +1,8 @@
+nimTitle	signal	powpow/signal.html	module powpow/signal		0
+nim	ListenerHandle	powpow/signal.html#ListenerHandle	type ListenerHandle		9
+nim	SignalRelay	powpow/signal.html#SignalRelay	type SignalRelay		15
+nim	newSignalRelay	powpow/signal.html#newSignalRelay,Loop,int	proc newSignalRelay(loop: Loop; maxSignals: int): SignalRelay		20
+nim	listen	powpow/signal.html#listen,SignalRelay,int,Callback	proc listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle		27
+nim	listenOnce	powpow/signal.html#listenOnce,SignalRelay,int,Callback	proc listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle		33
+nim	unlisten	powpow/signal.html#unlisten,ListenerHandle	proc unlisten(li: ListenerHandle)		39
+nim	emit	powpow/signal.html#emit,SignalRelay,int	proc emit(relay: SignalRelay; signalId: int)		49

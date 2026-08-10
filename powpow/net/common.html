@@ -69,6 +69,7 @@
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#DefaultBufSize" title="DefaultBufSize = 4096">DefaultBufSize</a></li>
 <li><a class="reference" href="#DefaultSendFileChunk" title="DefaultSendFileChunk = 0">DefaultSendFileChunk</a></li>
+<li><a class="reference" href="#O_BINARY" title="O_BINARY = 0'i32">O_BINARY</a></li>
 <li><a class="reference" href="#O_RDONLY" title="O_RDONLY = 0">O_RDONLY</a></li>
 <li><a class="reference" href="#SEEK_CUR" title="SEEK_CUR = 1">SEEK_CUR</a></li>
 <li><a class="reference" href="#SEEK_END" title="SEEK_END = 2">SEEK_END</a></li>
@@ -123,6 +124,10 @@
   <li><a class="reference" href="#sendFileChunk%2CSocketHandle%2Cint%2Cint64%2Cint64" title="sendFileChunk(sockFd: SocketHandle; fileFd: int; fileOff: var int64;
               remaining: var int64): int64">sendFileChunk(sockFd: SocketHandle; fileFd: int; fileOff: var int64;
               remaining: var int64): int64</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">setIpv6Only
+  <li><a class="reference" href="#setIpv6Only%2CSocketHandle" title="setIpv6Only(fd: SocketHandle)">setIpv6Only(fd: SocketHandle)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">setNonBlocking
@@ -217,6 +222,14 @@
 </div>
 <div id="DefaultSendFileChunk">
   <dt><pre><a href="#DefaultSendFileChunk"><span class="Identifier">DefaultSendFileChunk</span></a> <span class="Other">=</span> <span class="DecNumber">0</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="O_BINARY">
+  <dt><pre><a href="#O_BINARY"><span class="Identifier">O_BINARY</span></a> <span class="Other">=</span> <span class="DecNumber">0'i32</span></pre></dt>
   <dd>
     
     
@@ -338,7 +351,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#openFileRead%2Cstring"><span class="Identifier">openFileRead</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Open a file for reading. Returns fd or -1 on error.
+    Open a file for reading. Returns fd or -1 on error. On Windows, force binary mode to prevent _read from treating 0x1A (Ctrl-Z) as EOF in binary files like videos/images.
     
   </dd>
 </div>
@@ -389,6 +402,17 @@
     
     Send file data to a socket using zero-copy when available. Updates fileOff and remaining. Returns bytes sent, 0 on EAGAIN (caller should retry when socket is writable),<div class="option-list"><div class="option-list-item odd"><div class="option-list-label"><tt><span class="option">-1 on hard error.</span></tt></div><div class="option-list-description"></div></div>
 </div>
+    
+  </dd>
+</div>
+
+</div>
+<div id="setIpv6Only-procs-all">
+  <div id="setIpv6Only,SocketHandle">
+  <dt><pre><span class="Keyword">proc</span> <a href="#setIpv6Only%2CSocketHandle"><span class="Identifier">setIpv6Only</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Set IPV6_V6ONLY so an IPv6 wildcard socket does not also claim IPv4 (required to bind 0.0.0.0 and :: on the same port). No-op on Windows.
     
   </dd>
 </div>
@@ -553,7 +577,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-14 10:23:05 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:55 UTC</small>
       </div>
     </div>
   </div>

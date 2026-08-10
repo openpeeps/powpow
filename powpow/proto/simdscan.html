@@ -162,7 +162,7 @@
     <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    SSE2-accelerated rn scanner. Scans up to scanLen bytes. Falls back to full scalar scan to catch rn straddling two chunks.
+    SSE2-accelerated rn scanner. Scans up to scanLen bytes. When a match is found, a bounded scalar prefix scan guarantees the earliest rn is returned: a rn whose r is the last byte of one 16-byte chunk and whose n is the first byte of the next is invisible to both chunk-aligned SSE2 loads, so a later (wrong) match must not be reported as the first one.
     
   </dd>
 </div>
@@ -198,7 +198,7 @@
     <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    SSE2-accelerated rnrn scanner. Falls back to full scalar scan to catch rnrn straddling two chunks.
+    SSE2-accelerated rnrn scanner. Same boundary-straddle correction as findCRLFSse2.
     
   </dd>
 </div>
@@ -214,7 +214,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-14 10:23:05 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:56 UTC</small>
       </div>
     </div>
   </div>
