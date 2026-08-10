@@ -242,15 +242,24 @@ proc postRecv(p: Platform, state: IocpFdStatePtr) =
 proc add*(p: Platform, fd: int, events: set[EventType],
           edgeTriggered = false, udata: pointer = nil) =
   let gen = cast[int](udata)
-  var state = allocFdState(fd, udata, gen)
-  p.fdStates[fd] = state
-
-  let res = createIoCompletionPort(cast[Handle](fd), p.iocp, nil, 0)
-  if res == nil or res == INVALID_HANDLE_VALUE:
-    p.fdStates.del(fd)
-    deallocShared(state)
-    raise newException(OSError,
-      "powpow: CreateIoCompletionPort failed for fd " & $fd)
+  var state = p.fdStates.getOrDefault(fd, nil)
+  if state == nil:
+    state = allocFdState(fd, udata, gen)
+    p.fdStates[fd] = state
+    let res = createIoCompletionPort(cast[Handle](fd), p.iocp, nil, 0)
+    if res == nil or res == INVALID_HANDLE_VALUE:
+      p.fdStates.del(fd)
+      deallocShared(state)
+      raise newException(OSError,
+        "powpow: CreateIoCompletionPort failed for fd " & $fd)
+  else:
+    # Re-registration of the same fd (e.g. a non-blocking connect that arms
+    # Write first and then re-registers the same socket for Read). The socket
+    # is already associated with the completion port — CreateIoCompletionPort
+    # must NOT be called again; just refresh the completion key/state, mirroring
+    # epoll's EEXIST -> EPOLL_CTL_MOD fallback and kqueue's idempotent EV_ADD.
+    state.udata = udata
+    state.gen = gen
 
   if Read in events:
     postRecv(p, state)

@@ -16,6 +16,15 @@
 ##            discrepancy between two HTTP processors; a request where powpow
 ##            and a conformant reference disagree is the red flag this test
 ##            hunts for. powpow must match the reference on every request.
+##
+##   Part C — (optional, live-server) the `smuggler` CLI fuzzes a running
+##            powpow server over the network using the bundled grammars:
+##
+##              nim c -r -d:release examples/httpserver.nim
+##              smuggler -g tests/fuzz/request-line.cfg -t 127.0.0.1:9000 -n 1000
+##
+##            `nimble testSmuggler` (also run in CI via test.yml) exercises
+##            Parts A and B; Part C requires a live server of your own.
 
 import std/[unittest, strutils, os, net, nativesockets, sequtils]
 import std/httpcore

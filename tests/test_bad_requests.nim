@@ -206,6 +206,7 @@ proc rawRequest(raw: string): string =
     ,
     onData = proc(conn: Connection, data: openArray[byte]) =
       resp.add cast[string](@data)
+      conn.close()          # free the client fd / IOCP state
       serverLoop.stop()
     ,
     onClose = proc(conn: Connection) =
