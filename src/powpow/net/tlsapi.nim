@@ -65,7 +65,6 @@ proc opensslError*(): string =
   ## Most recent OpenSSL error from the queue, or "" if empty.
   let e = ERR_get_error()
   if e == 0: return ""
-  var buf = newString(256)
-  discard ERR_error_string(e, buf.cstring)
-  let z = buf.find('\0')
-  result = if z >= 0: buf[0 ..< z] else: buf
+  var buf {.noinit.}: array[256, char]
+  discard ERR_error_string(e, cast[cstring](addr buf[0]))
+  result = $cast[cstring](addr buf[0])

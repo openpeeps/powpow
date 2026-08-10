@@ -776,11 +776,7 @@ proc parseChunkedBody(p: HttpParser): bool =
 
       # Ensure body buffer capacity
       if p.buf.len < p.headerEnd + p.chunkBodyLen:
-        let newCap = max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen)
-        var newBuf = newSeq[byte](newCap)
-        if p.bufLen > 0:
-          copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
-        p.buf = newBuf
+        p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
 
       # Copy chunk data to body area
       if remaining > 0:
@@ -814,11 +810,7 @@ proc parseChunkedBody(p: HttpParser): bool =
 
         # Ensure body buffer capacity
         if p.buf.len < p.headerEnd + p.chunkBodyLen:
-          let newCap = max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen)
-          var newBuf = newSeq[byte](newCap)
-          if p.bufLen > 0:
-            copyMem(addr newBuf[0], addr p.buf[0], p.bufLen)
-          p.buf = newBuf
+          p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
 
         # Copy partial chunk data
         copyMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], available)
@@ -1057,14 +1049,14 @@ proc peekPath*(p: HttpParser): lent string {.inline.} =
   if p.pathCache.len == 0 and p.pathEnd > p.pathStart:
     let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
     let plen = p.pathEnd - p.pathStart
-    p.pathCache = newString(plen)
+    p.pathCache.setLen(plen)
     copyMem(addr p.pathCache[0], addr buf[p.pathStart], plen)
   p.pathCache
 
 proc peekContentType*(p: HttpParser): lent string {.inline.} =
   if p.contentTypeVal.len == 0 and p.contentTypeStart >= 0:
     let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-    p.contentTypeVal = newString(p.contentTypeLen)
+    p.contentTypeVal.setLen(p.contentTypeLen)
     copyMem(addr p.contentTypeVal[0], addr buf[p.contentTypeStart], p.contentTypeLen)
   p.contentTypeVal
 
@@ -1087,7 +1079,7 @@ proc getPath*(req: HttpRequest): lent string =
   if p.pathCache.len == 0 and p.pathEnd > p.pathStart:
     let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
     let plen = p.pathEnd - p.pathStart
-    p.pathCache = newString(plen)
+    p.pathCache.setLen(plen)
     copyMem(addr p.pathCache[0], addr buf[p.pathStart], plen)
   p.pathCache
 
@@ -1096,7 +1088,7 @@ proc getQuery*(req: HttpRequest): lent string =
   if p.queryCache.len == 0 and p.queryStart >= 0:
     let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
     let qlen = p.queryEnd - p.queryStart
-    p.queryCache = newString(qlen)
+    p.queryCache.setLen(qlen)
     copyMem(addr p.queryCache[0], addr buf[p.queryStart], qlen)
   p.queryCache
 
@@ -1104,14 +1096,26 @@ proc getUrl*(req: HttpRequest): lent string =
   if req.urlVal.len == 0:
     let path = req.getPath()
     let query = req.getQuery()
-    req.urlVal = if query.len > 0: path & "?" & query else: path
+    if query.len > 0:
+      req.urlVal.setLen(path.len + query.len + 1)
+      if path.len > 0:
+        copyMem(addr req.urlVal[0], unsafeAddr path[0], path.len)
+      req.urlVal[path.len] = '?'
+      copyMem(addr req.urlVal[path.len + 1], unsafeAddr query[0], query.len)
+    else:
+      req.urlVal.setLen(path.len)
+      if path.len > 0:
+        copyMem(addr req.urlVal[0], unsafeAddr path[0], path.len)
   req.urlVal
 
 proc getHeaders*(req: HttpRequest): HttpHeaders =
   if not req.headersReady:
     let p = req.parser
     let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-    req.headersVal = newHttpHeaders()
+    if req.headersVal.isNil:
+      req.headersVal = newHttpHeaders()
+    else:
+      req.headersVal.clear()
     var i = 0
     # Skip request line
     while i < p.headerEnd - 1:
@@ -1169,16 +1173,16 @@ proc getBody*(req: HttpRequest): seq[byte] =
     let p = req.parser
     if p.transferChunked and p.chunkBodyLen > 0:
       # Chunked body - already decoded into buffer
-      req.bodyVal = newSeq[byte](p.chunkBodyLen)
+      req.bodyVal.setLen(p.chunkBodyLen)
       copyMem(addr req.bodyVal[0],
               addr p.buf[p.headerEnd], p.chunkBodyLen)
     elif p.contentLength > 0 and p.bufLen >= p.contentEnd:
       # Content-Length body
-      req.bodyVal = newSeq[byte](p.contentLength)
+      req.bodyVal.setLen(p.contentLength)
       copyMem(addr req.bodyVal[0],
               addr p.buf[p.headerEnd], p.contentLength)
     else:
-      req.bodyVal = @[]
+      req.bodyVal.setLen(0)
     req.bodyReady = true
   return req.bodyVal
 

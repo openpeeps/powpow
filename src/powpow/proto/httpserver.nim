@@ -39,11 +39,11 @@ type
   HttpResponse* = ref object
     ## Build and send an HTTP response.
     conn:       Connection
+    statusCode: uint16
     sent:       bool
-    statusCode: HttpCode
+    closeConn:  bool           ## If true, send "Connection: close" and shut down
     headers:    seq[(string, string)]
     bodyBytes:  seq[byte]
-    closeConn:  bool           ## If true, send "Connection: close" and shut down
 
   OnRequestCallback* = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.}
     ## User-provided callback invoked for every parsed HTTP request.
@@ -67,6 +67,10 @@ type
     parserPool: seq[HttpParser]
     reqPool:   seq[HttpRequest]
     resPool:   seq[HttpResponse]
+    wsPool:    seq[pointer]   ## Idle WsConnection refs recycled by websocketUpgrade
+      ## (kept opaque to avoid an httpserver↔ws import cycle).
+    sweepStale: seq[ConnHttp]  ## Scratch buffer reused by the timeout sweep so
+      ## the periodic pass performs no per-sweep allocation.
     keepAliveMs: int
     maxBodySize*: int64
     maxStreamBodySize*: int64
@@ -98,6 +102,11 @@ const
   DefaultKeepAliveMs* = 5_000
   MaxParserPoolSize = 2048
   MaxResPoolSize = 4048
+  MaxReqPoolSize = 2048
+  MaxWsPoolSize* = 2048
+    ## Idle WebSocket connections recycled by websocketUpgrade. Reusing the
+    ## object keeps its 64KB frame-parser payload and assembly buffer alive, so
+    ## WS connection churn does not re-allocate them.
 
 
 func getFileExt*(path: string): string {.inline.} =
@@ -177,15 +186,15 @@ func parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, l
 proc newHttpResponse(conn: Connection): HttpResponse =
   HttpResponse(
     conn:       conn,
+    statusCode: uint16(Http200),
     sent:       false,
-    statusCode: Http200,
+    closeConn:  false,
     headers:    @[],
     bodyBytes:  @[],
-    closeConn:  false,
   )
 
 proc status*(res: HttpResponse, code: HttpCode): HttpResponse {.inline, discardable.} =
-  res.statusCode = code
+  res.statusCode = uint16(code)
   return res
 
 proc header*(res: HttpResponse, key, value: string): HttpResponse {.inline, discardable.} =
@@ -261,7 +270,7 @@ proc send*(res: HttpResponse, body: string = "") =
   copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
   p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
   hdrBuf[p] = byte(' '); p += 1
-  let stext = statusText(res.statusCode)
+  let stext = statusText(HttpCode(res.statusCode))
   copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
@@ -324,7 +333,7 @@ proc send*(res: HttpResponse, body: seq[byte]) =
   copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
   p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
   hdrBuf[p] = byte(' '); p += 1
-  let stext = statusText(res.statusCode)
+  let stext = statusText(HttpCode(res.statusCode))
   copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
@@ -454,7 +463,7 @@ proc sendFile*(res: HttpResponse, path: string;
     let connHeader = if closeConn: "close" else: "keep-alive"
 
     res.sent = true
-    var hdrBuf = newSeq[byte](768)
+    var hdrBuf = res.bodyBytes
     var p = 0
 
     if status == Http200:
@@ -510,14 +519,15 @@ proc sendFile*(res: HttpResponse, path: string;
 
     if res.conn.isTlsActive():
       # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+      # Reuse the pooled res.bodyBytes as the chunk buffer.
       const TlsChunk = 65536
-      var tlsBuf = newSeq[byte](TlsChunk)
+      res.bodyBytes.setLen(TlsChunk)
       var remain = rangeLen
       while remain > 0:
         let toRead = if remain > TlsChunk: TlsChunk else: int(remain)
-        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr tlsBuf[0]), toRead)
+        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr res.bodyBytes[0]), toRead)
         if n <= 0: break
-        discard res.conn.send(tlsBuf.toOpenArray(0, int(n) - 1))
+        discard res.conn.send(res.bodyBytes.toOpenArray(0, int(n) - 1))
         remain -= n
       closeFile(fileFd)
       if res.closeConn:
@@ -596,7 +606,7 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
         return
 
     res.sent = true
-    var hdrBuf = newSeq[byte](768)
+    var hdrBuf = res.bodyBytes
     var p = 0
 
     hdrAdd(hdrBuf, p, "HTTP/1.1 206 Partial Content\r\n", 30)
@@ -642,14 +652,15 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
 
     if res.conn.isTlsActive():
       # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+      # Reuse the pooled res.bodyBytes as the chunk buffer.
       const TlsChunk = 65536
-      var tlsBuf = newSeq[byte](TlsChunk)
+      res.bodyBytes.setLen(TlsChunk)
       var remain = rangeLen
       while remain > 0:
         let toRead = if remain > TlsChunk: TlsChunk else: int(remain)
-        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr tlsBuf[0]), toRead)
+        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr res.bodyBytes[0]), toRead)
         if n <= 0: break
-        discard res.conn.send(tlsBuf.toOpenArray(0, int(n) - 1))
+        discard res.conn.send(res.bodyBytes.toOpenArray(0, int(n) - 1))
         remain -= n
       closeFile(fileFd)
       return
@@ -702,12 +713,12 @@ proc acquireHttpResponse(server: HttpServer, conn: Connection): HttpResponse =
     result.headers.setLen(0)
     result.bodyBytes.setLen(0)
     result.sent = false
-    result.statusCode = Http200
+    result.statusCode = uint16(Http200)
     result.closeConn = false
   else:
     result = HttpResponse(
-      conn: conn, sent: false, statusCode: Http200,
-      headers: @[], bodyBytes: @[], closeConn: false)
+      conn: conn, statusCode: uint16(Http200), sent: false, closeConn: false,
+      headers: @[], bodyBytes: @[])
 
 proc releaseHttpResponse(server: HttpServer, res: HttpResponse) {.inline.} =
   if server.resPool.len < MaxResPoolSize:
@@ -730,13 +741,18 @@ proc releaseRequest(server: HttpServer, req: HttpRequest) =
   req.urlVal.setLen(0)
   req.headersReady = false
   req.bodyReady = false
-  server.reqPool.add(req)
+  if server.reqPool.len < MaxReqPoolSize:
+    server.reqPool.add(req)
 
 # ── HttpServer lifecycle ─────────────────────────────────────────────────────
 
 proc populatePools*(server: HttpServer; poolSize = 256)
 
-proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
+proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
+  ## Create an HTTP server on the given event loop. Pools (parsers,
+  ## responses, connections, read buffers) are prewarmed by default so the
+  ## request hot path performs no allocations; pass `populate = false` to
+  ## defer ~1 MB of startup allocations.
   let srv = HttpServer(
     tcpServer: nil,
     loop:      loop,
@@ -745,6 +761,8 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     parserPool: @[],
     reqPool:   @[],
     resPool:   @[],
+    wsPool:    @[],
+    sweepStale: @[],
     sslCtx:    nil,
     keepAliveMs: DefaultKeepAliveMs,
     maxBodySize: 0,
@@ -762,7 +780,7 @@ proc newHttpServer*(loop: Loop; populate: bool = false): HttpServer =
     srv.populatePools()
   srv
 
-proc newHttpServer*(populate: bool = false): HttpServer =
+proc newHttpServer*(populate: bool = true): HttpServer =
   var eventLoop = newLoop()
   newHttpServer(eventLoop, populate)
 
@@ -789,6 +807,16 @@ proc releaseParser(server: HttpServer, parser: HttpParser) {.inline.} =
   if server.parserPool.len < MaxParserPoolSize:
     parser.reset()
     server.parserPool.add(parser)
+
+proc wsPoolPop*(server: HttpServer): pointer {.inline.} =
+  ## Pop an idle WebSocket connection from the pool, or nil when empty.
+  ## Kept opaque (`pointer`) so httpserver does not need to know WsConnection.
+  if server.wsPool.len > 0: server.wsPool.pop() else: nil
+
+proc wsPoolAdd*(server: HttpServer, ws: pointer) {.inline.} =
+  ## Return an idle WebSocket connection to the pool (dropped when full).
+  if server.wsPool.len < MaxWsPoolSize:
+    server.wsPool.add(ws)
 
 proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
   ## Set the keep-alive idle timeout in milliseconds. 0 disables it.
@@ -835,23 +863,23 @@ proc sweepTimeouts(server: HttpServer) =
   if server.keepAliveMs <= 0 and server.readTimeoutMs <= 0:
     return
   let now = monoMs()
-  var stale: seq[ConnHttp]
+  server.sweepStale.setLen(0)
   for ctx in server.connRoots.values:
     if ctx.conn != nil and ctx.conn.state == Closing:
       # Graceful close in progress (response sent, FIN sent): reclaim if the
       # peer never finishes reading/closing.
       if server.keepAliveMs > 0 and now - ctx.lastActive > server.keepAliveMs:
-        stale.add(ctx)
+        server.sweepStale.add(ctx)
       continue
     if ctx.idleAfter >= ctx.lastActive:
       # Idle — waiting for the next request → keep-alive applies.
       if server.keepAliveMs > 0 and now - ctx.idleAfter > server.keepAliveMs:
-        stale.add(ctx)
+        server.sweepStale.add(ctx)
     else:
       # A request is in progress → read timeout applies.
       if server.readTimeoutMs > 0 and now - ctx.lastActive > server.readTimeoutMs:
-        stale.add(ctx)
-  for ctx in stale:
+        server.sweepStale.add(ctx)
+  for ctx in server.sweepStale:
     server.closeStale(ctx)
 
 proc startTimeoutSweep(server: HttpServer) =
@@ -1071,8 +1099,8 @@ proc populatePools*(server: HttpServer; poolSize = 256) =
       server.parserPool.add(newHttpParser())
     if server.resPool.len < MaxResPoolSize:
       server.resPool.add(HttpResponse(
-        conn: nil, sent: false, statusCode: Http200,
-        headers: @[], bodyBytes: @[], closeConn: false))
+        conn: nil, statusCode: uint16(Http200), sent: false, closeConn: false,
+        headers: @[], bodyBytes: @[]))
     if server.tcpServer.connPool.len < MaxConnPoolSize:
       var buf = cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
       if server.loop.bufPool.len < MaxBufPoolSize:
@@ -1114,7 +1142,7 @@ proc withinRoot*(root, path: string): bool =
 
 proc serveStatic*(res: HttpResponse, req: HttpRequest,
                   urlPrefix: string, fsRoot: string,
-                  indexFiles: seq[string] = @["index.html", "index.htm"]): bool =
+                  indexFiles: openArray[string] = ["index.html", "index.htm"]): bool =
   ## Serve static files from `fsRoot` for requests whose path starts with `urlPrefix`.
   ## Path traversal protection: rejects paths containing ".." or "~".
   ## Returns true if the file was served, false if not found (caller should send 404).

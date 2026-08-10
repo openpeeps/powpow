@@ -11,6 +11,7 @@
 import ../loop
 import ../types
 import common
+import tcp
 when not defined(windows):
   import std/posix
 
@@ -34,7 +35,7 @@ proc close*(sock: UdpSocket) =
     sockClose(sock.fd)
     sock.fd = SocketHandle(-1)
   if sock.readBuf != nil:
-    deallocShared(sock.readBuf)
+    releaseBuf(sock.loop, sock.readBuf)
     sock.readBuf = nil
 
 # ── I/O ──────────────────────────────────────────────────────────────────────
@@ -125,7 +126,7 @@ proc bindUdp*(loop: Loop, address: string, port: int,
     fd:         fd,
     loop:       loop,
     onData:     onData,
-    readBuf:    cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize)),
+    readBuf:    acquireBuf(loop),
     readBufLen: DefaultBufSize,
   )
 
@@ -157,7 +158,7 @@ proc connectUdp*(loop: Loop, address: string, port: int,
     fd:         fd,
     loop:       loop,
     onData:     onData,
-    readBuf:    cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize)),
+    readBuf:    acquireBuf(loop),
     readBufLen: DefaultBufSize,
   )
 

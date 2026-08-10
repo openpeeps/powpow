@@ -14,3 +14,6 @@ testresults/
 !/examples/*.html
 !/examples/www/
 !/examples/www/*
+nimble.develop
+nimble.paths
+nimbledeps

@@ -120,6 +120,7 @@ type
     tcpServer: TcpServer
     loop:      Loop
     conns:     Table[int, WsConnection]  ## fd → connection
+    wsPool:    seq[WsConnection]         ## idle connections recycled across upgrades
     maxFrameSize*: int
     handshakeSessions: Table[int, HttpParser]  ## fd → pre-upgrade HTTP parser
     handshakeTimers:   Table[int, TimerId]     ## fd → handshake timeout timer
@@ -562,6 +563,74 @@ proc newWsConnection*(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize)
     idleTimeoutMs: 0,
   )
 
+proc resetWs(ws: WsConnection; conn: Connection; maxFrameSize: int) =
+  ## Reset a pooled WsConnection for reuse with a new TCP connection.
+  ws.conn = conn
+  ws.maxFrameSize = maxFrameSize
+  ws.onOpen = nil
+  ws.onMessage = nil
+  ws.onClose = nil
+  ws.onError = nil
+  ws.assembling = false
+  ws.fragOpcode = 0
+  ws.assembleBuf.setLen(0)
+  ws.idleTimer = TimerId(0)
+  ws.idleTimeoutMs = 0
+  ws.lastActive = monoMs()
+  ws.parser.reset()
+
+proc acquireWsConnection(wss: WsServer, conn: Connection): WsConnection =
+  ## Get a WsConnection for `conn`, recycling one from the pool when available.
+  if wss.wsPool.len > 0:
+    result = wss.wsPool.pop()
+    result.resetWs(conn, wss.maxFrameSize)
+  else:
+    result = newWsConnection(conn, wss.maxFrameSize)
+
+proc releaseWsConnection(wss: WsServer, ws: WsConnection) =
+  ## Return `ws` to the server's pool. Must be called exactly once per
+  ## connection from the fd callback / server close paths. The idle timer is
+  ## cancelled first so a stale wheel entry can never close a recycled
+  ## connection or keep the object alive.
+  if ws.idleTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.idleTimer)
+    ws.idleTimer = TimerId(0)
+  if wss.wsPool.len < MaxWsPoolSize:
+    ws.conn = nil
+    ws.onOpen = nil
+    ws.onMessage = nil
+    ws.onClose = nil
+    ws.onError = nil
+    wss.wsPool.add(ws)
+
+proc acquireWs(server: HttpServer, conn: Connection,
+               maxFrameSize: int): WsConnection =
+  ## Get a WsConnection for the HTTP→WS upgrade path, recycling one from the
+  ## HttpServer pool when available. `server` may be nil (no pooling).
+  if server != nil:
+    let pooled = server.wsPoolPop()
+    if pooled != nil:
+      result = cast[WsConnection](pooled)
+      result.resetWs(conn, maxFrameSize)
+      return
+  result = newWsConnection(conn, maxFrameSize)
+
+proc releaseWs(server: HttpServer, ws: WsConnection) =
+  ## Return `ws` to the HttpServer pool (upgrade path). `ws.conn == nil` marks
+  ## it as already released, guarding against double-release. The idle timer is
+  ## cancelled first so a stale wheel entry can never fire on a recycled object.
+  if ws.conn == nil: return
+  if ws.idleTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.idleTimer)
+    ws.idleTimer = TimerId(0)
+  ws.conn = nil
+  ws.onOpen = nil
+  ws.onMessage = nil
+  ws.onClose = nil
+  ws.onError = nil
+  if server != nil:
+    server.wsPoolAdd(cast[pointer](ws))
+
 proc armIdleTimeout(ws: WsConnection) =
   ## Arm (or re-arm) the post-upgrade idle timer so it fires `idleTimeoutMs`
   ## after the last received frame. The timer only re-arms when it fires, so a
@@ -594,6 +663,7 @@ proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer
     tcpServer: nil,
     loop:      loop,
     conns:     initTable[int, WsConnection](64),
+    wsPool:    @[],
     maxFrameSize: maxFrameSize,
     handshakeSessions: initTable[int, HttpParser](64),
     handshakeTimers:   initTable[int, TimerId](64),
@@ -709,7 +779,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
         conn.sendHandshake(clientKey)
 
         # Create the WebSocket connection
-        let ws = newWsConnection(conn, wss.maxFrameSize)
+        let ws = wss.acquireWsConnection(conn)
         ws.onOpen    = wss.defaultOpen
         ws.onMessage = wss.defaultMessage
         ws.onClose   = wss.defaultClose
@@ -727,7 +797,9 @@ proc listen*(wss: WsServer, address: string, port: int) =
               if not ws.onClose.isNil:
                 ws.onClose(ws, 1006, "Connection lost")
               ws.conn.close()
-              wss.conns.del(efd)
+              if efd in wss.conns:
+                wss.conns.del(efd)
+                wss.releaseWsConnection(ws)
               return
             if Read in ev:
               var buf: array[65536, byte]
@@ -739,7 +811,9 @@ proc listen*(wss: WsServer, address: string, port: int) =
                   if n > 0:
                     ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                     if ws.conn.state != Connected:
-                      wss.conns.del(efd)
+                      if efd in wss.conns:
+                        wss.conns.del(efd)
+                        wss.releaseWsConnection(ws)
                       return
                   else:
                     break
@@ -748,13 +822,17 @@ proc listen*(wss: WsServer, address: string, port: int) =
                   if n > 0:
                     ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                     if ws.conn.state != Connected:
-                      wss.conns.del(efd)
+                      if efd in wss.conns:
+                        wss.conns.del(efd)
+                        wss.releaseWsConnection(ws)
                       return
                   elif n == 0:
                     if not ws.onClose.isNil:
                       ws.onClose(ws, 1000, "")
                     ws.conn.close()
-                    wss.conns.del(efd)
+                    if efd in wss.conns:
+                      wss.conns.del(efd)
+                      wss.releaseWsConnection(ws)
                     return
                   else:
                     if sockWouldBlock():
@@ -764,7 +842,9 @@ proc listen*(wss: WsServer, address: string, port: int) =
                     if not ws.onError.isNil:
                       ws.onError(ws, "recv error: " & $lastSocketError())
                     ws.conn.close()
-                    wss.conns.del(efd)
+                    if efd in wss.conns:
+                      wss.conns.del(efd)
+                      wss.releaseWsConnection(ws)
                     return
         )
 
@@ -790,6 +870,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
         if not ws.onClose.isNil:
           ws.onClose(ws, 1000, "")
         wss.conns.del(fd)
+        wss.releaseWsConnection(ws)
     ,
   )
   wss.tcpServer.listen(address, port)
@@ -808,7 +889,9 @@ proc close*(wss: WsServer) =
     if not ws.onClose.isNil:
       ws.onClose(ws, 1001, "Server shutting down")
     ws.conn.close()
+    wss.releaseWsConnection(ws)
   wss.conns.clear()
+  wss.wsPool.setLen(0)
 
 # ── HTTP → WebSocket upgrade ─────────────────────────────────────────────────
 
@@ -860,7 +943,7 @@ proc websocketUpgrade*(
     conn.sendHandshake(clientKey)
 
     # Create WebSocket connection
-    let ws = newWsConnection(conn, maxFrameSize)
+    let ws = server.acquireWs(conn, maxFrameSize)
     ws.onOpen    = onOpen
     ws.onMessage = onMessage
     ws.onClose   = onClose
@@ -878,6 +961,7 @@ proc websocketUpgrade*(
           if not ws.onClose.isNil:
             ws.onClose(ws, 1006, "Connection lost")
           ws.conn.close()
+          server.releaseWs(ws)
           return
         if Read in ev:
           var buf: array[65536, byte]
@@ -889,6 +973,7 @@ proc websocketUpgrade*(
               if n > 0:
                 ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                 if ws.conn.state != Connected:
+                  server.releaseWs(ws)
                   return
               else:
                 break
@@ -897,11 +982,13 @@ proc websocketUpgrade*(
               if n > 0:
                 ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                 if ws.conn.state != Connected:
+                  server.releaseWs(ws)
                   return
               elif n == 0:
                 if not ws.onClose.isNil:
                   ws.onClose(ws, 1000, "")
                 ws.conn.close()
+                server.releaseWs(ws)
                 return
               else:
                 if sockWouldBlock():
@@ -911,6 +998,7 @@ proc websocketUpgrade*(
                 if not ws.onError.isNil:
                   ws.onError(ws, "recv error: " & $lastSocketError())
                 ws.conn.close()
+                server.releaseWs(ws)
                 return
     )
 
