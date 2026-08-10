@@ -221,6 +221,13 @@ when not defined(windows):
         if first == ' ' or first == '\t':
           result.err = 400          # obs-fold / leading-ws header
           return
+        # Field name must be non-empty and followed by a colon (mirrors powpow).
+        var colon = i
+        while colon < lineEnd and buf[colon] != ':':
+          inc colon
+        if colon == i or colon >= lineEnd:
+          result.err = 400
+          return
         let lower = buf[i .. lineEnd - 1].toLowerAscii()
         if lower.startsWith("content-length:"):
           let val = buf[i + 15 .. lineEnd - 1].strip()
@@ -250,41 +257,57 @@ when not defined(windows):
             result.chunked = true
       i = lineEnd + 2
 
-  proc refRequestLineOk(buf: string; rlEnd: int): bool =
+  proc refMethodOk(buf: string; mEnd: int): bool =
+    ## The method token must be one of the standard methods — mirrors powpow's
+    ## method-token validation (near-miss tokens like GETTY/GIT/PET are 400).
+    if mEnd == 0: return false
+    const standard = ["GET", "POST", "PUT", "PATCH", "DELETE",
+                      "HEAD", "OPTIONS", "CONNECT", "TRACE"]
+    for m in standard:
+      if mEnd == m.len and buf[0 ..< mEnd] == m:
+        return true
+    false
+
+  proc refRequestLineOk(buf: string; rlEnd: int): int =
     ## Mirrors powpow's parseRequestLine: "METHOD SP PATH SP HTTP/x.y".
-    ## Multiple spaces or tabs between tokens make the request line invalid;
-    ## an empty request-target, non-digit version numbers, or trailing garbage
-    ## after the version are rejected too (both parsers must agree).
+    ## Returns 0 when the request line is valid, 400 for a malformed one, and
+    ## 505 for a well-formed but unsupported HTTP version. Both parsers must
+    ## agree on every decision.
     var i = 0
     while i < rlEnd and buf[i] != ' ':
       if i >= 10:
-        return false
+        return 400
       inc i
     if i >= rlEnd:
-      return false                    # no space after method
+      return 400                    # no space after method
+    if not refMethodOk(buf, i):
+      return 400                    # near-miss / non-standard method token
     inc i                             # skip exactly one space
     let pathStart = i
     while i < rlEnd and buf[i] != ' ':
       inc i
     if i >= rlEnd:
-      return false                    # no space after path
+      return 400                    # no space after path
     if i == pathStart:
-      return false                    # empty request-target
+      return 400                    # empty request-target
     inc i                             # skip exactly one space
     if i + 8 > rlEnd:
-      return false
+      return 400
     if buf[i] != 'H' or buf[i + 1] != 'T' or buf[i + 2] != 'T' or
        buf[i + 3] != 'P' or buf[i + 4] != '/':
-      return false
+      return 400
     if buf[i + 5] < '0' or buf[i + 5] > '9' or
        buf[i + 7] < '0' or buf[i + 7] > '9':
-      return false
+      return 400
+    # Well-formed but unsupported HTTP version -> 505 (RFC 7230 §2.6).
+    if buf[i + 5] != '1' or buf[i + 7] > '1':
+      return 505
     var k = i + 8
     while k < rlEnd and (buf[k] == ' ' or buf[k] == '\t'):
       inc k
     if k < rlEnd:
-      return false                    # trailing garbage after HTTP/x.y
-    true
+      return 400                    # trailing garbage after HTTP/x.y
+    0
 
   proc refParseOne(buf: string): tuple[status: int; bodyLen: int; done: bool] =
     ## Parse one request incrementally. status 0 = need more data; on completion
@@ -294,8 +317,9 @@ when not defined(windows):
       if buf.len > 64 * 1024:
         return (413, 0, true)
       return (0, 0, false)
-    if not refRequestLineOk(buf, rlEnd):
-      return (400, 0, true)
+    let rlCode = refRequestLineOk(buf, rlEnd)
+    if rlCode != 0:
+      return (rlCode, 0, true)
     let sep = buf.find("\r\n\r\n")
     if sep < 0:
       if buf.len > 64 * 1024:
