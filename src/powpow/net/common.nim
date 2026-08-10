@@ -379,6 +379,10 @@ const
   SendFileChunkSize* = 65536     # fallback chunk size for non-zero-copy paths
   DefaultSendFileChunk* = 0      # 0 = let the platform decide
 
+var sendFileScratch {.threadvar.}: ptr UncheckedArray[byte]
+  ## Reusable Windows fallback read buffer: one 64KB alloc per thread instead
+  ## of an alloc + dealloc per 64KB chunk of every non-zero-copy file send.
+
 const
   O_RDONLY* = 0
   SEEK_SET* = 0
@@ -479,15 +483,15 @@ proc sendFileChunk*(sockFd: SocketHandle; fileFd: int;
     # the file position from fileOff (POSIX sendfile handles this
     # internally, but the read+send fallback must do it manually).
     # TODO: replace with TransmitFile when IOCP interaction is resolved.
-    var buf = cast[ptr UncheckedArray[byte]](alloc(SendFileChunkSize))
+    if sendFileScratch == nil:
+      sendFileScratch = cast[ptr UncheckedArray[byte]](alloc(SendFileChunkSize))
+    let buf = sendFileScratch
     let toRead = min(remaining, SendFileChunkSize.int64).cint
     discard c_lseek(fileFd.cint, fileOff, SEEK_SET)
     let n = c_read(fileFd.cint, buf, toRead)
     if n <= 0:
-      dealloc(buf)
       return if n == 0: 0 else: -1
     let sent = send(sockFd, buf, n, 0)
-    dealloc(buf)
     if sent < 0:
       let e = wsagetlasterror()
       if e == WSAEWOULDBLOCK: return 0

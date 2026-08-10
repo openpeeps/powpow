@@ -44,6 +44,11 @@ const
     ## reading while the server writes a large response (e.g. a TLS file
     ## download) must not make the server accumulate the whole payload in RAM
     ## per connection (slow-read memory DoS).
+  MaxRetainedBufferCap = 65536
+    ## Pooled connections keep their writeBuf/tlsCoalesce capacity so the pool
+    ## does not re-allocate per request. Above this cap the capacity is dropped
+    ## on release — an idle pooled connection must not pin a 32MB buffer it
+    ## once needed for a single large response.
 
 proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] {.inline.} =
   if loop.bufPool.len > 0:
@@ -56,6 +61,12 @@ proc releaseBuf(loop: Loop, buf: ptr UncheckedArray[byte]) {.inline.} =
     loop.bufPool.add(buf)
   else:
     deallocShared(buf)
+
+proc trimRetainedBuffer(buf: var seq[byte]) {.inline.} =
+  ## Drop a pooled connection's buffer capacity when it exceeds the retained
+  ## cap, so an idle pooled connection does not pin a huge once-used buffer.
+  if buf.capacity > MaxRetainedBufferCap:
+    buf = @[]
 
 proc setLinger0(fd: SocketHandle) {.inline.} =
   var lin {.noInit.}: TLinger
@@ -83,6 +94,7 @@ type
     readBufLen:       int
     writeBuf:         seq[byte]
     writePos:         int
+    tlsCoalesce:      seq[byte]   ## Reused TLS sendv coalesce buffer
     corked:           bool
     closeAfterFlush:  bool
     sendFileFd*:      int
@@ -268,6 +280,17 @@ else:
   proc tlsWrite*(conn: Connection, buf: pointer, count: int): int = -1
   proc tlsFree*(conn: Connection) = discard
 
+proc watchWritable(conn: Connection) {.inline.} =
+  ## Watch for writability so a partially-buffered write can flush.
+  conn.loop.modify(conn.fd.int, {Read, Write})
+
+proc corkAndWatch(conn: Connection) {.inline.} =
+  ## Enable TCP corking for the queued writes and watch for writability.
+  if not conn.corked:
+    setTcpCork(conn.fd, true)
+    conn.corked = true
+  conn.loop.modify(conn.fd.int, {Read, Write})
+
 proc send*(conn: Connection, data: openArray[byte]): int =
   if conn.state != Connected: return 0
 
@@ -285,7 +308,7 @@ proc send*(conn: Connection, data: openArray[byte]): int =
       conn.writeBuf.setLen(data.len)
       copyMem(addr conn.writeBuf[0], unsafeAddr data[0], data.len)
       conn.writePos = 0
-      conn.loop.modify(conn.fd.int, {Read, Write})
+      conn.watchWritable()
       return data.len
     if n < 0:
       conn.close()
@@ -295,7 +318,7 @@ proc send*(conn: Connection, data: openArray[byte]): int =
       conn.writeBuf.setLen(remaining)
       copyMem(addr conn.writeBuf[0], unsafeAddr data[n], remaining)
       conn.writePos = 0
-      conn.loop.modify(conn.fd.int, {Read, Write})
+      conn.watchWritable()
     return data.len
 
   if conn.writeBuf.len > 0:
@@ -309,10 +332,7 @@ proc send*(conn: Connection, data: openArray[byte]): int =
       conn.writeBuf.setLen(data.len)
       copyMem(addr conn.writeBuf[0], unsafeAddr data[0], data.len)
       conn.writePos = 0
-      if not conn.corked:
-        setTcpCork(conn.fd, true)
-        conn.corked = true
-      conn.loop.modify(conn.fd.int, {Read, Write})
+      conn.corkAndWatch()
       return data.len
     conn.close()
     return -1
@@ -322,10 +342,7 @@ proc send*(conn: Connection, data: openArray[byte]): int =
     conn.writeBuf.setLen(remaining)
     copyMem(addr conn.writeBuf[0], unsafeAddr data[n], remaining)
     conn.writePos = 0
-    if not conn.corked:
-      setTcpCork(conn.fd, true)
-      conn.corked = true
-    conn.loop.modify(conn.fd.int, {Read, Write})
+    conn.corkAndWatch()
 
   return data.len
 
@@ -350,27 +367,27 @@ proc sendv*(conn: Connection,
     # oversized payloads stream through a bounded chunk buffer instead.
     const MaxTlsCoalesce = 1 shl 20  # 1 MB
     if totalLen <= MaxTlsCoalesce:
-      var buf = newSeq[byte](totalLen)
+      conn.tlsCoalesce.setLen(totalLen)
       var pos = 0
       for part in parts:
-        copyMem(addr buf[pos], part.data, part.len)
+        copyMem(addr conn.tlsCoalesce[pos], part.data, part.len)
         pos += part.len
-      return conn.send(buf)
-    var chunk = newSeq[byte](MaxTlsCoalesce)
+      return conn.send(conn.tlsCoalesce)
+    conn.tlsCoalesce.setLen(MaxTlsCoalesce)
     var pos = 0
     for part in parts:
       var off = 0
       while off < part.len:
-        let n = min(part.len - off, chunk.len - pos)
-        copyMem(addr chunk[pos],
+        let n = min(part.len - off, conn.tlsCoalesce.len - pos)
+        copyMem(addr conn.tlsCoalesce[pos],
                 cast[ptr UncheckedArray[byte]](cast[uint](part.data) + off.uint), n)
         pos += n
         off += n
-        if pos == chunk.len:
-          discard conn.send(chunk.toOpenArray(0, pos - 1))
+        if pos == conn.tlsCoalesce.len:
+          discard conn.send(conn.tlsCoalesce.toOpenArray(0, pos - 1))
           pos = 0
     if pos > 0:
-      discard conn.send(chunk.toOpenArray(0, pos - 1))
+      discard conn.send(conn.tlsCoalesce.toOpenArray(0, pos - 1))
     return totalLen
 
   if conn.writeBuf.len > 0:
@@ -413,10 +430,7 @@ proc sendv*(conn: Connection,
         copyMem(addr conn.writeBuf[pos], part.data, part.len)
         pos += part.len
       conn.writePos = 0
-      if not conn.corked:
-        setTcpCork(conn.fd, true)
-        conn.corked = true
-      conn.loop.modify(conn.fd.int, {Read, Write})
+      conn.corkAndWatch()
       return totalLen
     conn.close()
     return -1
@@ -438,10 +452,7 @@ proc sendv*(conn: Connection,
         pos += toCopy
         skipped = n
     conn.writePos = 0
-    if not conn.corked:
-      setTcpCork(conn.fd, true)
-      conn.corked = true
-    conn.loop.modify(conn.fd.int, {Read, Write})
+    conn.corkAndWatch()
 
   return totalLen
 
@@ -557,6 +568,9 @@ proc releaseConnection(server: TcpServer, conn: Connection) =
   conn.sendFileRemain = 0
   conn.writeBuf.setLen(0)
   conn.writePos = 0
+  conn.writeBuf.trimRetainedBuffer()
+  conn.tlsCoalesce.setLen(0)
+  conn.tlsCoalesce.trimRetainedBuffer()
   conn.clientIp = ""
   conn.ssl = nil
   conn.tlsState = TlsOff

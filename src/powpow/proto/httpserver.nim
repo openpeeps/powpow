@@ -519,14 +519,15 @@ proc sendFile*(res: HttpResponse, path: string;
 
     if res.conn.isTlsActive():
       # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+      # Reuse the pooled res.bodyBytes as the chunk buffer.
       const TlsChunk = 65536
-      var tlsBuf = newSeq[byte](TlsChunk)
+      res.bodyBytes.setLen(TlsChunk)
       var remain = rangeLen
       while remain > 0:
         let toRead = if remain > TlsChunk: TlsChunk else: int(remain)
-        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr tlsBuf[0]), toRead)
+        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr res.bodyBytes[0]), toRead)
         if n <= 0: break
-        discard res.conn.send(tlsBuf.toOpenArray(0, int(n) - 1))
+        discard res.conn.send(res.bodyBytes.toOpenArray(0, int(n) - 1))
         remain -= n
       closeFile(fileFd)
       if res.closeConn:
@@ -651,14 +652,15 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
 
     if res.conn.isTlsActive():
       # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+      # Reuse the pooled res.bodyBytes as the chunk buffer.
       const TlsChunk = 65536
-      var tlsBuf = newSeq[byte](TlsChunk)
+      res.bodyBytes.setLen(TlsChunk)
       var remain = rangeLen
       while remain > 0:
         let toRead = if remain > TlsChunk: TlsChunk else: int(remain)
-        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr tlsBuf[0]), toRead)
+        let n = readFile(fileFd, cast[ptr UncheckedArray[byte]](addr res.bodyBytes[0]), toRead)
         if n <= 0: break
-        discard res.conn.send(tlsBuf.toOpenArray(0, int(n) - 1))
+        discard res.conn.send(res.bodyBytes.toOpenArray(0, int(n) - 1))
         remain -= n
       closeFile(fileFd)
       return
