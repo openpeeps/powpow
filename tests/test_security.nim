@@ -1277,3 +1277,76 @@ test "test_ratelimit_zero_max_disabled":
   assert rl.allow("1.2.3.4"), "maxRequests=0 means unlimited"
   assert rl.allow("1.2.3.4")
   loop.close()
+
+test "test_ws_upgrade_without_server_escapes_http_timeout_sweep":
+  # websocketUpgrade() called WITHOUT the `server` argument used to leave the
+  # connection registered in the HttpServer's connRoots, so the server-wide
+  # keep-alive timeout sweep closed the live WebSocket out from under it
+  # (without firing onClose). The owning server is now derived from the
+  # response, so the upgraded connection must survive well past keepAliveMs.
+  let loop = newLoop()
+  var server = newHttpServer(loop, populate = false)
+  server.setKeepAliveTimeout(80)   # aggressive HTTP idle timeout
+  server.readTimeoutMs = 0         # only keep-alive drives the sweep
+  server.timeoutSweepMs = 20
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      if req.getMethod() == HttpGet and req.getPath() == "/ws":
+        discard websocketUpgrade(res, req,   # NOTE: no `server` argument
+          onOpen = proc(ws: WsConnection) = discard,
+        )
+      else:
+        res.sendError(Http404)
+  server.listen("127.0.0.1", 29971)
+
+  var clientConn: Connection = nil
+  var opened = false
+  var closed = false
+  var closedAt = -1
+  let t0 = monoMs()
+  loop.connect("127.0.0.1", 29971,
+    onConnect = proc(conn: Connection) =
+      clientConn = conn
+      discard conn.send("GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n" &
+                        "Connection: Upgrade\r\n" &
+                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" &
+                        "Sec-WebSocket-Version: 13\r\n\r\n")
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      if not opened and cast[string](@data).find("101") >= 0:
+        opened = true
+    ,
+    onClose = proc(conn: Connection) =
+      closed = true
+      closedAt = int(monoMs() - t0)
+    ,
+  )
+
+  var polls = 0
+  while not opened and polls < 5000:
+    loop.poll(1)
+    inc polls
+  assert opened, "WS upgrade should complete (101)"
+
+  # Idle well past keepAliveMs. Pre-fix the HTTP keep-alive sweep closed the
+  # upgraded connection within ~keepAliveMs and the client's onClose fired
+  # early; post-fix it must stay open.
+  polls = 0
+  while (monoMs() - t0) < 600 and polls < 20000:
+    loop.poll(1)
+    inc polls
+
+  assert not closed,
+    "upgraded WS connection must survive the HTTP keep-alive sweep " &
+    "(closed at " & $closedAt & "ms, keepAliveMs=80)"
+
+  # Clean up: close the client; the server observes EOF and releases the WS.
+  if clientConn != nil:
+    clientConn.close()
+  polls = 0
+  while polls < 1000:
+    loop.poll(1)
+    inc polls
+
+  server.close()
+  loop.close()

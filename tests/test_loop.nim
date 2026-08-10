@@ -183,6 +183,34 @@ test "test_pause_cancel_interaction":
   doAssert not fired, "cancelled+paused timer should not fire"
   loop.close()
 
+# ── Test 14: timer counter drift regression ──────────────────────────────────
+
+test "test_timer_count_returns_to_zero":
+  # Long one-shot timers cascade across wheel levels (addToWheel re-adds a
+  # counted node) and intervals re-arm through addToWheel on every fire. Both
+  # paths used to `inc totalTimers` again, inflating the counter and keeping
+  # the cancelled-set prune from ever running. Assert the counter returns to 0.
+  let loop = newLoop()
+  var fired = 0
+  for d in [300, 350, 450, 650, 900]:
+    discard loop.addTimer(d) do (id: int):
+      inc fired
+  var intervalTicks = 0
+  var intervalId: TimerId
+  intervalId = loop.addInterval(5) do (id: int):
+    inc intervalTicks
+    if intervalTicks >= 3:
+      loop.cancelTimer(intervalId)
+  var polls = 0
+  while loop.timerCount > 0 and polls < 50_000:
+    loop.poll(1)
+    inc polls
+  doAssert polls < 50_000, "timers did not resolve; timerCount=" & $loop.timerCount
+  doAssert fired == 5, "all one-shot timers should fire, got " & $fired
+  doAssert intervalTicks >= 3, "interval should have ticked, got " & $intervalTicks
+  doAssert loop.timerCount == 0, "totalTimers drifted to " & $loop.timerCount
+  loop.close()
+
 # ── Test 13: observer ────────────────────────────────────────────────────────
 
 test "test_observer_value_change":

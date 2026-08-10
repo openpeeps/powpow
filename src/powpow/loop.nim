@@ -137,6 +137,11 @@ proc close*(loop: Loop) =
 # ── Timer wheel ──────────────────────────────────────────────────────────────
 
 proc addToWheel(loop: Loop; node: TimerNode) {.inline.} =
+  # Insert `node` into the wheel at the slot for its deadline. This is a pure
+  # "put in the wheel" primitive — it does NOT change `totalTimers`, which is
+  # managed by the semantic entry/exit points (addTimer/addInterval, the fire
+  # loop, pause/resume). Callers that re-add an already-counted node (cascade,
+  # interval re-fire) therefore do not double-count.
   let diff = node.deadline - loop.wheelBase
   var level, slot: int
   if diff < 256:
@@ -153,7 +158,6 @@ proc addToWheel(loop: Loop; node: TimerNode) {.inline.} =
     slot = ((node.deadline shr 24) and 0xFF).int
   node.next = loop.wheel[level][slot]
   loop.wheel[level][slot] = node
-  inc loop.totalTimers
   let bitIdx = slot shr 6
   let bitOff = slot and 63
   loop.occBits[level][bitIdx] = loop.occBits[level][bitIdx] or (1.uint64 shl bitOff)
@@ -247,6 +251,7 @@ proc addTimer*(loop: Loop, delayMs: int, callback: TimerCallback): TimerId =
     cancelled: false,
     paused:   false,
   )
+  inc loop.totalTimers
   addToWheel(loop, node)
 
 proc addInterval*(loop: Loop, intervalMs: int,
@@ -262,9 +267,19 @@ proc addInterval*(loop: Loop, intervalMs: int,
     cancelled: false,
     paused:   false,
   )
+  inc loop.totalTimers
   addToWheel(loop, node)
 
-proc cancelTimer*(loop: Loop, id: TimerId) {.inline.} =
+proc cancelTimer*(loop: Loop; id: TimerId) =
+  ## Cancel a timer. A timer still in the wheel is flagged for lazy removal
+  ## when it reaches the front of the wheel (so no wheel surgery is needed).
+  ## A timer already paused (moved out of the wheel) is dropped immediately —
+  ## it was already removed from `totalTimers` when it was paused.
+  for i in 0 ..< loop.pausedList.len:
+    if loop.pausedList[i].id == id:
+      loop.pausedList.del(i)
+      loop.timerMap.del(id)
+      return
   loop.cancelled.incl(id)
 
 proc pauseTimer*(loop: Loop; id: TimerId) =
@@ -285,12 +300,19 @@ proc resumeTimer*(loop: Loop; id: TimerId) =
       loop.pausedList.del(i)
       node.paused = false
       node.deadline = monoMs() + (if node.interval > 0: node.interval else: node.delayMs)
+      inc loop.totalTimers   # re-enter the wheel: was decremented when paused
       addToWheel(loop, node)
       return
   # Not yet in pausedList — still in the wheel with paused=true
   let node = loop.timerMap.getOrDefault(id)
   if node != nil:
     node.paused = false
+
+proc timerCount*(loop: Loop): int {.inline.} =
+  ## Number of timers currently in the wheel (not paused, not cancelled-pending).
+  ## 0 means the loop can skip timer processing entirely. Exposed for
+  ## observability/tests.
+  loop.totalTimers
 
 # ── idle handlers ────────────────────────────────────────────────────────────
 
@@ -373,6 +395,7 @@ proc processTimers(loop: Loop; now: int64) =
         elif node.id in loop.cancelled:
           loop.cancelled.excl(node.id)
           dec loop.totalTimers
+          loop.timerMap.del(node.id)
         else:
           node.callback(node.id.int)
           if node.interval > 0:
@@ -385,8 +408,16 @@ proc processTimers(loop: Loop; now: int64) =
         prev = node
       node = next
 
+  # Prune cancelled ids whose timer has already been resolved (no longer in the
+  # wheel or paused list) so the set stays bounded. Never drop an id for a
+  # still-pending timer — that would let its callback fire after cancellation.
   if loop.cancelled.len > loop.totalTimers * 2 + 16:
-    loop.cancelled.clear()
+    var stale: seq[TimerId]
+    for id in loop.cancelled:
+      if id notin loop.timerMap:
+        stale.add(id)
+    for id in stale:
+      loop.cancelled.excl(id)
   loop.nextDead = int64.high
 
 proc timerTimeout(loop: Loop; now: int64): int =

@@ -44,7 +44,7 @@ suite "websocket post-upgrade idle timeout":
       inc polls
     check opened
     check closed
-    check polls < 1500, "closed by idle (120ms), not handshake timeout (2000ms): " & $polls
+    doAssert polls < 1500, "closed by idle (120ms), not handshake timeout (2000ms): " & $polls
     wss.close()
     loop.close()
 
@@ -79,13 +79,13 @@ suite "websocket post-upgrade idle timeout":
       loop.poll(1)
       inc polls
     check opened
-    check not closed, "must stay open while frames arrive"
+    doAssert not closed, "must stay open while frames arrive"
     if trafficTimer != TimerId(0):
       loop.cancelTimer(trafficTimer)
     while not closed and polls < 10000:
       loop.poll(1)
       inc polls
-    check closed, "must close once traffic stops"
+    doAssert closed, "must close once traffic stops"
     if clientConn != nil: clientConn.close()
     wss.close()
     loop.close()

@@ -910,7 +910,9 @@ proc websocketUpgrade*(
   ## After the upgrade, the connection is no longer managed by the HttpServer —
   ## all future data goes directly to the WebSocket callbacks.
   ##
-  ## Pass the `server` argument to clean up the HTTP session tracking.
+  ## The `server` argument is optional: it is derived from the response when
+  ## omitted, so the connection is always detached from the HTTP session
+  ## tracking and the post-upgrade idle timeout applies.
   ##
   ## .. code-block:: nim
   ##    server.get("/ws") do (req: HttpRequest, res: Response):
@@ -920,6 +922,7 @@ proc websocketUpgrade*(
   ##          ws.sendText(cast[string](@data)),
   ##      )
   {.gcsafe.}:
+    var owner = server
     let headers = req.getHeaders()
     let clientKey = headerValue(headers, "Sec-WebSocket-Key")
     let upgradeHeader = headerValue(headers, "Upgrade")
@@ -936,20 +939,27 @@ proc websocketUpgrade*(
 
     res.markSent()
 
-    if server != nil:
-      server.removeSession(conn)
+    # The owning HttpServer can be derived from the response, so a route that
+    # calls websocketUpgrade without passing `server` still detaches the
+    # connection from the HTTP session tracking. Otherwise the server-wide
+    # timeout sweep keeps treating the upgraded connection as an idle HTTP
+    # connection and closes it out from under the WebSocket.
+    if owner == nil:
+      owner = res.server
+    if owner != nil:
+      owner.removeSession(conn)
 
     # Send the 101 Switching Protocols response
     conn.sendHandshake(clientKey)
 
     # Create WebSocket connection
-    let ws = server.acquireWs(conn, maxFrameSize)
+    let ws = owner.acquireWs(conn, maxFrameSize)
     ws.onOpen    = onOpen
     ws.onMessage = onMessage
     ws.onClose   = onClose
     ws.onError   = onError
-    if server != nil:
-      ws.idleTimeoutMs = server.wsIdleTimeoutMs
+    if owner != nil:
+      ws.idleTimeoutMs = owner.wsIdleTimeoutMs
       ws.armIdleTimeout()
 
     # Re-register the fd for raw WebSocket frame handling.
@@ -961,7 +971,7 @@ proc websocketUpgrade*(
           if not ws.onClose.isNil:
             ws.onClose(ws, 1006, "Connection lost")
           ws.conn.close()
-          server.releaseWs(ws)
+          owner.releaseWs(ws)
           return
         if Read in ev:
           var buf: array[65536, byte]
@@ -973,7 +983,7 @@ proc websocketUpgrade*(
               if n > 0:
                 ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                 if ws.conn.state != Connected:
-                  server.releaseWs(ws)
+                  owner.releaseWs(ws)
                   return
               else:
                 break
@@ -982,13 +992,13 @@ proc websocketUpgrade*(
               if n > 0:
                 ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                 if ws.conn.state != Connected:
-                  server.releaseWs(ws)
+                  owner.releaseWs(ws)
                   return
               elif n == 0:
                 if not ws.onClose.isNil:
                   ws.onClose(ws, 1000, "")
                 ws.conn.close()
-                server.releaseWs(ws)
+                owner.releaseWs(ws)
                 return
               else:
                 if sockWouldBlock():
@@ -998,7 +1008,7 @@ proc websocketUpgrade*(
                 if not ws.onError.isNil:
                   ws.onError(ws, "recv error: " & $lastSocketError())
                 ws.conn.close()
-                server.releaseWs(ws)
+                owner.releaseWs(ws)
                 return
     )
 

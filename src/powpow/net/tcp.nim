@@ -314,11 +314,25 @@ proc send*(conn: Connection, data: openArray[byte]): int =
       conn.close()
       return -1
     if n < data.len:
-      let remaining = data.len - n
-      conn.writeBuf.setLen(remaining)
-      copyMem(addr conn.writeBuf[0], unsafeAddr data[n], remaining)
-      conn.writePos = 0
-      conn.watchWritable()
+      # SSL_write accepts at most one record (~16KB) per call; drain the rest
+      # so we never buffer while the socket is still writable (edge-triggered).
+      var pos = n
+      while pos < data.len:
+        let m = conn.tlsWrite(unsafeAddr data[pos], data.len - pos)
+        if m == -2:
+          break
+        if m < 0:
+          conn.close()
+          return -1
+        if m == 0:
+          break
+        pos += m
+      if pos < data.len:
+        let remaining = data.len - pos
+        conn.writeBuf.setLen(remaining)
+        copyMem(addr conn.writeBuf[0], unsafeAddr data[pos], remaining)
+        conn.writePos = 0
+        conn.watchWritable()
     return data.len
 
   if conn.writeBuf.len > 0:
@@ -326,21 +340,26 @@ proc send*(conn: Connection, data: openArray[byte]): int =
       return 0
     return data.len
 
-  let n = sockSend(conn.fd, unsafeAddr data[0], data.len)
-  if n < 0:
-    if sockWouldBlock():
-      conn.writeBuf.setLen(data.len)
-      copyMem(addr conn.writeBuf[0], unsafeAddr data[0], data.len)
-      conn.writePos = 0
-      conn.corkAndWatch()
-      return data.len
-    conn.close()
-    return -1
+  # Direct write, draining until EAGAIN. Edge-triggered Write events only fire
+  # on a readiness transition, so we must never buffer the remainder while the
+  # socket is still writable — otherwise no Write event will ever re-arm us
+  # and the connection stalls.
+  var pos = 0
+  while pos < data.len:
+    let n = sockSend(conn.fd, unsafeAddr data[pos], data.len - pos)
+    if n < 0:
+      if sockWouldBlock():
+        break
+      conn.close()
+      return -1
+    if n == 0:
+      break  # defensive: send() returning 0 with len > 0 (peer closed)
+    pos += n
 
-  if n < data.len:
-    let remaining = data.len - n
+  if pos < data.len:
+    let remaining = data.len - pos
     conn.writeBuf.setLen(remaining)
-    copyMem(addr conn.writeBuf[0], unsafeAddr data[n], remaining)
+    copyMem(addr conn.writeBuf[0], unsafeAddr data[pos], remaining)
     conn.writePos = 0
     conn.corkAndWatch()
 
@@ -436,23 +455,85 @@ proc sendv*(conn: Connection,
     return -1
 
   if n < totalLen:
-    var remaining = totalLen - n
-    conn.writeBuf.setLen(remaining)
-    var pos = 0
-    var skipped = 0
-    for part in parts:
-      if skipped + part.len <= n:
-        skipped += part.len
+    # Advance to the unsent region, then keep writing until EAGAIN.
+    # Edge-triggered Write events only fire on a readiness transition, so the
+    # remainder must never be buffered while the socket is still writable —
+    # otherwise no Write event will re-arm us and the connection stalls.
+    var skipParts = 0
+    var partOff = 0
+    var consumed = n
+    while skipParts < parts.len and consumed > 0:
+      let avail = parts[skipParts].len - partOff
+      if consumed >= avail:
+        consumed -= avail
+        inc skipParts
+        partOff = 0
       else:
-        let offset = n - skipped
-        let toCopy = part.len - offset
+        partOff += consumed
+        consumed = 0
+    var subStack: array[MaxStackIovs, IOVec]
+    var subIovs: seq[IOVec]
+    var sentTotal = n
+    var blocked = false
+    while sentTotal < totalLen:
+      let remaining = parts.len - skipParts
+      if remaining <= 0: break
+      var subBuf: ptr IOVec
+      if remaining <= MaxStackIovs:
+        subBuf = addr subStack[0]
+        for i in 0 ..< remaining:
+          let p = skipParts + i
+          subStack[i] = initIovec(
+            cast[ptr UncheckedArray[byte]](
+              cast[uint](parts[p].data) + (if i == 0: partOff.uint else: 0.uint)),
+            parts[p].len - (if i == 0: partOff else: 0))
+      else:
+        subIovs.setLen(remaining)
+        subBuf = addr subIovs[0]
+        for i in 0 ..< remaining:
+          let p = skipParts + i
+          subIovs[i] = initIovec(
+            cast[ptr UncheckedArray[byte]](
+              cast[uint](parts[p].data) + (if i == 0: partOff.uint else: 0.uint)),
+            parts[p].len - (if i == 0: partOff else: 0))
+      let m = sockWritev(conn.fd, subBuf, remaining)
+      if m < 0:
+        if sockWouldBlock():
+          blocked = true
+          break
+        conn.close()
+        return -1
+      if m == 0:
+        blocked = true   # defensive: writev returning 0 with len > 0
+        break
+      sentTotal += m
+      var rm = m
+      while skipParts < parts.len and rm > 0:
+        let avail = parts[skipParts].len - partOff
+        if rm >= avail:
+          rm -= avail
+          inc skipParts
+          partOff = 0
+        else:
+          partOff += rm
+          rm = 0
+    if blocked and sentTotal < totalLen:
+      # Buffer the still-unsent remainder and wait for a Write event (the
+      # socket is genuinely not writable now, so the transition will fire).
+      let remaining = totalLen - sentTotal
+      conn.writeBuf.setLen(remaining)
+      var pos = 0
+      var sp = skipParts
+      var off = partOff
+      while sp < parts.len:
+        let take = parts[sp].len - off
         copyMem(addr conn.writeBuf[pos],
-                cast[ptr UncheckedArray[byte]](
-                  cast[uint](part.data) + offset.uint), toCopy)
-        pos += toCopy
-        skipped = n
-    conn.writePos = 0
-    conn.corkAndWatch()
+                cast[ptr UncheckedArray[byte]](cast[uint](parts[sp].data) + off.uint), take)
+        pos += take
+        inc sp
+        off = 0
+      conn.writePos = 0
+      conn.corkAndWatch()
 
   return totalLen
 

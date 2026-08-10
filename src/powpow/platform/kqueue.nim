@@ -93,6 +93,9 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   let readFlags: cushort =
     if edgeTriggered: EV_ADD or EV_CLEAR
     else:             EV_ADD
+  let writeFlags: cushort =
+    if edgeTriggered: EV_ADD or EV_CLEAR
+    else:             EV_ADD
 
   if Read in events:
     changes[n].ident  = fd.csize_t
@@ -105,7 +108,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   if Write in events:
     changes[n].ident  = fd.csize_t
     changes[n].filter = EVFILT_WRITE
-    changes[n].flags  = EV_ADD
+    changes[n].flags  = writeFlags
     changes[n].fflags = 0
     changes[n].data   = 0
     changes[n].udata  = udata
@@ -162,7 +165,7 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
   changes[n].data   = 0
   changes[n].udata  = udata
   if Write in events:
-    changes[n].flags = EV_ADD
+    changes[n].flags = if edgeTriggered: (EV_ADD or EV_CLEAR).cushort else: EV_ADD
   else:
     changes[n].flags = EV_DELETE
   inc n

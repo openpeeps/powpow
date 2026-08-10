@@ -5,7 +5,8 @@
 ## pipelining when a \r\n spans a 16-byte chunk boundary.
 
 import powpow/proto/http
-import std/[unittest, strutils]
+import powpow/proto/simdscan
+import std/[httpcore, unittest, strutils]
 
 suite "request line strictness":
 
@@ -43,10 +44,9 @@ suite "SSE2 \\r\\n boundary bug (pipelining)":
       inc count
       parser.resetForNext()
       discard parser.feed(@[])
-    check count == 50, "all 50 pipelined requests must parse, got " & $count
+    doAssert count == 50, "all 50 pipelined requests must parse, got " & $count
 
   test "double CRLF spanning a 16-byte boundary is found":
-    import powpow/proto/simdscan
     var buf = newSeq[byte](64)
     # \r\n\r\n at positions 14..17 (spans the 16-byte boundary)
     buf[14] = '\r'.byte; buf[15] = '\n'.byte; buf[16] = '\r'.byte; buf[17] = '\n'.byte

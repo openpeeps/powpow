@@ -39,6 +39,9 @@ type
   HttpResponse* = ref object
     ## Build and send an HTTP response.
     conn:       Connection
+    server*:    HttpServer   ## owning server (set on acquire) — used by
+      ## `websocketUpgrade` to detach the connection from the HTTP session
+      ## tracking / timeout sweep when the caller omits the `server` argument
     statusCode: uint16
     sent:       bool
     closeConn:  bool           ## If true, send "Connection: close" and shut down
@@ -752,6 +755,7 @@ proc acquireHttpResponse(server: HttpServer, conn: Connection): HttpResponse =
   if server.resPool.len > 0:
     result = server.resPool.pop()
     result.conn = conn
+    result.server = server
     result.headers.setLen(0)
     result.bodyBytes.setLen(0)
     result.sent = false
@@ -759,7 +763,7 @@ proc acquireHttpResponse(server: HttpServer, conn: Connection): HttpResponse =
     result.closeConn = false
   else:
     result = HttpResponse(
-      conn: conn, statusCode: uint16(Http200), sent: false, closeConn: false,
+      conn: conn, server: server, statusCode: uint16(Http200), sent: false, closeConn: false,
       headers: @[], bodyBytes: @[])
 
 proc releaseHttpResponse(server: HttpServer, res: HttpResponse) {.inline.} =
