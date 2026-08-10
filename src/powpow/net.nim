@@ -19,10 +19,12 @@ import ./net/common
 import ./net/tcp
 import ./net/tls
 import ./net/udp
+import ./net/dns
 
 export common
 export tcp
 export tls
 export udp
+export dns
 export loop
 export types

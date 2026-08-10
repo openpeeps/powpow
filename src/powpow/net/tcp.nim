@@ -14,6 +14,7 @@ import std/tables
 import ../loop
 import ../types
 import common
+import dns
 when not defined(windows):
   import std/posix
 
@@ -108,6 +109,7 @@ type
   OnAccept*  = proc(conn: Connection) {.closure.}
   OnData*    = proc(conn: Connection, data: openArray[byte]) {.closure.}
   OnClose*   = proc(conn: Connection) {.closure.}
+  OnError*   = proc(err: string) {.closure.}
 
   TcpServer* = ref object
     fd*:       SocketHandle
@@ -889,90 +891,105 @@ proc newTcpServer*(loop: Loop,
 proc connect*(loop: Loop, address: string, port: int,
               onConnect: proc(conn: Connection) {.closure.},
               onData: OnData,
-              onClose: OnClose = nil) =
-  let addrBuf = resolveAddr(address, port, SOCK_STREAM)
-  let fd = socket(cast[ptr Sockaddr](addr addrBuf).sa_family.cint,
-                  SOCK_STREAM, 0)
-  if fd.cint < 0:
-    raise newException(NetError, "socket() failed")
-
-  setNonBlocking(fd)
-  setTcpNoDelay(fd)
-
-  let conn = Connection(
-    fd:        fd,
-    loop:      loop,
-    state:     Connecting,
-    readBuf:   acquireBuf(loop),
-    readBufLen: DefaultBufSize,
-  )
-
-  let sLen = getSockLen(addr addrBuf)
-  let ret = connect(fd, cast[ptr Sockaddr](addr addrBuf), sLen)
-  if ret < 0 and not sockInProgress():
-    conn.closeAndRelease()
-    raise newException(NetError, "connect() failed")
-
-  if ret == 0:
-    conn.state = Connected
-    conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
-      if Error in ev:
-        conn.closeAndRelease()
-        if onClose != nil: onClose(conn)
+              onClose: OnClose = nil,
+              onError: OnError = nil) =
+  ## Non-blocking TCP connect. DNS resolution is performed asynchronously on
+  ## the loop (see net/dns), so a slow resolver never blocks the event loop.
+  ## `onError` reports DNS / socket() / connect() failures; when nil these are
+  ## dropped silently (matching the existing non-blocking connect failure path).
+  resolveAddrAsync(loop, address, port, SOCK_STREAM,
+    proc(addrBuf: Sockaddr_storage; err: string) =
+      if err.len > 0:
+        if onError != nil:
+          onError(err)
         return
-      if conn.tlsState == TlsHandshaking:
-        if not conn.driveHandshake():
-          return
-      if Write in ev:
-        if conn.flushWriteBuffer():
-          if conn.closeAfterFlush:
+      let fd = socket(cast[ptr Sockaddr](addr addrBuf).sa_family.cint,
+                      SOCK_STREAM, 0)
+      if fd.cint < 0:
+        if onError != nil:
+          onError("socket() failed")
+        return
+
+      setNonBlocking(fd)
+      setTcpNoDelay(fd)
+
+      let conn = Connection(
+        fd:        fd,
+        loop:      loop,
+        state:     Connecting,
+        readBuf:   acquireBuf(loop),
+        readBufLen: DefaultBufSize,
+      )
+
+      let sLen = getSockLen(addr addrBuf)
+      let ret = connect(fd, cast[ptr Sockaddr](addr addrBuf), sLen)
+      if ret < 0 and not sockInProgress():
+        conn.closeAndRelease()
+        if onError != nil:
+          onError("connect() failed")
+        return
+
+      if ret == 0:
+        conn.state = Connected
+        conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
+          if Error in ev:
             conn.closeAndRelease()
             if onClose != nil: onClose(conn)
             return
-          if conn.state == Connected:
-            conn.loop.modify(rfd, {Read})
-      if Read in ev or Hup in ev:
-        conn.handleClientRead(onData, onClose)
-      if Hup in ev and conn.state == Connected:
-        conn.closeAndRelease()
-        if onClose != nil: onClose(conn)
-    onConnect(conn)
-    if conn.state == Closed: return
-  else:
-    conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
-      conn.loop.unregister(wfd)
-      var err: cint = 0
-      var errLen: SockLen = sizeof(err).SockLen
-      discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
-      if err != 0:
-        conn.closeAndRelease()
-        return
-
-      conn.state = Connected
-      setTcpNoDelay(SocketHandle(wfd))
-      conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
-        if Error in ev:
-          conn.closeAndRelease()
-          if onClose != nil: onClose(conn)
-          return
-        if conn.tlsState == TlsHandshaking:
-          if not conn.driveHandshake():
+          if conn.tlsState == TlsHandshaking:
+            if not conn.driveHandshake():
+              return
+          if Write in ev:
+            if conn.flushWriteBuffer():
+              if conn.closeAfterFlush:
+                conn.closeAndRelease()
+                if onClose != nil: onClose(conn)
+                return
+              if conn.state == Connected:
+                conn.loop.modify(rfd, {Read})
+          if Read in ev or Hup in ev:
+            conn.handleClientRead(onData, onClose)
+          if Hup in ev and conn.state == Connected:
+            conn.closeAndRelease()
+            if onClose != nil: onClose(conn)
+        onConnect(conn)
+        if conn.state == Closed: return
+      else:
+        conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
+          conn.loop.unregister(wfd)
+          var err: cint = 0
+          var errLen: SockLen = sizeof(err).SockLen
+          discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
+          if err != 0:
+            conn.closeAndRelease()
             return
-        if Write in ev:
-          if conn.flushWriteBuffer():
-            if conn.closeAfterFlush:
+
+          conn.state = Connected
+          setTcpNoDelay(SocketHandle(wfd))
+          conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
+            if Error in ev:
               conn.closeAndRelease()
               if onClose != nil: onClose(conn)
               return
-            if conn.state == Connected:
-              conn.loop.modify(rfd, {Read})
-        if Read in ev or Hup in ev:
-          conn.handleClientRead(onData, onClose)
-        if Hup in ev and conn.state == Connected:
-          conn.closeAndRelease()
-          if onClose != nil: onClose(conn)
-      onConnect(conn)
-      if conn.state == Closed: return
+            if conn.tlsState == TlsHandshaking:
+              if not conn.driveHandshake():
+                return
+            if Write in ev:
+              if conn.flushWriteBuffer():
+                if conn.closeAfterFlush:
+                  conn.closeAndRelease()
+                  if onClose != nil: onClose(conn)
+                  return
+                if conn.state == Connected:
+                  conn.loop.modify(rfd, {Read})
+            if Read in ev or Hup in ev:
+              conn.handleClientRead(onData, onClose)
+            if Hup in ev and conn.state == Connected:
+              conn.closeAndRelease()
+              if onClose != nil: onClose(conn)
+          onConnect(conn)
+          if conn.state == Closed: return
+  )
 
 when not defined(windows):
   proc connectUnix*(loop: Loop; path: string;

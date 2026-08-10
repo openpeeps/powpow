@@ -54,10 +54,29 @@ proc sendTo*(sock: UdpSocket, data: openArray[byte],
     return -1
   return n.int
 
+proc sendTo*(sock: UdpSocket, data: openArray[byte],
+             addrBuf: Sockaddr_storage): int {.inline.} =
+  ## Send a datagram to an already-resolved peer address (no re-resolution).
+  if data.len == 0: return 0
+  let sLen = getSockLen(addr addrBuf)
+  let n = sendto(sock.fd,
+                 unsafeAddr data[0], data.len.cint, 0,
+                 cast[ptr Sockaddr](addr addrBuf), sLen)
+  if n < 0:
+    if sockWouldBlock():
+      return 0
+    return -1
+  return n.int
+
 proc sendTo*(sock: UdpSocket, data: string,
              address: string, port: int): int {.inline.} =
   if data.len == 0: return 0
   sock.sendTo(data.toOpenArrayByte(0, data.high), address, port)
+
+proc sendTo*(sock: UdpSocket, data: string,
+             addrBuf: Sockaddr_storage): int {.inline.} =
+  if data.len == 0: return 0
+  sock.sendTo(data.toOpenArrayByte(0, data.high), addrBuf)
 
 proc send*(sock: UdpSocket, data: openArray[byte]): int {.inline.} =
   if data.len == 0: return 0

@@ -89,6 +89,10 @@ type
     pausedList:    seq[TimerNode]               # Timers removed from wheel while paused
     observers:     seq[Observer]                # Variable observers polled each loop
     obsDead:       int
+    dns*:          ref RootObj                  # optional DNS resolver context (net/dns)
+    cleanupCbs:    seq[Callback]                # invoked from close(), for sub-systems
+      ## that own loop-thread state (e.g. the DNS resolver) and need to free it
+      ## when the loop shuts down.
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -118,9 +122,21 @@ proc newLoop*(): Loop =
     pausedList:  newSeqOfCap[TimerNode](16),
     observers:   newSeqOfCap[Observer](16),
     obsDead:     0,
+    dns:         nil,
+    cleanupCbs:  @[],
   )
 
+proc addCleanup*(loop: Loop; cb: Callback) =
+  ## Register a callback that runs on `loop.close()` (on the same thread that
+  ## created the loop). Sub-systems that own loop-thread state — e.g. the DNS
+  ## resolver's socket and query table — use this to free themselves.
+  loop.cleanupCbs.add(cb)
+
 proc close*(loop: Loop) =
+  for cb in loop.cleanupCbs:
+    cb()
+  loop.cleanupCbs.setLen(0)
+  loop.dns = nil
   for fd, w in loop.fdWatchers:
     if w.alive:
       when defined(windows):

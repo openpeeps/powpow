@@ -28,7 +28,7 @@
 ##
 ## ### TCP Networking (`net/tcp.nim`)
 ## - Non-blocking TCP server with connection pooling
-## - Non-blocking TCP client with async connect
+## - Non-blocking TCP client with async connect (DNS resolved on the loop)
 ## - Edge-triggered I/O events
 ## - Write buffering with automatic corking (TCP_CORK / TCP_NOPUSH)
 ## - Scatter-gather writes via writev
@@ -37,6 +37,14 @@
 ## - Unix domain socket support (macOS/BSD/Linux)
 ## - SO_LINGER{0} for fast shutdown
 ## - Per-connection read buffer pooling
+##
+## ### Async DNS (`net/dns.nim`)
+## - In-loop DNS resolver (RFC 1035) — no blocking getaddrinfo, no worker threads
+## - Reads /etc/hosts and /etc/resolv.conf (system resolver config)
+## - A + AAAA queries with A-fallback; retries with timeout/attempts
+## - TTL-based result cache + negative caching
+## - `resolveAddrAsync` for users; `connect` uses it automatically
+## - Numeric IP literals resolve inline (zero DNS I/O)
 ##
 ## ### UDP Networking (`net/udp.nim`)
 ## - Non-blocking UDP server (bind) and client (connect)

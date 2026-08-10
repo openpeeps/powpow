@@ -127,6 +127,15 @@ when defined(windows):
                     namelen: ptr SockLen): cint {.
     importc: "getpeername", stdcall, dynlib: "ws2_32.dll".}
 
+  proc inet_pton(af: cint; src: cstring; dst: pointer): cint {.
+    importc: "InetPtonA", stdcall, dynlib: "ws2_32.dll".}
+
+  proc htons(hostshort: cushort): cushort {.
+    importc: "htons", stdcall, dynlib: "ws2_32.dll".}
+
+  proc htonl(hostlong: int32): int32 {.
+    importc: "htonl", stdcall, dynlib: "ws2_32.dll".}
+
   const
     NI_NUMERICHOST* = cint(1)
     NI_MAXHOST* = 1025
@@ -184,6 +193,9 @@ else:
 
   proc ioctl(fd: cint; request: culong; arg: pointer): cint {.
     importc: "ioctl", header: "<sys/ioctl.h>".}
+
+  proc inet_pton(af: cint; src: cstring; dst: pointer): cint {.
+    importc: "inet_pton", header: "<arpa/inet.h>".}
 
   when defined(macosx) or defined(bsd):
     const FIONBIO = 0x8004667E.culong
@@ -301,6 +313,40 @@ proc resolveAddr*(address: string, port: int,
   defer: freeaddrinfo(res)
 
   copyMem(addr result, res.ai_addr, res.ai_addrlen)
+
+proc isIpAddress*(address: string): bool =
+  ## True when `address` is a numeric IPv4 or IPv6 literal (no DNS needed).
+  var buf: array[16, byte]
+  let af = if address.find('.') >= 0: AF_INET else: AF_INET6
+  inet_pton(af, address.cstring, addr buf[0]) == 1
+
+proc sockaddrFromIp*(ip: string, port: int): Sockaddr_storage =
+  ## Build a socket address from a numeric IPv4/IPv6 literal without calling
+  ## getaddrinfo (which blocks on the resolver). Raises NetError otherwise.
+  var res: Sockaddr_storage
+  if ip.find('.') >= 0:
+    var sain: Sockaddr_in
+    when defined(windows):
+      sain.sin_family = AF_INET.cushort
+    else:
+      sain.sin_family = TSa_Family(AF_INET)
+    sain.sin_port = htons(port.uint16)
+    if inet_pton(AF_INET, ip.cstring, addr sain.sin_addr) != 1:
+      raise newException(NetError, "invalid IPv4 literal: " & ip)
+    copyMem(addr res, addr sain, sizeof(sain))
+  elif ip.find(':') >= 0:
+    var sai6: Sockaddr_in6
+    when defined(windows):
+      sai6.sin6_family = AF_INET6.cushort
+    else:
+      sai6.sin6_family = TSa_Family(AF_INET6)
+    sai6.sin6_port = htons(port.uint16)
+    if inet_pton(AF_INET6, ip.cstring, addr sai6.sin6_addr) != 1:
+      raise newException(NetError, "invalid IPv6 literal: " & ip)
+    copyMem(addr res, addr sai6, sizeof(sai6))
+  else:
+    raise newException(NetError, "not an IP literal: " & ip)
+  result = res
 
 proc getSockLen*(addrBuf: ptr Sockaddr_storage): SockLen {.inline.} =
   ## Return the correct socklen for the address family.
