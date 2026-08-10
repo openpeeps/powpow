@@ -37,8 +37,8 @@
 > [!WARNING]
 > 💥 This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms. **Use it, test it, and do not hesitate to report any issues you find!** 💥 
 
-## Example of web servers (the fun part)
-Most web servers out there are all rainbows and flowers, until you upload or stream a file, and it transforms into a nightmare at runtime. **PowPow is different**. Check examples in the `examples/` directory, or see the [API reference](https://openpeeps.github.io/powpow) for more details.
+## Examples (the fun part)
+Most web servers out there are all rainbows and flowers, until you upload or stream a file, and it transforms into a nightmare at runtime. PowPow is slowly moving toward a production-ready server. Everything below is runnable and lives in the `examples/` directory.
 
 - `httpserver.nim` the classic. A tiny, functional HTTP/1.1 server
 
