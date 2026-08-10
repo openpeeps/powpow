@@ -1,12 +1,11 @@
 ## examples/upload_server.nim — File upload demo using zero-copy APIs.
 ##
-## Demonstrates three approaches:
+## Demonstrates two upload approaches:
 ##
-##   /upload/raw     — Raw body via streamToFile()  (~68KB — recommended)
-##   /upload/stream  — Multipart via getMultipart()  (~68KB, same as /lazy)
-##
-## The two multipart routes (/lazy, /stream) are identical — both use
-## auto-detected streaming.
+##   /upload/raw     — Raw body via streamToFile() (recommended for trusted
+##                     server-to-server transfers; the body carries no metadata,
+##                     so the filename/type must be conveyed out-of-band)
+##   /upload/stream  — Multipart via getMultipart() (fields + files)
 ##
 ## Run:
 ##   nim c -r examples/upload_server.nim
@@ -72,7 +71,7 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
 # ── Start ────────────────────────────────────────────────────────────────────
 
 echo "Upload server listening on http://localhost:9000"
-echo "  POST /upload/raw   — raw body via streamToFile() (~68KB — recommended)"
-echo "  POST /upload/stream — multipart via getMultipart() (~68KB, same as /lazy)"
+echo "  POST /upload/raw   — raw body via streamToFile() (trusted server-to-server transfers)"
+echo "  POST /upload/stream — multipart via getMultipart()"
 echo "  Press Ctrl+C to stop"
 server.start(handler, Port(9000))
