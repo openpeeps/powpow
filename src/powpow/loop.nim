@@ -105,18 +105,18 @@ proc newLoop*(): Loop =
     idleCbs:     initTable[int, Callback](),
     nextIdleId:  0,
     deadCount:   0,
-    deadFds:     @[],
-    fdWatcherPool: @[],
+    deadFds:     newSeqOfCap[int](16),
+    fdWatcherPool: newSeqOfCap[FdWatcher](16),
 
     running:     false,
     stopFlag:    false,
-    bufPool:     @[],
+    bufPool:     newSeqOfCap[ptr UncheckedArray[byte]](16),
     occBits:     [default array[4, uint64], default array[4, uint64],
                   default array[4, uint64], default array[4, uint64]],
     nextDead:    int64.high,
     timerMap:    initTable[TimerId, TimerNode](),
-    pausedList:  @[],
-    observers:   @[],
+    pausedList:  newSeqOfCap[TimerNode](16),
+    observers:   newSeqOfCap[Observer](16),
     obsDead:     0,
   )
 
@@ -476,13 +476,13 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
       w.callback(w.fd, pev.events)
   if loop.stopFlag: return
 
-  let now2 = monoMs()
-  processTimers(loop, now2)
+  if loop.totalTimers > 0:
+    # Timers may have expired during the I/O wait — recompute and fire them.
+    let now2 = monoMs()
+    processTimers(loop, now2)
   if loop.stopFlag: return
 
-  sweepDead(loop)
-
-  # Check observers for variable changes
+  sweepDead(loop)  # Check observers for variable changes
   for obs in loop.observers.mitems:
     if obs.alive:
       let val = obs.varPtr[]

@@ -50,13 +50,13 @@ const
     ## on release — an idle pooled connection must not pin a 32MB buffer it
     ## once needed for a single large response.
 
-proc acquireBuf(loop: Loop): ptr UncheckedArray[byte] {.inline.} =
+proc acquireBuf*(loop: Loop): ptr UncheckedArray[byte] {.inline.} =
   if loop.bufPool.len > 0:
     loop.bufPool.pop()
   else:
     cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
 
-proc releaseBuf(loop: Loop, buf: ptr UncheckedArray[byte]) {.inline.} =
+proc releaseBuf*(loop: Loop, buf: ptr UncheckedArray[byte]) {.inline.} =
   if loop.bufPool.len < MaxBufPoolSize:
     loop.bufPool.add(buf)
   else:
