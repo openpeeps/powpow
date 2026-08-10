@@ -193,11 +193,10 @@ covered by regression tests in [`tests/test_security.nim`](tests/test_security.n
   (1 MB), so an attacker-controlled response echoed over TLS cannot force an
   arbitrarily large allocation.
 
-#### Recommended production configuration
+### Recommended production configuration
 
 For publicly reachable endpoints, set explicit caps instead of relying on the
-defaults (the `maxBodySize = 0` backstop is `MaxStreamBodySize`, 512 MB per
-connection — a lot for one client):
+defaults (the `maxBodySize = 0` backstop is `MaxStreamBodySize`:
 
 ```nim
 let server = newHttpServer(loop)
@@ -221,7 +220,7 @@ mutates requests from a context-free grammar, detects CL/TE desyncs with an
 in-process oracle, and drives live servers with the two-request
 response-pairing technique.
 
-#### Security roadmap
+### Security roadmap
 
 - [ ] Coverage-guided fuzzing of the HTTP / WebSocket / multipart parsers
       (libFuzzer & nim-drchaos adapters in `smuggler`)
