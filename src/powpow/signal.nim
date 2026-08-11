@@ -309,7 +309,7 @@ proc teardown(src: SignalSource) =
   when defined(linux):
     if src.sfFd >= 0:
       src.loop.unregister(src.sfFd.int)
-      c_close(src.sfFd)
+      discard c_close(src.sfFd)
       src.sfFd = -1
   elif defined(windows):
     if src.consoleAdded:
