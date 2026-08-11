@@ -9,7 +9,6 @@ it depends on.
 ## Run everything
 
 ```sh
-cd /Users/georgelemon/Development/packages/powpow
 for f in audit/*.nim; do
   nim c -r --hints:off --verbosity:0 "$f" || echo "FAILED: $f"
 done
