@@ -46,6 +46,15 @@
 ## - `resolveAddrAsync` for users; `connect` uses it automatically
 ## - Numeric IP literals resolve inline (zero DNS I/O)
 ##
+## ### OS Signals (`signal.nim`)
+## - In-process `SignalRelay` pub/sub bus (listen / listenOnce / unlisten)
+## - `watchOsSignal`/`watchOsSignals` deliver real OS signals through the loop
+## - `OsSignal` enum: SIGHUP, SIGINT, SIGQUIT, SIGUSR1/2, SIGPIPE, SIGALRM,
+##   SIGTERM, SIGURG, SIGCHLD, SIGIO
+## - Platform-native delivery: signalfd (Linux), self-pipe (macOS/BSD/POSIX),
+##   SetConsoleCtrlHandler Ctrl+C (Windows) — no global signal handlers
+## - Graceful shutdown on SIGINT/SIGTERM without blocking the loop
+##
 ## ### UDP Networking (`net/udp.nim`)
 ## - Non-blocking UDP server (bind) and client (connect)
 ## - recvfrom / sendto for connectionless communication

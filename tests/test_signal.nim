@@ -2,6 +2,8 @@
 
 import ../src/powpow
 import std/unittest
+when not defined(windows):
+  import std/posix as osposix
 
 suite "signal":
 
@@ -133,3 +135,100 @@ suite "signal":
     loop.run()
     check a == 1
     check b == 1  # B fires once (already deferred before A unlistened it)
+
+when not defined(windows):
+  # ── OS signal delivery (SIGUSR1/SIGUSR2 are the safest for CI) ─────────────
+
+  test "test_os_signal_delivered":
+    # SIGUSR1 sent to our own process must reach a relay listener on the loop,
+    # and the process must keep running (default action suppressed).
+    var count = 0
+    let loop = newLoop()
+    let relay = newOsSignalRelay(loop)
+    discard relay.listen(SignalUsr1) do (): inc count
+    relay.watchOsSignal(SignalUsr1)
+    discard loop.addTimer(10) do (id: int):
+      discard osposix.kill(osposix.getpid(), osposix.SIGUSR1)
+    discard loop.addTimer(50) do (id: int):
+      check count == 1
+      loop.stop()
+    loop.run()
+    check count == 1
+    loop.close()
+
+  test "test_os_signal_multiple":
+    var a, b = 0
+    let loop = newLoop()
+    let relay = newOsSignalRelay(loop)
+    discard relay.listen(SignalUsr1) do (): inc a
+    discard relay.listen(SignalUsr2) do (): inc b
+    relay.watchOsSignals([SignalUsr1, SignalUsr2])
+    discard loop.addTimer(10) do (id: int):
+      discard osposix.kill(osposix.getpid(), osposix.SIGUSR1)
+      discard osposix.kill(osposix.getpid(), osposix.SIGUSR2)
+    discard loop.addTimer(50) do (id: int):
+      loop.stop()
+    loop.run()
+    check a == 1
+    check b == 1
+    loop.close()
+
+  test "test_os_signal_sigint":
+    # The primary shutdown case: SIGINT must be delivered, not terminate us.
+    var count = 0
+    let loop = newLoop()
+    let relay = newOsSignalRelay(loop)
+    discard relay.listen(SignalInt) do (): inc count
+    relay.watchOsSignal(SignalInt)
+    discard loop.addTimer(10) do (id: int):
+      discard osposix.kill(osposix.getpid(), osposix.SIGINT)
+    discard loop.addTimer(50) do (id: int):
+      loop.stop()
+    loop.run()
+    check count == 1
+    loop.close()
+
+  test "test_os_signal_listen_once":
+    var count = 0
+    let loop = newLoop()
+    let relay = newOsSignalRelay(loop)
+    discard relay.listenOnce(SignalUsr1) do (): inc count
+    relay.watchOsSignal(SignalUsr1)
+    discard loop.addTimer(10) do (id: int):
+      discard osposix.kill(osposix.getpid(), osposix.SIGUSR1)
+      discard osposix.kill(osposix.getpid(), osposix.SIGUSR1)
+    discard loop.addTimer(50) do (id: int):
+      loop.stop()
+    loop.run()
+    check count == 1
+    loop.close()
+
+  test "test_os_signal_unlisten":
+    var count = 0
+    let loop = newLoop()
+    let relay = newOsSignalRelay(loop)
+    let li = relay.listen(SignalUsr1) do (): inc count
+    relay.watchOsSignal(SignalUsr1)
+    li.unlisten()
+    discard loop.addTimer(10) do (id: int):
+      discard osposix.kill(osposix.getpid(), osposix.SIGUSR1)
+    discard loop.addTimer(50) do (id: int):
+      loop.stop()
+    loop.run()
+    check count == 0
+    loop.close()
+
+  test "test_os_signal_watched_no_listener":
+    # A watched signal with no subscribed listener is still caught (the default
+    # action is suppressed) but fires nothing — and must not kill the process.
+    var count = 0
+    let loop = newLoop()
+    let relay = newOsSignalRelay(loop)
+    relay.watchOsSignal(SignalUsr1)   # armed, but no listen() subscribed
+    discard loop.addTimer(10) do (id: int):
+      discard osposix.kill(osposix.getpid(), osposix.SIGUSR1)
+    discard loop.addTimer(50) do (id: int):
+      loop.stop()
+    loop.run()
+    check count == 0
+    loop.close()

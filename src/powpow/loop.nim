@@ -10,7 +10,7 @@
 ## The loop uses a hierarchical timer wheel for efficient timer management, and supports edge-triggered I/O events.
 ## The API is designed to be minimal and efficient, with a focus on low-latency event handling and minimal overhead.
 
-import std/[tables, deques, sets, monotimes, bitops, sequtils]
+import std/[tables, deques, sets, monotimes, bitops, sequtils, locks]
 
 import ./platform, ./types
 export types, platform
@@ -90,15 +90,18 @@ type
     observers:     seq[Observer]                # Variable observers polled each loop
     obsDead:       int
     dns*:          ref RootObj                  # optional DNS resolver context (net/dns)
+    sigSource*:    ref RootObj                  # optional OS signal source (signal.nim)
     cleanupCbs:    seq[Callback]                # invoked from close(), for sub-systems
       ## that own loop-thread state (e.g. the DNS resolver) and need to free it
       ## when the loop shuts down.
     closed*:       bool                         # set once close() runs
+    postedLock:    Lock                         # guards postedCbs (cross-thread)
+    postedCbs:     seq[Callback]                # callbacks posted from other threads
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 proc newLoop*(): Loop =
-  Loop(
+  result = Loop(
     platform:    Platform.init(),
     fdWatchers:  initTable[int, FdWatcher](256),
     nextGen:     1,
@@ -124,9 +127,12 @@ proc newLoop*(): Loop =
     observers:   newSeqOfCap[Observer](16),
     obsDead:     0,
     dns:         nil,
+    sigSource:   nil,
     cleanupCbs:  @[],
     closed:      false,
+    postedCbs:   @[],
   )
+  initLock(result.postedLock)
 
 proc addCleanup*(loop: Loop; cb: Callback) =
   ## Register a callback that runs on `loop.close()` (on the same thread that
@@ -261,6 +267,14 @@ proc modify*(loop: Loop, fd: int, events: set[EventType]) {.inline.} =
 
 proc deferCall*(loop: Loop, cb: Callback) {.inline.} =
   loop.deferred.addLast(cb)
+
+proc postToLoop*(loop: Loop, cb: Callback) =
+  ## Thread-safe: run `cb` on the loop's thread at the next poll iteration.
+  ## Used to hand work from other threads (e.g. the Windows Ctrl+C handler) to
+  ## the loop thread. Requires `--threads:on` for real cross-thread safety.
+  withLock(loop.postedLock):
+    loop.postedCbs.add(cb)
+  loop.platform.wake()
 
 # ── timers ───────────────────────────────────────────────────────────────────
 
@@ -495,6 +509,16 @@ proc processDeferred(loop: Loop) {.inline.} =
     let cb = loop.deferred.popFirst()
     cb()
 
+proc drainPosted(loop: Loop) {.inline.} =
+  ## Run callbacks posted from other threads (postToLoop).
+  if loop.postedCbs.len > 0:
+    var batch: seq[Callback]
+    withLock(loop.postedLock):
+      batch = loop.postedCbs
+      loop.postedCbs.setLen(0)
+    for cb in batch:
+      cb()
+
 # ── internal: sweep dead watchers ────────────────────────────────────────────
 
 proc sweepDead(loop: Loop) {.inline.} =
@@ -514,6 +538,7 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   let now = monoMs()
 
   processDeferred(loop)
+  drainPosted(loop)
   if loop.stopFlag: return
 
   processTimers(loop, now)
