@@ -21,26 +21,26 @@ when defined(windows):
     Sockaddr* {.importc: "struct sockaddr", header: "<winsock2.h>",
                 pure, final.} = object
       sa_family*: cushort
-      sa_data: array[14, byte]
+      sa_data*: array[14, byte]
 
     Sockaddr_in* {.importc: "struct sockaddr_in", header: "<winsock2.h>",
                    pure, final.} = object
-      sin_family: cushort
-      sin_port: cushort
-      sin_addr: array[4, byte]
-      sin_zero: array[8, byte]
+      sin_family*: cushort
+      sin_port*: cushort
+      sin_addr*: array[4, byte]
+      sin_zero*: array[8, byte]
 
     Sockaddr_in6* {.pure, final.} = object
-      sin6_family: cushort
-      sin6_port: cushort
-      sin6_flowinfo: int32
-      sin6_addr: array[16, byte]
-      sin6_scope_id: int32
+      sin6_family*: cushort
+      sin6_port*: cushort
+      sin6_flowinfo*: int32
+      sin6_addr*: array[16, byte]
+      sin6_scope_id*: int32
 
     Sockaddr_storage* {.importc: "struct sockaddr_storage",
                         header: "<winsock2.h>", pure, final.} = object
-      ss_family: cushort
-      ss_padding: array[120, byte]
+      ss_family*: cushort
+      ss_padding*: array[120, byte]
 
     AddrInfo* {.importc: "struct addrinfo", header: "<ws2tcpip.h>",
                 pure, final.} = object
@@ -127,13 +127,13 @@ when defined(windows):
                     namelen: ptr SockLen): cint {.
     importc: "getpeername", stdcall, dynlib: "ws2_32.dll".}
 
-  proc inet_pton(af: cint; src: cstring; dst: pointer): cint {.
+  proc inet_pton*(af: cint; src: cstring; dst: pointer): cint {.
     importc: "InetPtonA", stdcall, dynlib: "ws2_32.dll".}
 
-  proc htons(hostshort: cushort): cushort {.
+  proc htons*(hostshort: cushort): cushort {.
     importc: "htons", stdcall, dynlib: "ws2_32.dll".}
 
-  proc htonl(hostlong: int32): int32 {.
+  proc htonl*(hostlong: int32): int32 {.
     importc: "htonl", stdcall, dynlib: "ws2_32.dll".}
 
   const
@@ -416,18 +416,31 @@ proc sockShutdown*(fd: SocketHandle, how: cint) {.inline.} =
     discard posix.shutdown(fd, how)
 
 proc sockWritev*(fd: SocketHandle, iov: ptr IOVec, iovcnt: int): int {.inline.} =
-  ## Scatter-gather write. On Windows, concatenates buffers and calls send.
+  ## Scatter-gather write. On Windows there is no synchronous writev, so a loop
+  ## of send() calls (one per iovec) would cost N syscalls vs 1 on POSIX — the
+  ## HTTP response path routinely builds ~7 iovecs. Coalesce small writes into a
+  ## single send() call instead.
   when defined(windows):
     let arr = cast[ptr UncheckedArray[IOVec]](iov)
     var total = 0
     for i in 0 ..< iovcnt:
+      total += arr[i].iov_len
+    if total <= 16384:
+      var buf: array[16384, byte]
+      var pos = 0
+      for i in 0 ..< iovcnt:
+        copyMem(addr buf[pos], arr[i].iov_base, arr[i].iov_len)
+        pos += arr[i].iov_len
+      return send(fd, addr buf[0], total.cint, 0).int
+    var sent = 0
+    for i in 0 ..< iovcnt:
       let n = send(fd, arr[i].iov_base, arr[i].iov_len.cint, 0).int
       if n < 0:
-        if total > 0: return total
+        if sent > 0: return sent
         return n
-      total += n
+      sent += n
       if n < arr[i].iov_len: break
-    result = total
+    result = sent
   else:
     result = posix.writev(fd.cint, cast[ptr posix.IOVec](iov), iovcnt.cint).int
 

@@ -174,7 +174,7 @@ when defined(linux):
 elif defined(windows):
   import std/winlean
   type HandlerRoutine = proc(dwCtrlType: DWORD): int32 {.stdcall.}
-  proc SetConsoleCtrlHandler(handler: HandlerRoutine; add: BOOL): BOOL {.
+  proc SetConsoleCtrlHandler(handler: HandlerRoutine; add: WINBOOL): WINBOOL {.
     importc: "SetConsoleCtrlHandler", dynlib: "kernel32".}
   const CTRL_C_EVENT = 0
   const WinSigInt = 2

@@ -710,40 +710,70 @@ proc handleClientRead(conn: Connection, onData: OnData, onClose: OnClose) =
         return
 
 proc acceptClients(server: TcpServer) =
-  while true:
-    var clientAddr {.noInit.}: Sockaddr_storage
-    var addrLen: SockLen = sizeof(clientAddr).SockLen
-    let clientFd = accept(server.fd,
-                          cast[ptr Sockaddr](addr clientAddr),
-                          addr addrLen)
-    if clientFd.int >= 0:
+  when defined(windows):
+    # On Windows the listen socket is driven by AcceptEx (pure IOCP): accepted
+    # sockets are queued by the platform backend and drained here. This matches
+    # the epoll/kqueue methodology — no select() in the hot path.
+    while true:
+      let clientFd = server.loop.platform.takeAcceptedSocket(server.fd.int)
+      if clientFd < 0: return
+      var clientAddr {.noInit.}: Sockaddr_storage
+      var addrLen: SockLen = sizeof(clientAddr).SockLen
+      discard getpeername(clientFd.cint,
+                          cast[ptr Sockaddr](addr clientAddr), addr addrLen)
       setNonBlocking(SocketHandle(clientFd))
       setTcpNoDelay(SocketHandle(clientFd))
+      if server.maxConnections > 0 and server.fdConn.len >= server.maxConnections:
+        sockClose(SocketHandle(clientFd))
+        continue
+      let conn = acquireConnection(server, SocketHandle(clientFd))
+      conn.clientAddr = clientAddr
+      if server.onAccept != nil:
+        server.onAccept(conn)
+      if conn.state == Closed:
+        continue
+      server.fdConn[clientFd.int] = conn
+      conn.loop.register(clientFd.int, {Read}, edgeTriggered = true,
+                         callback = server.sharedCb)
+      conn.handleClientRead(server.onData, server.onClose)
+      if conn.state == Closed:
+        server.releaseConnection(conn)
+        continue
+  else:
+    while true:
+      var clientAddr {.noInit.}: Sockaddr_storage
+      var addrLen: SockLen = sizeof(clientAddr).SockLen
+      let clientFd = accept(server.fd,
+                            cast[ptr Sockaddr](addr clientAddr),
+                            addr addrLen)
+      if clientFd.int >= 0:
+        setNonBlocking(SocketHandle(clientFd))
+        setTcpNoDelay(SocketHandle(clientFd))
 
-    if clientFd.int < 0:
-      if sockWouldBlock():
+      if clientFd.int < 0:
+        if sockWouldBlock():
+          return
         return
-      return
-    
-    if server.maxConnections > 0 and server.fdConn.len >= server.maxConnections:
-      sockClose(clientFd)
-      return
-    
-    let conn = acquireConnection(server, clientFd)
-    conn.clientAddr = clientAddr
+      
+      if server.maxConnections > 0 and server.fdConn.len >= server.maxConnections:
+        sockClose(clientFd)
+        return
+      
+      let conn = acquireConnection(server, clientFd)
+      conn.clientAddr = clientAddr
 
-    if server.onAccept != nil:
-      server.onAccept(conn)
-    if conn.state == Closed:
-      continue
+      if server.onAccept != nil:
+        server.onAccept(conn)
+      if conn.state == Closed:
+        continue
 
-    server.fdConn[clientFd.int] = conn
-    conn.loop.register(clientFd.int, {Read}, edgeTriggered = true,
-                       callback = server.sharedCb)
-    conn.handleClientRead(server.onData, server.onClose)
-    if conn.state == Closed:
-      server.releaseConnection(conn)
-      continue
+      server.fdConn[clientFd.int] = conn
+      conn.loop.register(clientFd.int, {Read}, edgeTriggered = true,
+                         callback = server.sharedCb)
+      conn.handleClientRead(server.onData, server.onClose)
+      if conn.state == Closed:
+        server.releaseConnection(conn)
+        continue
 
 proc listen*(server: TcpServer, address: string, port: int) =
   let addrBuf = resolveAddr(address, port, SOCK_STREAM)
