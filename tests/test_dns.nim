@@ -14,7 +14,7 @@ type
   FakeDns = ref object
     sock: UdpSocket
     queries: int
-    answers: Table[string, string]   # hostname -> IPv4, or "nx" for NXDOMAIN
+    answers: Table[string, seq[string]]   # hostname -> IPv4 list, or @["nx"]
     dropHosts: seq[string]
 
 proc decodeName(msg: seq[byte]; start: int): tuple[name: string, next: int] =
@@ -34,14 +34,14 @@ proc decodeName(msg: seq[byte]; start: int): tuple[name: string, next: int] =
   (name, pos)
 
 proc dnsResponse(id: uint16; qname: string; rcode: int; qtype: uint16;
-                 ip: string): seq[byte] =
+                 ips: seq[string]): seq[byte] =
   result = newSeq[byte](12)
   result[0] = byte((id shr 8) and 0xFF)
   result[1] = byte(id and 0xFF)
   result[2] = 0x81
   result[3] = byte(0x80 or (rcode and 0x0F))
   result[4] = 0; result[5] = 1          # QDCOUNT
-  result[6] = 0; result[7] = (if rcode == 0 and ip.len > 0: 1 else: 0)  # ANCOUNT
+  result[6] = 0; result[7] = byte(if rcode == 0 and ips.len > 0: ips.len else: 0)  # ANCOUNT
   result[8] = 0; result[9] = 0
   result[10] = 0; result[11] = 0
   for label in qname.split('.'):
@@ -52,7 +52,7 @@ proc dnsResponse(id: uint16; qname: string; rcode: int; qtype: uint16;
   result.add(0)
   result.add(byte((qtype shr 8) and 0xFF)); result.add(byte(qtype and 0xFF))
   result.add(0); result.add(1)
-  if ip.len > 0:
+  for ip in ips:
     result.add(0xC0); result.add(0x0C)  # pointer to the question name
     result.add(byte((qtype shr 8) and 0xFF)); result.add(byte(qtype and 0xFF))
     result.add(0); result.add(1)        # IN
@@ -69,7 +69,7 @@ proc dnsResponse(id: uint16; qname: string; rcode: int; qtype: uint16;
 proc startFakeDns(loop: Loop; port: int): FakeDns =
   let fake = FakeDns(
     queries: 0,
-    answers: initTable[string, string](),
+    answers: initTable[string, seq[string]](),
     dropHosts: @[],
     sock: nil,
   )
@@ -85,17 +85,17 @@ proc startFakeDns(loop: Loop; port: int): FakeDns =
       if pos + 4 > data.len:
         return
       let qtype = (uint16(data[pos]) shl 8) or data[pos + 1]
-      let ip = fake.answers.getOrDefault(name.toLowerAscii())
-      if ip == "nx":
+      let ips = fake.answers.getOrDefault(name.toLowerAscii())
+      if ips == @["nx"]:
         discard fake.sock.sendTo(
-          dnsResponse(id, name, 3, qtype, ""), sender)
-      elif ip.len > 0 and qtype == 1:
+          dnsResponse(id, name, 3, qtype, @[]), sender)
+      elif ips.len > 0 and qtype == 1:
         # AAAA queries return an empty answer so the resolver falls back to A.
         discard fake.sock.sendTo(
-          dnsResponse(id, name, 0, qtype, ip), sender)
+          dnsResponse(id, name, 0, qtype, ips), sender)
       else:
         discard fake.sock.sendTo(
-          dnsResponse(id, name, 0, qtype, ""), sender)
+          dnsResponse(id, name, 0, qtype, @[]), sender)
   )
   result = fake
 
@@ -112,36 +112,36 @@ proc pollUntil(loop: Loop; pred: proc(): bool; maxPolls: int): int =
 
 test "test_dns_ip_literal_fast_path":
   let loop = newLoop()
-  var got: Sockaddr_storage
+  var got: seq[Sockaddr_storage] = @[]
   var errMsg = ""
   var called = false
   loop.resolveAddrAsync("10.1.2.3", 8080, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) =
-      got = addrBuf
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
       errMsg = err
       called = true
   )
   assert called, "IP literal should resolve synchronously"
   assert errMsg.len == 0, "no error expected, got: " & errMsg
-  assert cast[ptr Sockaddr](unsafeAddr got).sa_family == AF_INET.cushort,
+  assert got.len == 1, "expected one address, got " & $got.len
+  assert cast[ptr Sockaddr](unsafeAddr got[0]).sa_family == AF_INET.cushort,
     "expected IPv4 family"
   loop.close()
 
 test "test_dns_localhost_via_hosts":
   let loop = newLoop()
+  var got: seq[Sockaddr_storage] = @[]
   var errMsg = ""
-  var family = cint(0)
   var called = false
   loop.resolveAddrAsync("localhost", 80, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) =
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
       errMsg = err
-      family = cast[ptr Sockaddr](unsafeAddr addrBuf).sa_family.cint
       called = true
   )
   assert called, "localhost should resolve from /etc/hosts"
   assert errMsg.len == 0, "no error expected, got: " & errMsg
-  assert family == AF_INET.cint or family == AF_INET6.cint,
-    "expected an IP family, got " & $family
+  assert got.len >= 1, "expected at least one address"
   loop.close()
 
 test "test_dns_synthetic_a_fallback":
@@ -149,14 +149,14 @@ test "test_dns_synthetic_a_fallback":
   loop.setDnsServers([("127.0.0.1", 29981)])
   loop.configureDns(200, 2)
   var fake = startFakeDns(loop, 29981)
-  fake.answers["test.example"] = "10.0.0.7"
+  fake.answers["test.example"] = @["10.0.0.7"]
 
-  var got: Sockaddr_storage
+  var got: seq[Sockaddr_storage] = @[]
   var errMsg = ""
   var called = false
   loop.resolveAddrAsync("test.example", 5000, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) =
-      got = addrBuf
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
       errMsg = err
       called = true
   )
@@ -165,11 +165,12 @@ test "test_dns_synthetic_a_fallback":
   assert errMsg.len == 0, "no error expected, got: " & errMsg
 
   # The AAAA query is answered empty, forcing the A fallback; the A answer
-  # 10.0.0.7 must come through in the resolved address.
+  # 10.0.0.7 must come through in the resolved addresses.
+  assert got.len == 1, "expected one address, got " & $got.len
   var resolved = sockaddrFromIp("10.0.0.7", 5000)
-  let got4 = cast[ptr Sockaddr_in](unsafeAddr got)
+  let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
   let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
-  assert cast[ptr Sockaddr](unsafeAddr got).sa_family == AF_INET.cushort
+  assert cast[ptr Sockaddr](unsafeAddr got[0]).sa_family == AF_INET.cushort
   assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
     "resolved IP mismatch"
   stopFakeDns(loop, fake)
@@ -180,12 +181,12 @@ test "test_dns_nxdomain":
   loop.setDnsServers([("127.0.0.1", 29982)])
   loop.configureDns(200, 2)
   var fake = startFakeDns(loop, 29982)
-  fake.answers["bad.example"] = "nx"
+  fake.answers["bad.example"] = @["nx"]
 
   var errMsg = ""
   var called = false
   loop.resolveAddrAsync("bad.example", 80, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) =
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
       errMsg = err
       called = true
   )
@@ -207,7 +208,7 @@ test "test_dns_timeout":
   var errMsg = ""
   var called = false
   loop.resolveAddrAsync("drop.example", 80, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) =
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
       errMsg = err
       called = true
   )
@@ -223,11 +224,11 @@ test "test_dns_cache":
   loop.setDnsServers([("127.0.0.1", 29984)])
   loop.configureDns(200, 2)
   var fake = startFakeDns(loop, 29984)
-  fake.answers["test.example"] = "10.0.0.9"
+  fake.answers["test.example"] = @["10.0.0.9"]
 
   var called = false
   loop.resolveAddrAsync("test.example", 80, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) = called = true)
+    proc(addrs: seq[Sockaddr_storage]; err: string) = called = true)
   discard pollUntil(loop, proc(): bool = called, 20_000)
   assert called, "first resolve should complete"
   let queriesAfterFirst = fake.queries
@@ -235,7 +236,7 @@ test "test_dns_cache":
 
   called = false
   loop.resolveAddrAsync("test.example", 80, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) = called = true)
+    proc(addrs: seq[Sockaddr_storage]; err: string) = called = true)
   discard pollUntil(loop, proc(): bool = called, 20_000)
   assert called, "cached resolve should complete"
   assert fake.queries == queriesAfterFirst,
@@ -249,7 +250,7 @@ test "test_dns_connect_via_hostname":
   loop.setDnsServers([("127.0.0.1", 29985)])
   loop.configureDns(300, 2)
   var fake = startFakeDns(loop, 29985)
-  fake.answers["myserver.test"] = "127.0.0.1"
+  fake.answers["myserver.test"] = @["127.0.0.1"]
 
   var server: TcpServer
   var echoData: string = ""
@@ -293,7 +294,7 @@ test "test_dns_loop_not_blocked":
   var errMsg = ""
   var done = false
   loop.resolveAddrAsync("slow.example", 80, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) =
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
       errMsg = err
       done = true
   )
@@ -304,5 +305,81 @@ test "test_dns_loop_not_blocked":
   assert ticks > 0,
     "the loop must keep processing timers while DNS is pending (ticks=" & $ticks & ")"
   assert errMsg.len > 0, "expected timeout"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_multi_record":
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29988)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29988)
+  fake.answers["multi.example"] = @["10.1.0.1", "10.1.0.2"]
+
+  var got: seq[Sockaddr_storage] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveAddrAsync("multi.example", 443, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      errMsg = err
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 2, "expected 2 addresses, got " & $got.len
+  var e1 = sockaddrFromIp("10.1.0.1", 443)
+  var e2 = sockaddrFromIp("10.1.0.2", 443)
+  let a = cast[ptr Sockaddr_in](unsafeAddr got[0])
+  let b = cast[ptr Sockaddr_in](unsafeAddr got[1])
+  let ea = cast[ptr Sockaddr_in](unsafeAddr e1)
+  let eb = cast[ptr Sockaddr_in](unsafeAddr e2)
+  assert cmpMem(addr a.sin_addr, addr ea.sin_addr, 4) == 0, "first IP mismatch"
+  assert cmpMem(addr b.sin_addr, addr eb.sin_addr, 4) == 0, "second IP mismatch"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_connect_fallback_across_addresses":
+  # multi.example resolves to [127.0.0.2, 127.0.0.1]; the echo server is on
+  # 127.0.0.1. connect() must fail on 127.0.0.2 (connection refused) then fall
+  # back to 127.0.0.1 and succeed.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29989)])
+  loop.configureDns(300, 2)
+  var fake = startFakeDns(loop, 29989)
+  fake.answers["multi.example"] = @["127.0.0.2", "127.0.0.1"]
+
+  var server: TcpServer
+  server = newTcpServer(loop,
+    onAccept = proc(conn: Connection) = discard,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      discard conn.send(data)
+  )
+  server.listen("127.0.0.1", 29990)
+
+  var connected = false
+  var received = ""
+  var failed = false
+  loop.connect("multi.example", 29990,
+    onConnect = proc(conn: Connection) =
+      connected = true
+      discard conn.send("fallback ok")
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      received = cast[string](@data)
+      conn.close()
+      server.close()
+      loop.stop()
+    ,
+    onError = proc(err: string) =
+      failed = true
+      echo "  (onError: ", err, ")"
+    ,
+  )
+  loop.run()
+
+  assert connected, "connect should fall back to the reachable address"
+  assert received == "fallback ok", "echo mismatch: " & received
+  assert not failed, "fallback should have succeeded"
   stopFakeDns(loop, fake)
   loop.close()

@@ -70,6 +70,8 @@ proc init*(T: typedesc[Platform]): T =
     raise newException(OSError, "powpow: pipe() failed for wake mechanism")
   result.wakeReadFd = pipeFds[0]
   result.wakeWriteFd = pipeFds[1]
+  result.wakeReadFd.raiseFd()
+  result.wakeWriteFd.raiseFd()
   let flags = fcntl(result.wakeReadFd, F_GETFL, 0)
   if flags >= 0: discard fcntl(result.wakeReadFd, F_SETFL, flags or O_NONBLOCK)
   let wflags = fcntl(result.wakeWriteFd, F_GETFL, 0)
@@ -112,7 +114,18 @@ proc read(fd: cint, buf: pointer, count: csize_t): cint {.
 const
   F_GETFL = 3
   F_SETFL = 4
+  F_DUPFD = 0
   O_NONBLOCK = 4
+
+# ── Lifecycle ────────────────────────────────────────────────────────────────
+
+proc raiseFd(fd: var cint) {.inline.} =
+  ## Keep the loop's control fds out of the 0..2 range (see kqueue backend).
+  if fd >= 0 and fd < 3:
+    let nf = fcntl(fd, F_DUPFD, 3)
+    if nf >= 0:
+      discard c_close(fd)
+      fd = nf
 
 # ── Registration ─────────────────────────────────────────────────────────────
 

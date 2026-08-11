@@ -34,11 +34,24 @@ type
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
+proc raiseFd(fd: var cint) {.inline.} =
+  ## Keep the loop's control fds out of the 0..2 range. Nim's runtime does not
+  ## open the standard descriptors at startup, so kqueue()/pipe() can land on
+  ## fd 0/1/2; those can later be reused by application sockets, silently
+  ## clobbering the loop's kqueue/wake. Duplicate to the lowest free fd >= 3
+  ## and close the original.
+  if fd >= 0 and fd < 3:
+    let nf = fcntl(fd, F_DUPFD, 3)
+    if nf >= 0:
+      discard posix.close(fd)
+      fd = nf
+
 proc init*(T: typedesc[Platform]): T =
   result = T()
   result.kqFd = kqueue()
   if result.kqFd < 0:
     raise newException(OSError, "powpow: kqueue() failed")
+  result.kqFd.raiseFd()
   result.kEvents = newSeq[KEvent](EventCapacityMin)
   result.events  = newSeq[PlatformEvent](EventCapacityMin)
   result.count   = 0
@@ -48,6 +61,8 @@ proc init*(T: typedesc[Platform]): T =
     raise newException(OSError, "powpow: pipe() failed for wake mechanism")
   result.wakeReadFd = pipeFds[0]
   result.wakeWriteFd = pipeFds[1]
+  result.wakeReadFd.raiseFd()
+  result.wakeWriteFd.raiseFd()
   let flags = fcntl(result.wakeReadFd, F_GETFL, 0)
   if flags >= 0: discard fcntl(result.wakeReadFd, F_SETFL, flags or O_NONBLOCK)
   let wflags = fcntl(result.wakeWriteFd, F_GETFL, 0)

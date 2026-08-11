@@ -296,10 +296,11 @@ proc setIpv6Only*(fd: SocketHandle) =
 
 # ── Address resolution ───────────────────────────────────────────────────────
 
-proc resolveAddr*(address: string, port: int,
-                  sockType = SOCK_STREAM, protocol = 0): Sockaddr_storage =
-  ## Resolve `address:port` into a `Sockaddr_storage` ready for `bind`/`connect`.
-  ## Works for both IPv4 and IPv6.
+proc resolveAddrAll*(address: string, port: int,
+                     sockType = SOCK_STREAM, protocol = 0): seq[Sockaddr_storage] =
+  ## Resolve `address:port` into ALL returned socket addresses (walks the
+  ## `addrinfo` chain, so hosts with multiple A/AAAA records yield multiple
+  ## candidates). The caller may try them in order for connect fallback.
   var hints: AddrInfo
   hints.ai_family   = AF_UNSPEC
   hints.ai_socktype = sockType
@@ -312,7 +313,18 @@ proc resolveAddr*(address: string, port: int,
       "getaddrinfo failed: " & $gai_strerrorCompat(err))
   defer: freeaddrinfo(res)
 
-  copyMem(addr result, res.ai_addr, res.ai_addrlen)
+  var it = res
+  while it != nil:
+    result.add(default(Sockaddr_storage))
+    copyMem(addr result[^1], it.ai_addr, it.ai_addrlen)
+    it = it.ai_next
+
+proc resolveAddr*(address: string, port: int,
+                  sockType = SOCK_STREAM, protocol = 0): Sockaddr_storage =
+  ## Resolve `address:port` into the FIRST socket address ready for
+  ## `bind`/`connect`. Works for both IPv4 and IPv6. For multi-address
+  ## fallback use `resolveAddrAll`.
+  result = resolveAddrAll(address, port, sockType, protocol)[0]
 
 proc isIpAddress*(address: string): bool =
   ## True when `address` is a numeric IPv4 or IPv6 literal (no DNS needed).

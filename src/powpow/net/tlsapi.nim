@@ -24,6 +24,7 @@ type
 const
   SSL_FILETYPE_PEM* = 1
   SSL_VERIFY_NONE*  = 0
+  SSL_VERIFY_PEER*  = 1
 
   SSL_ERROR_NONE*       = 0
   SSL_ERROR_SSL*        = 1
@@ -45,6 +46,8 @@ proc SSL_CTX_check_private_key*(c: SslCtx): cint {.
   importc: "SSL_CTX_check_private_key".}
 proc SSL_CTX_set_verify*(c: SslCtx; mode: cint; cb: pointer) {.
   importc: "SSL_CTX_set_verify".}
+proc SSL_CTX_set_default_verify_paths*(c: SslCtx): cint {.
+  importc: "SSL_CTX_set_default_verify_paths".}
 
 proc SSL_new*(c: SslCtx): SslPtr {.importc: "SSL_new".}
 proc SSL_free*(s: SslPtr) {.importc: "SSL_free".}
@@ -56,15 +59,26 @@ proc SSL_read*(s: SslPtr; buf: pointer; num: cint): cint {.importc: "SSL_read".}
 proc SSL_write*(s: SslPtr; buf: pointer; num: cint): cint {.importc: "SSL_write".}
 proc SSL_shutdown*(s: SslPtr): cint {.importc: "SSL_shutdown".}
 proc SSL_get_error*(s: SslPtr; ret: cint): cint {.importc: "SSL_get_error".}
+proc SSL_ctrl*(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint {.
+  importc: "SSL_ctrl".}
+proc SSL_set1_host*(s: SslPtr; hostname: cstring): cint {.
+  importc: "SSL_set1_host".}
+
+const SSL_CTRL_SET_TLSEXT_HOSTNAME* = 55
+  ## `SSL_set_tlsext_host_name` is a macro over `SSL_ctrl` in OpenSSL 1.1.1+/3,
+  ## so it is not linkable; use SSL_ctrl with this command for SNI.
 
 proc ERR_get_error*(): culong {.importc: "ERR_get_error".}
-proc ERR_error_string*(e: culong; buf: cstring): cstring {.
-  importc: "ERR_error_string".}
+proc ERR_error_string_n*(e: culong; buf: cstring; len: csize_t) {.
+  importc: "ERR_error_string_n".}
 
 proc opensslError*(): string =
   ## Most recent OpenSSL error from the queue, or "" if empty.
+  ## Uses the length-bounded ERR_error_string_n (ERR_error_string's static
+  ## buffer is not thread-safe, and the unbounded form can overflow a fixed
+  ## buffer).
   let e = ERR_get_error()
   if e == 0: return ""
   var buf {.noinit.}: array[256, char]
-  discard ERR_error_string(e, cast[cstring](addr buf[0]))
+  ERR_error_string_n(e, cast[cstring](addr buf[0]), buf.len.csize_t)
   result = $cast[cstring](addr buf[0])

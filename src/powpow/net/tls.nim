@@ -72,23 +72,35 @@ when not defined(windows):
 
     result = SslContext(ctx: ctx, role: TlsServer)
 
-  proc newClientTlsContext*(): SslContext =
-    ## Creates a client-side TLS context with peer verification disabled.
-
+  proc newClientTlsContext*(verifyPeer = true): SslContext =
+    ## Creates a client-side TLS context. With `verifyPeer` (the default) the
+    ## peer certificate chain is verified against the system CA store, so
+    ## untrusted / self-signed servers are rejected — set it to `false` only
+    ## for self-signed or testing servers.
     let tlsMethod = TLS_client_method()
     if tlsMethod == nil:
       raise newException(SslError, "TLS_client_method() failed")
     let ctx = SSL_CTX_new(tlsMethod)
     if ctx == nil:
       raise newException(SslError, "SSL_CTX_new() failed")
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nil)
+    if verifyPeer:
+      if SSL_CTX_set_default_verify_paths(ctx) != 1:
+        SSL_CTX_free(ctx)
+        raise newException(SslError, "SSL_CTX_set_default_verify_paths() failed")
+      SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nil)
+    else:
+      SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nil)
     result = SslContext(ctx: ctx, role: TlsClient)
 
-  proc wrapTls*(conn: Connection, ctx: SslContext) =
+  proc wrapTls*(conn: Connection, ctx: SslContext, serverName = "") =
     ## Wrap an existing connected `Connection` in TLS and begin a non-blocking
     ## handshake. For a server this is used for implicit TLS (e.g. SMTP 465) or
     ## an in-place STARTTLS upgrade; for a client it must be called from the
     ## connect callback.
+    ##
+    ## For clients, pass `serverName` (the host that was connected to) to send
+    ## SNI and enforce hostname verification — the peer certificate must match
+    ## it in addition to the chain.
     ##
     ## The handshake completes asynchronously on the event loop; any data sent
     ## with `conn.send` before it completes is buffered and flushed once TLS is
@@ -106,6 +118,10 @@ when not defined(windows):
       SSL_set_accept_state(ssl)
     of TlsClient:
       SSL_set_connect_state(ssl)
+      if serverName.len > 0:
+        discard SSL_ctrl(ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, 0,
+                         cast[pointer](serverName.cstring))   # SNI
+        discard SSL_set1_host(ssl, serverName.cstring)        # hostname check
     conn.ssl = cast[pointer](ssl)
     conn.tlsState = TlsHandshaking
     # Clients must kick the handshake off by writing the ClientHello; servers
@@ -121,10 +137,10 @@ else:
   proc newServerTlsContext*(certFile, keyFile: string): SslContext =
     raise newException(SslError, "TLS is not supported on Windows")
 
-  proc newClientTlsContext*(): SslContext =
+  proc newClientTlsContext*(verifyPeer = true): SslContext =
     raise newException(SslError, "TLS is not supported on Windows")
 
-  proc wrapTls*(conn: Connection, ctx: SslContext) =
+  proc wrapTls*(conn: Connection, ctx: SslContext, serverName = "") =
     raise newException(SslError, "TLS is not supported on Windows")
 
   proc isTlsActive*(conn: Connection): bool {.inline.} = false

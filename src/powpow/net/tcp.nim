@@ -58,10 +58,12 @@ proc acquireBuf*(loop: Loop): ptr UncheckedArray[byte] {.inline.} =
     cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
 
 proc releaseBuf*(loop: Loop, buf: ptr UncheckedArray[byte]) {.inline.} =
-  if loop.bufPool.len < MaxBufPoolSize:
-    loop.bufPool.add(buf)
-  else:
+  ## Return a read buffer to the loop's pool, or deallocate it if the loop is
+  ## closed (the pool has already been freed) or the pool is full.
+  if loop.closed or loop.bufPool.len >= MaxBufPoolSize:
     deallocShared(buf)
+  else:
+    loop.bufPool.add(buf)
 
 proc trimRetainedBuffer(buf: var seq[byte]) {.inline.} =
   ## Drop a pooled connection's buffer capacity when it exceeds the retained
@@ -895,78 +897,58 @@ proc connect*(loop: Loop, address: string, port: int,
               onError: OnError = nil) =
   ## Non-blocking TCP connect. DNS resolution is performed asynchronously on
   ## the loop (see net/dns), so a slow resolver never blocks the event loop.
+  ## When a host resolves to multiple addresses they are tried in order —
+  ## if one is unreachable the next is attempted before `onError` fires.
   ## `onError` reports DNS / socket() / connect() failures; when nil these are
   ## dropped silently (matching the existing non-blocking connect failure path).
   resolveAddrAsync(loop, address, port, SOCK_STREAM,
-    proc(addrBuf: Sockaddr_storage; err: string) =
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
       if err.len > 0:
         if onError != nil:
           onError(err)
         return
-      let fd = socket(cast[ptr Sockaddr](addr addrBuf).sa_family.cint,
-                      SOCK_STREAM, 0)
-      if fd.cint < 0:
+      if addrs.len == 0:
         if onError != nil:
-          onError("socket() failed")
+          onError("connect: no addresses resolved for " & address)
         return
 
-      setNonBlocking(fd)
-      setTcpNoDelay(fd)
+      var tryIdx = 0
+      proc attemptNext() {.closure.} =
+        if tryIdx >= addrs.len:
+          if onError != nil:
+            onError("connect() failed on all resolved addresses for " & address)
+          return
+        let addrBuf = addrs[tryIdx]
+        inc tryIdx
 
-      let conn = Connection(
-        fd:        fd,
-        loop:      loop,
-        state:     Connecting,
-        readBuf:   acquireBuf(loop),
-        readBufLen: DefaultBufSize,
-      )
+        let fd = socket(cast[ptr Sockaddr](addr addrBuf).sa_family.cint,
+                        SOCK_STREAM, 0)
+        if fd.cint < 0:
+          if onError != nil:
+            onError("socket() failed")
+          return
 
-      let sLen = getSockLen(addr addrBuf)
-      let ret = connect(fd, cast[ptr Sockaddr](addr addrBuf), sLen)
-      if ret < 0 and not sockInProgress():
-        conn.closeAndRelease()
-        if onError != nil:
-          onError("connect() failed")
-        return
+        setNonBlocking(fd)
+        setTcpNoDelay(fd)
 
-      if ret == 0:
-        conn.state = Connected
-        conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
-          if Error in ev:
-            conn.closeAndRelease()
-            if onClose != nil: onClose(conn)
-            return
-          if conn.tlsState == TlsHandshaking:
-            if not conn.driveHandshake():
-              return
-          if Write in ev:
-            if conn.flushWriteBuffer():
-              if conn.closeAfterFlush:
-                conn.closeAndRelease()
-                if onClose != nil: onClose(conn)
-                return
-              if conn.state == Connected:
-                conn.loop.modify(rfd, {Read})
-          if Read in ev or Hup in ev:
-            conn.handleClientRead(onData, onClose)
-          if Hup in ev and conn.state == Connected:
-            conn.closeAndRelease()
-            if onClose != nil: onClose(conn)
-        onConnect(conn)
-        if conn.state == Closed: return
-      else:
-        conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
-          conn.loop.unregister(wfd)
-          var err: cint = 0
-          var errLen: SockLen = sizeof(err).SockLen
-          discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
-          if err != 0:
-            conn.closeAndRelease()
-            return
+        let conn = Connection(
+          fd:        fd,
+          loop:      loop,
+          state:     Connecting,
+          readBuf:   acquireBuf(loop),
+          readBufLen: DefaultBufSize,
+        )
 
+        let sLen = getSockLen(addr addrBuf)
+        let ret = connect(fd, cast[ptr Sockaddr](addr addrBuf), sLen)
+        if ret < 0 and not sockInProgress():
+          conn.closeAndRelease()
+          attemptNext()
+          return
+
+        if ret == 0:
           conn.state = Connected
-          setTcpNoDelay(SocketHandle(wfd))
-          conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
+          conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
             if Error in ev:
               conn.closeAndRelease()
               if onClose != nil: onClose(conn)
@@ -989,6 +971,52 @@ proc connect*(loop: Loop, address: string, port: int,
               if onClose != nil: onClose(conn)
           onConnect(conn)
           if conn.state == Closed: return
+        else:
+          conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
+            conn.loop.unregister(wfd)
+            # kqueue reports a refused connect as EV_ERROR (mapped to the Error
+            # event here) with the errno in the kevent data — SO_ERROR may read
+            # 0 on that path, so a refused address must be detected from the
+            # event set too (otherwise we misdetect success and never fall
+            # back to the next address).
+            if Error in ev:
+              conn.closeAndRelease()
+              attemptNext()
+              return
+            var err: cint = 0
+            var errLen: SockLen = sizeof(err).SockLen
+            discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
+            if err != 0:
+              conn.closeAndRelease()
+              attemptNext()
+              return
+
+            conn.state = Connected
+            setTcpNoDelay(SocketHandle(wfd))
+            conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
+              if Error in ev:
+                conn.closeAndRelease()
+                if onClose != nil: onClose(conn)
+                return
+              if conn.tlsState == TlsHandshaking:
+                if not conn.driveHandshake():
+                  return
+              if Write in ev:
+                if conn.flushWriteBuffer():
+                  if conn.closeAfterFlush:
+                    conn.closeAndRelease()
+                    if onClose != nil: onClose(conn)
+                    return
+                  if conn.state == Connected:
+                    conn.loop.modify(rfd, {Read})
+              if Read in ev or Hup in ev:
+                conn.handleClientRead(onData, onClose)
+              if Hup in ev and conn.state == Connected:
+                conn.closeAndRelease()
+                if onClose != nil: onClose(conn)
+            onConnect(conn)
+            if conn.state == Closed: return
+      attemptNext()
   )
 
 when not defined(windows):

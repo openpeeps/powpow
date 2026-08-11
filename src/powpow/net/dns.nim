@@ -39,7 +39,7 @@ else:
   const ResolvConfPath = "/etc/resolv.conf"
 
 type
-  DnsCallback* = proc(addrBuf: Sockaddr_storage; err: string) {.closure.}
+  DnsCallback* = proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.}
 
   ResolvedIp* = object
     af: cint
@@ -322,10 +322,12 @@ proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; err: string) =
     q.resolver.loop.cancelTimer(q.timer)
     q.timer = TimerId(0)
   if err.len == 0 and addrs.len > 0:
-    let addrBuf = makeSockaddr(addrs[0], q.port)
-    q.cb(addrBuf, "")
+    var outAddrs: seq[Sockaddr_storage]
+    for ip in addrs:
+      outAddrs.add(makeSockaddr(ip, q.port))
+    q.cb(outAddrs, "")
   else:
-    q.cb(default(Sockaddr_storage),
+    q.cb(newSeq[Sockaddr_storage](),
          if err.len > 0: err else: "DNS: no addresses for " & q.hostname)
 
 proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: cint;
@@ -386,7 +388,7 @@ proc onDnsResponse(q: DnsQuery; msg: openArray[byte]) =
 proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: cint;
                 qtype: uint16; cb: DnsCallback) =
   if resolver.queries.len >= MaxOutstandingQueries:
-    cb(default(Sockaddr_storage), "DNS: too many outstanding queries")
+    cb(newSeq[Sockaddr_storage](), "DNS: too many outstanding queries")
     return
   let id = resolver.nextQueryId()
   let q = DnsQuery(
@@ -436,7 +438,10 @@ proc createResolver(loop: Loop): DnsResolver =
   resolver.timeoutMs = conf.timeoutMs
   resolver.attempts = conf.attempts
   for ns in conf.nameservers:
-    resolver.nameservers.add(makeSockaddr(ns, DnsPort))
+    # The resolver socket is AF_INET — IPv6 nameservers (e.g. fe80::1%en0 in
+    # resolv.conf) cannot be queried and sendto() fails with EINVAL.
+    if ns.af == AF_INET.cint:
+      resolver.nameservers.add(makeSockaddr(ns, DnsPort))
   if resolver.nameservers.len == 0:
     for ip in defaultNameservers():
       resolver.nameservers.add(makeSockaddr(ip, DnsPort))
@@ -486,9 +491,9 @@ proc getResolver(loop: Loop): DnsResolver =
 
 proc resolveAddrAsync*(loop: Loop; address: string; port: int;
                        sockType: cint;
-                       cb: proc(addrBuf: Sockaddr_storage; err: string) {.closure.}) =
+                       cb: proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.}) =
   ## Resolve `address:port` asynchronously on `loop`. `cb` runs on the loop
-  ## thread with the resolved `Sockaddr_storage` (or an empty one plus a
+  ## thread with ALL resolved socket addresses (or an empty seq plus a
   ## non-empty `err` on failure). Never blocks the loop on DNS.
   ##
   ## Numeric IPv4/IPv6 literals resolve immediately without any DNS I/O.
@@ -497,9 +502,9 @@ proc resolveAddrAsync*(loop: Loop; address: string; port: int;
     try:
       addrBuf = sockaddrFromIp(address, port)
     except NetError as e:
-      cb(default(Sockaddr_storage), e.msg)
+      cb(newSeq[Sockaddr_storage](), e.msg)
       return
-    cb(addrBuf, "")
+    cb(@[addrBuf], "")
     return
 
   let key = address.toLowerAscii()
@@ -510,22 +515,28 @@ proc resolveAddrAsync*(loop: Loop; address: string; port: int;
     if cached.addrs.len > 0 or cached.negative:
       if cached.expiresAt > monoMs():
         if cached.negative:
-          cb(default(Sockaddr_storage), "DNS: host not found: " & address)
+          cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & address)
         else:
-          cb(makeSockaddr(cached.addrs[0], port), "")
+          var outAddrs: seq[Sockaddr_storage]
+          for ip in cached.addrs:
+            outAddrs.add(makeSockaddr(ip, port))
+          cb(outAddrs, "")
         return
       r.cache.del(key)
 
   let h = getHosts().getOrDefault(key)
   if h.len > 0:
-    cb(makeSockaddr(h[0], port), "")
+    var outAddrs: seq[Sockaddr_storage]
+    for ip in h:
+      outAddrs.add(makeSockaddr(ip, port))
+    cb(outAddrs, "")
     return
 
   var resolver: DnsResolver
   try:
     resolver = loop.getResolver()
   except CatchableError as e:
-    cb(default(Sockaddr_storage), e.msg)
+    cb(newSeq[Sockaddr_storage](), e.msg)
     return
   startQuery(resolver, address, port, sockType, DnsQtypeAAAA, cb)
 
@@ -541,12 +552,14 @@ proc configureDns*(loop: Loop; timeoutMs: int; attempts: int) =
 proc setDnsServers*(loop: Loop; servers: openArray[(string, int)]) =
   ## Point the resolver at specific DNS servers `(address, port)` — e.g. a
   ## local test responder, or ("8.8.8.8", 53). Creates the resolver if not
-  ## yet used.
+  ## yet used. Only IPv4 servers are accepted (the resolver socket is AF_INET).
   let resolver = loop.getResolver()
   resolver.nameservers.setLen(0)
   for (address, port) in servers:
     try:
-      resolver.nameservers.add(makeSockaddr(parseIpLiteral(address), port))
+      let ip = parseIpLiteral(address)
+      if ip.af == AF_INET.cint:
+        resolver.nameservers.add(makeSockaddr(ip, port))
     except NetError:
       discard
 

@@ -254,3 +254,23 @@ test "test_observer_cancel":
   doAssert cbCount == 0, "cancelled observer should not fire, got " & $cbCount
   loop.close()
 
+test "test_close_buffer_release_after_close_no_leak":
+  # A connection that returns its readBuf AFTER loop.close() must not be
+  # re-pooled into the already-freed pool (shared-memory leak per connection).
+  let loop = newLoop()
+  doAssert not loop.closed
+  var buf = acquireBuf(loop)
+  loop.close()
+  doAssert loop.closed, "close() must set the closed flag"
+  doAssert loop.bufPool.len == 0, "pool must be drained after close"
+  releaseBuf(loop, buf)   # would leak if re-pooled
+  doAssert loop.bufPool.len == 0,
+    "released-after-close buffer must be deallocated, not pooled"
+
+test "test_close_idempotent":
+  let loop = newLoop()
+  loop.close()
+  loop.close()   # must not crash / double-free
+  doAssert loop.closed
+
+

@@ -41,11 +41,20 @@ type
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
+proc raiseFd(fd: var cint) {.inline.} =
+  ## Keep the loop's control fds out of the 0..2 range (see kqueue backend).
+  if fd >= 0 and fd < 3:
+    let nf = fcntl(fd, F_DUPFD, 3)
+    if nf >= 0:
+      discard posix.close(fd)
+      fd = nf
+
 proc init*(T: typedesc[Platform]): T =
   result = T()
   result.epFd = epoll_create1(0)
   if result.epFd < 0:
     raise newException(OSError, "powpow: epoll_create1() failed")
+  result.epFd.raiseFd()
   result.epEvents = newSeq[EpollEvent](EventCapacityMin)
   result.events   = newSeq[PlatformEvent](EventCapacityMin)
   result.count    = 0
@@ -53,6 +62,7 @@ proc init*(T: typedesc[Platform]): T =
   result.wakeFd = eventfd(0, EFD_NONBLOCK)
   if result.wakeFd < 0:
     raise newException(OSError, "powpow: eventfd() failed for wake mechanism")
+  result.wakeFd.raiseFd()
 
   var wev: EpollEvent
   wev.events = EPOLLIN

@@ -93,6 +93,7 @@ type
     cleanupCbs:    seq[Callback]                # invoked from close(), for sub-systems
       ## that own loop-thread state (e.g. the DNS resolver) and need to free it
       ## when the loop shuts down.
+    closed*:       bool                         # set once close() runs
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,7 @@ proc newLoop*(): Loop =
     obsDead:     0,
     dns:         nil,
     cleanupCbs:  @[],
+    closed:      false,
   )
 
 proc addCleanup*(loop: Loop; cb: Callback) =
@@ -133,6 +135,13 @@ proc addCleanup*(loop: Loop; cb: Callback) =
   loop.cleanupCbs.add(cb)
 
 proc close*(loop: Loop) =
+  ## Shut the loop down and free its resources. Close servers/connections and
+  ## the DNS resolver BEFORE the loop — anything that returns buffers via
+  ## `releaseBuf` after this point deallocates them immediately (they cannot be
+  ## re-pooled into a freed pool), so buffers handed back post-close are never
+  ## leaked. Idempotent.
+  if loop.closed: return
+  loop.closed = true
   for cb in loop.cleanupCbs:
     cb()
   loop.cleanupCbs.setLen(0)

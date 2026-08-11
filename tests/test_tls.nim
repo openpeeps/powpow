@@ -84,7 +84,7 @@ when not defined(windows):
     server.listen("127.0.0.1", 29876)
 
     discard loop.addTimer(50) do (id: int):
-      let clientCtx = newClientTlsContext()
+      let clientCtx = newClientTlsContext(verifyPeer = false)  # self-signed test cert
       loop.connect("127.0.0.1", 29876,
         onConnect = proc(conn: Connection) =
           conn.wrapTls(clientCtx)
@@ -130,7 +130,7 @@ when not defined(windows):
     server.listen("127.0.0.1", 29877)
 
     discard loop.addTimer(50) do (id: int):
-      let clientCtx = newClientTlsContext()
+      let clientCtx = newClientTlsContext(verifyPeer = false)  # self-signed test cert
       var upgraded = false
       loop.connect("127.0.0.1", 29877,
         onConnect = proc(conn: Connection) =
@@ -182,7 +182,7 @@ when not defined(windows):
 
     var gotData = false
     discard loop.addTimer(50) do (id: int):
-      let clientCtx = newClientTlsContext()
+      let clientCtx = newClientTlsContext(verifyPeer = false)  # self-signed test cert
       loop.connect("127.0.0.1", 29880,
         onConnect = proc(conn: Connection) =
           conn.wrapTls(clientCtx)
@@ -213,4 +213,50 @@ when not defined(windows):
     # The bounded-coalesce path accepted the full payload without defect and
     # produced data (sendv return checked in onConnect).
     doAssert gotData, "large TLS sendv should have produced data"
+    loop.close()
+
+when not defined(windows):
+  test "tls_client_verify_rejects_self_signed":
+    # A client context with the default verifyPeer=true must reject a server
+    # presenting an untrusted (self-signed) certificate: the handshake fails
+    # and no application data is exchanged.
+    let (cert, key) = writeTestCert()
+    let serverCtx = newServerTlsContext(cert, key)
+    let loop = newLoop()
+
+    let server = newTcpServer(loop,
+      onAccept = proc(conn: Connection) =
+        conn.wrapTls(serverCtx)
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        discard conn.send(data)
+      ,
+    )
+    server.listen("127.0.0.1", 29881)
+
+    var clientGotData = false
+    var serverSent = false
+    discard loop.addTimer(50) do (id: int):
+      let clientCtx = newClientTlsContext()   # verifyPeer defaults to true
+      loop.connect("127.0.0.1", 29881,
+        onConnect = proc(conn: Connection) =
+          conn.wrapTls(clientCtx, serverName = "localhost")
+          discard conn.send("should not echo")
+        ,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          clientGotData = true
+        ,
+        onClose = proc(conn: Connection) =
+          server.close()
+          loop.stop()
+        ,
+      )
+
+    discard loop.addTimer(3000) do (id: int):
+      server.close()
+      loop.stop()
+
+    loop.run()
+    doAssert not clientGotData,
+      "verified client must not receive data from an untrusted server"
     loop.close()
