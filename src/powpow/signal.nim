@@ -168,10 +168,6 @@ when defined(linux):
     ssi_addr: uint64
     ssi_addr_lsb: uint16
 
-  const
-    SFD_NONBLOCK = 0x0004
-    SFD_CLOEXEC  = 0x0001
-
   proc signalfd(fd: cint; mask: ptr Sigset; flags: cint): cint {.
     importc: "signalfd", header: "<sys/signalfd.h>".}
 
@@ -225,7 +221,7 @@ when defined(linux):
   proc ensureSignalfd(src: SignalSource) =
     if src.sfFd >= 0: return
     discard sigemptyset(src.sfMask)
-    src.sfFd = signalfd(-1, addr src.sfMask, SFD_NONBLOCK or SFD_CLOEXEC)
+    src.sfFd = signalfd(-1, addr src.sfMask, O_NONBLOCK or O_CLOEXEC)
     if src.sfFd < 0:
       raise newException(OSError, "powpow: signalfd() failed")
     src.loop.register(src.sfFd.int, {Read},
