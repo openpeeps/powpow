@@ -157,6 +157,7 @@ proc close*(conn: Connection) =
   if conn.ssl != nil:
     conn.tlsFree()
   sockClose(conn.fd)
+  conn.fd = SocketHandle(-1)   # never close/register a reused fd via stale state
   conn.writeBuf.setLen(0)
   conn.writePos = 0
 
@@ -173,7 +174,7 @@ proc queueWrite(conn: Connection, data: openArray[byte]): bool =
   copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
   true
 
-proc flushWriteBuffer(conn: Connection): bool =
+proc flushWriteBuffer*(conn: Connection): bool =
   while conn.writePos < conn.writeBuf.len:
     let remaining = conn.writeBuf.len - conn.writePos
     let n = if conn.tlsState == TlsActive:
@@ -1004,6 +1005,11 @@ proc connect*(loop: Loop, address: string, port: int,
         else:
           conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
             conn.loop.unregister(wfd)
+            if conn.fd.int != wfd:
+              # The watcher fired for a stale event after this connection's fd
+              # was closed and the number reused by another socket. Never act
+              # on an fd this connection no longer owns.
+              return
             # kqueue reports a refused connect as EV_ERROR (mapped to the Error
             # event here) with the errno in the kevent data — SO_ERROR may read
             # 0 on that path, so a refused address must be detected from the

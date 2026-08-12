@@ -11,6 +11,8 @@
 ## The API is designed to be minimal and efficient, with a focus on low-latency event handling and minimal overhead.
 
 import std/[tables, deques, sets, monotimes, bitops, sequtils, locks]
+when defined(threads):
+  import std/threads
 
 import ./platform, ./types
 export types, platform
@@ -97,6 +99,10 @@ type
     closed*:       bool                         # set once close() runs
     postedLock:    Lock                         # guards postedCbs (cross-thread)
     postedCbs:     seq[Callback]                # callbacks posted from other threads
+    ownerThread:   int                          # id of the creating thread (-1 w/o threads)
+      ## Set to the creating thread's id so higher layers (e.g. WebSocket sends)
+      ## can detect calls from other threads and defer them to the loop via
+      ## `postToLoop` instead of racing the loop thread's connection state.
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -131,6 +137,7 @@ proc newLoop*(): Loop =
     cleanupCbs:  @[],
     closed:      false,
     postedCbs:   @[],
+    ownerThread: (when defined(threads): cast[int](getThreadId()) else: -1),
   )
   initLock(result.postedLock)
 
@@ -230,6 +237,13 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
       fd: fd, events: events, callback: callback,
       edgeTriggered: edgeTriggered, gen: gen, alive: true)
   loop.fdWatchers[fd] = watcher
+  when not defined(windows):
+    # A stale path can register an fd that was already closed and reused (a
+    # closed fd is EBADF to kevent/epoll). Tolerate it: leave the watcher
+    # dormant instead of raising and killing the whole loop.
+    if fcntl(fd.cint, F_GETFD, 0) < 0:
+      watcher.alive = false
+      return
   loop.platform.add(fd, events, edgeTriggered, cast[pointer](watcher))
   loop.platform.ensureCapacity(loop.fdWatchers.len)
 
@@ -553,7 +567,11 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   for i in 0 ..< nEvents:
     let pev = loop.platform.events[i]
     let w = cast[FdWatcher](pev.udata)
-    if w != nil and w.alive:
+    # Stale-event guard: the watcher pointer in this event must still be the
+    # CURRENT registration for its fd. A watcher that was unregistered and
+    # pooled (then possibly reused for another fd/registration) must not be
+    # dispatched — this is the generation-counter check.
+    if w != nil and w.alive and loop.fdWatchers.getOrDefault(w.fd) == w:
       w.callback(w.fd, pev.events)
   if loop.stopFlag: return
 

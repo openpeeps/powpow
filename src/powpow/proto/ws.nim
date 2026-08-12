@@ -30,6 +30,8 @@
 
 import std/[httpcore, base64, tables, strutils]
 import pkg/checksums/sha1
+when defined(threads):
+  import std/threads
 
 import ../net/tcp
 import ../net/common
@@ -253,29 +255,49 @@ proc writeFrameMasked*(conn: Connection, opcode: int, payload: openArray[byte],
 
 # ── WsConnection send helpers ────────────────────────────────────────────────
 
+proc sendSafe(ws: WsConnection, opcode: int, data: openArray[byte]) =
+  ## Thread-safe frame write. When called from a thread other than the loop's
+  ## (e.g. a background file-watcher thread notifying clients), the write is
+  ## deferred to the loop thread via `postToLoop` so the connection's buffers,
+  ## the fd watcher and `ws.conn` are only ever touched on the loop thread.
+  ## The deferred closure re-checks that the ws still owns the same connection
+  ## and that it is still open, so a recycled/closed ws is never written to.
+  let conn = ws.conn
+  if conn == nil or conn.state != Connected:
+    return
+  when defined(threads):
+    if conn.loop.ownerThread != cast[int](getThreadId()):
+      let payload = @data
+      let loop = conn.loop
+      loop.postToLoop(proc() =
+        if ws.conn == conn and conn.state == Connected:
+          conn.writeFrame(opcode, payload))
+      return
+  conn.writeFrame(opcode, data)
+
 proc sendText*(ws: WsConnection, s: string) {.inline.} =
   if s.len == 0:
-    ws.conn.writeFrame(0x1, [])
+    ws.sendSafe(0x1, [])
   else:
-    ws.conn.writeFrame(0x1, s.toOpenArrayByte(0, s.high))
+    ws.sendSafe(0x1, s.toOpenArrayByte(0, s.high))
 
 proc sendBinary*(ws: WsConnection, data: openArray[byte]) {.inline.} =
   if data.len == 0:
-    ws.conn.writeFrame(0x2, [])
+    ws.sendSafe(0x2, [])
   else:
-    ws.conn.writeFrame(0x2, data)
+    ws.sendSafe(0x2, data)
 
 proc sendPing*(ws: WsConnection, data: openArray[byte] = []) {.inline.} =
   if data.len == 0:
-    ws.conn.writeFrame(0x9, [])
+    ws.sendSafe(0x9, [])
   else:
-    ws.conn.writeFrame(0x9, data)
+    ws.sendSafe(0x9, data)
 
 proc sendPong*(ws: WsConnection, data: openArray[byte] = []) {.inline.} =
   if data.len == 0:
-    ws.conn.writeFrame(0xA, [])
+    ws.sendSafe(0xA, [])
   else:
-    ws.conn.writeFrame(0xA, data)
+    ws.sendSafe(0xA, data)
 
 proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
   ## Send a close frame and shut down the connection.
@@ -793,6 +815,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
         conn.loop.unregister(fd)
         conn.loop.register(fd, {Read}, edgeTriggered = true,
           callback = proc(efd: int, ev: set[EventType]) =
+            if ws.conn == nil: return
             if Error in ev or Hup in ev:
               if not ws.onClose.isNil:
                 ws.onClose(ws, 1006, "Connection lost")
@@ -801,6 +824,10 @@ proc listen*(wss: WsServer, address: string, port: int) =
                 wss.conns.del(efd)
                 wss.releaseWsConnection(ws)
               return
+            if Write in ev:
+              if ws.conn.flushWriteBuffer():
+                if ws.conn.state == Connected:
+                  ws.conn.loop.modify(efd, {Read})
             if Read in ev:
               var buf: array[65536, byte]
               while true:
@@ -967,12 +994,21 @@ proc websocketUpgrade*(
     conn.loop.unregister(conn.fd.int)
     conn.loop.register(conn.fd.int, {Read}, edgeTriggered = true,
       callback = proc(fd: int, ev: set[EventType]) =
+        # The ws may already be released (conn detached) if a stale event slips
+        # through — never dereference a nil connection.
+        if ws.conn == nil: return
         if Error in ev or Hup in ev:
           if not ws.onClose.isNil:
             ws.onClose(ws, 1006, "Connection lost")
           ws.conn.close()
           owner.releaseWs(ws)
           return
+        if Write in ev:
+          # A buffered frame write (sendText armed {Read, Write}) needs flushing;
+          # without this the ws send stalls forever under socket backpressure.
+          if ws.conn.flushWriteBuffer():
+            if ws.conn.state == Connected:
+              ws.conn.loop.modify(fd, {Read})
         if Read in ev:
           var buf: array[65536, byte]
           while true:

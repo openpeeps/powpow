@@ -133,7 +133,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
     let ret = kevent(p.kqFd, addr changes[0], n.cint, nil, 0, nil)
     if ret < 0:
       raise newException(OSError,
-        "powpow: kevent ADD failed for fd " & $fd)
+        "powpow: kevent ADD failed for fd " & $fd & ": " & $strerror(errno))
 
 proc remove*(p: Platform, fd: int) =
   var rd: KEvent
