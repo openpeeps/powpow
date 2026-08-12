@@ -9,10 +9,7 @@
 import ../src/powpow
 import std/[times, unittest, monotimes, os, strformat]
 
-when defined(windows):
-  test "benchmark_skipped_on_windows":
-    discard
-else:
+when not defined(windows):
   import std/posix
 
   # Bump file descriptor limit so we can create thousands of pipes
