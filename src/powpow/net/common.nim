@@ -23,8 +23,14 @@ when defined(windows):
       sa_family*: cushort
       sa_data*: array[14, byte]
 
-    Sockaddr_in* {.importc: "struct sockaddr_in", header: "<winsock2.h>",
-                   pure, final.} = object
+    Sockaddr_in* {.pure, final.} = object
+      ## Note: a pure object, not an `importc` mirror of winsock's
+      ## `struct sockaddr_in`. The C field `sin_addr` is an `IN_ADDR` struct,
+      ## not an array — projecting it as `array[4, byte]` under `importc`
+      ## makes Nim emit `(void*)sain.sin_addr` (C array decay), which fails to
+      ## compile against the real header. As a pure object the layout is
+      ## byte-identical (2+2+4+8) and `sin_addr` is a genuine array, so
+      ## `addr sain.sin_addr` decays correctly.
       sin_family*: cushort
       sin_port*: cushort
       sin_addr*: array[4, byte]
