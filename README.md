@@ -37,6 +37,18 @@
 > [!WARNING]
 > 💥 This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms. **Use it, test it, and do not hesitate to report any issues you find!** 💥 
 
+## 📚 Documentation
+
+The full documentation lives in [`docs/`](docs/contents/index.md):
+
+- [Overview](docs/contents/overview.md) — architecture and the complete feature matrix
+- [Getting started](docs/contents/getting-started.md) — install and your first server
+- [Event loop](docs/contents/core/event-loop.md), [TCP](docs/contents/net/tcp.md),
+  [HTTP server](docs/contents/http/server.md), [WebSocket](docs/contents/websocket.md) and more — per-feature guides
+- [Examples index](docs/contents/examples.md) — every runnable example, its port and commands
+- [API reference](docs/contents/api/README.md) — per-module signatures (plus the [generated reference](https://openpeeps.github.io/powpow))
+- [Performance](docs/contents/performance.md), [Security](docs/contents/security.md), [Testing](docs/contents/testing.md)
+
 ## Examples (the fun part)
 Most web servers out there are all rainbows and flowers, until you upload or stream a file, and it transforms into a nightmare at runtime. PowPow is slowly moving toward a production-ready server. Everything below is runnable and lives in the `examples/` directory.
 

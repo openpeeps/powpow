@@ -1,0 +1,6 @@
+_build/
+config/
+booyaka.db
+booyaka.search.db
+logs/
+*.html
