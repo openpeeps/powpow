@@ -5,7 +5,7 @@
 import ../src/powpow
 import std/[times, unittest, monotimes, os, net]
 
-when not defined(windows):
+when defined(linux) or defined(macosx) or defined(bsd):
   # fd eventing is exercised with a pipe. The Windows iocp backend can only
   # register IOCP-compatible handles (sockets), so this is POSIX-only.
   import std/posix
@@ -69,7 +69,7 @@ test "test_timer_ordering":
 
 # ── Test 5: fd eventing via pipe ─────────────────────────────────────────────
 
-when not defined(windows):
+when defined(linux) or defined(macosx) or defined(bsd):
   test "test_fd_eventing":
     # Create a pipe; write to one end, poll the other.
     var fds: array[2, cint]

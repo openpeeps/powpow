@@ -74,6 +74,9 @@ proc postQueuedCompletionStatus(CompletionPort: Handle,
 proc closeHandle(hObject: Handle): BOOL {.
     importc: "CloseHandle", stdcall, dynlib: "kernel32".}
 
+proc getLastError(): cint {.
+    importc: "GetLastError", stdcall, dynlib: "kernel32".}
+
 proc select(nfds: cint, readfds, writefds, exceptfds: ptr FdSet,
             timeout: ptr TimeVal): cint {.
   importc: "select", stdcall, dynlib: "ws2_32.dll".}
@@ -115,6 +118,7 @@ const
   AF_INET_W = 2
   SOCK_STREAM_W = 1
   INVALID_SOCKET = 0xFFFFFFFFFFFFFFFF'u64
+  ERROR_INVALID_PARAMETER = 87
 
 type
   AcceptExFn = proc(listenSocket, acceptSocket: SOCKET, outputBuffer: pointer,
@@ -150,7 +154,8 @@ const
   WSA_IO_PENDING = 997
   WSAENOTCONN    = 10057
   SOL_SOCKET_W   = 0xFFFF.cint
-  SO_TYPE_W       = 3.cint
+  SO_TYPE_W       = 0x1008.cint   # Windows SO_TYPE (0x1002 is SO_RCVBUF; 3 is SO_ACCEPTCONN)
+  SO_ACCEPTCONN_W = 0x0002.cint   # Windows SO_ACCEPTCONN
   SOCK_DGRAM_W   = 2.cint
 
 const
@@ -167,7 +172,7 @@ type
     readPosted: bool
     hasData:   bool
     readLen:   int
-    readBuf:   array[16384, byte]
+    readBuf:   array[4096, byte]  # must be <= conn.readBufLen, or getReadData truncates
     udata:     pointer
     gen:       int
     isListen:  bool          # listen socket: accepts are driven by AcceptEx
@@ -220,6 +225,17 @@ proc init*(T: typedesc[Platform]): T =
   result.wakeState.magic = IocpStateMagic
 
 proc close*(p: Platform) =
+  # Close any sockets owned by the backend that loop.close()'s fd-watcher sweep
+  # does not see: the accept socket of a pending AcceptEx, and accepted sockets
+  # still queued for acceptClients.
+  for st in p.fdStates.values:
+    if st.isListen and st.acceptSock != 0 and st.acceptSock != INVALID_SOCKET:
+      discard closesocketW(st.acceptSock)
+      st.acceptSock = 0
+  for (_, sock) in p.acceptedFds:
+    if sock != 0 and sock != -1:
+      discard closesocketW(cast[SOCKET](sock))
+  p.acceptedFds.setLen(0)
   for st in p.fdStates.values:
     deallocShared(st)
   p.fdStates.clear()
@@ -284,8 +300,11 @@ proc allocFdState(p: Platform, fd: int, udata: pointer, gen: int): IocpFdStatePt
 
 proc postAcceptEx(p: Platform, state: IocpFdStatePtr) {.gcsafe.}
 
-proc postRecv(p: Platform, state: IocpFdStatePtr) =
-  if state.readPosted: return
+proc postRecv(p: Platform, state: IocpFdStatePtr): bool =
+  ## Returns true when a read is set up (WSARecv posted, or a datagram/listen
+  ## socket routed to its own path), false when the socket is broken (the peer
+  ## reset/closed it) and the connection must be closed.
+  if state.readPosted: return true
 
   # Datagram (UDP) sockets can't use WSARecv (no sender address) — poll them via
   # select() instead and let handleRead call recvfrom directly. The socket type
@@ -299,7 +318,7 @@ proc postRecv(p: Platform, state: IocpFdStatePtr) =
       state.sockType = st
   if state.sockType == SOCK_DGRAM_W:
     addToList(p.listenFds, state.fd)
-    return
+    return true
 
   state.readPosted = true
   state.hasData = false
@@ -325,15 +344,26 @@ proc postRecv(p: Platform, state: IocpFdStatePtr) =
     if err != WSA_IO_PENDING:
       state.readPosted = false
       if err == WSAENOTCONN:
-        # Listening sockets can't WSARecv — drive accepts via AcceptEx instead
-        # of select() (matches the pure-IOCP methodology of the epoll backend).
-        p.postAcceptEx(state)
+        # WSAENOTCONN is expected on a LISTENING socket (it can't WSARecv) — drive
+        # accepts via AcceptEx. But a connected socket that lost its peer ALSO
+        # returns WSAENOTCONN; distinguish via SO_ACCEPTCONN and, for a connected
+        # socket, signal the broken connection (return false) so the caller closes
+        # it instead of silently losing the close detection.
+        var acc: cint = 0
+        var optLen: cint = cint(sizeof(acc))
+        if getsockopt(cast[SOCKET](state.fd), SOL_SOCKET_W, SO_ACCEPTCONN_W,
+                      addr acc, optLen) == 0 and acc != 0:
+          state.isListen = true
+          p.postAcceptEx(state)
+          return true
+      return false
     # Note: ret == 0 (immediate/synchronous completion) needs no special
     # handling. For a socket associated with the completion port the
     # completion packet is STILL queued, so the bytes are delivered through
     # poll() like any other read. Recording hasData here would double-consume
     # the same data AND reuse state.ol (zeroMem'd below on the re-post) while
     # the completion is still queued — corrupting the state lifecycle.
+  true
 
 proc postAcceptEx(p: Platform, state: IocpFdStatePtr) {.gcsafe.} =
   ## Post an overlapped AcceptEx on a listening socket. Accepted sockets are
@@ -382,10 +412,18 @@ proc add*(p: Platform, fd: int, events: set[EventType],
     p.fdStates[fd] = state
     let res = createIoCompletionPort(cast[Handle](fd), p.iocp, nil, 0)
     if res == nil or res == INVALID_HANDLE_VALUE:
-      p.fdStates.del(fd)
-      deallocShared(state)
-      raise newException(OSError,
-        "powpow: CreateIoCompletionPort failed for fd " & $fd)
+      # A socket is frequently ALREADY associated with our completion port by
+      # the time it is (re)registered: a non-blocking connect arms {Write}, the
+      # connect callback removes the state and re-registers the same fd for
+      # {Read}; an AcceptEx-accepted socket also inherits the listener's
+      # association via SO_UPDATE_ACCEPT_CONTEXT. CreateIoCompletionPort then
+      # fails with ERROR_INVALID_PARAMETER (87) — expected, the socket is bound
+      # to this port already. Only a genuinely invalid handle is a hard error.
+      if getLastError() != ERROR_INVALID_PARAMETER:
+        p.fdStates.del(fd)
+        deallocShared(state)
+        raise newException(OSError,
+          "powpow: CreateIoCompletionPort failed for fd " & $fd)
   else:
     # Re-registration of the same fd (e.g. a non-blocking connect that arms
     # Write first and then re-registers the same socket for Read). The socket
@@ -396,7 +434,7 @@ proc add*(p: Platform, fd: int, events: set[EventType],
     state.gen = gen
 
   if Read in events:
-    postRecv(p, state)
+    discard postRecv(p, state)
   if Write in events:
     addToList(p.writeFds, fd)
 
@@ -424,7 +462,7 @@ proc modify*(p: Platform, fd: int, events: set[EventType],
   state.udata = udata
   state.gen = cast[int](udata)
   if Read in events and not state.readPosted:
-    postRecv(p, state)
+    discard postRecv(p, state)
   if Write in events:
     addToList(p.writeFds, fd)
   else:
@@ -443,8 +481,16 @@ proc getReadData*(p: Platform, fd: int,
     state.hasData = false
     state.readLen = 0
     state.readPosted = false
-    postRecv(p, state)
+    # The re-posted WSARecv may fail (the peer reset/closed the socket while we
+    # were reading); the NEXT call reports EOF (0) so the connection is closed
+    # instead of silently losing the close event.
+    discard postRecv(p, state)
     return n
+  if not state.readPosted:
+    # No WSARecv in flight and nothing buffered: the connection can't be read
+    # anymore (the re-post failed on a reset/closed socket). Signal EOF so the
+    # caller closes it.
+    return 0
   result = -1
 
 # ── Polling ──────────────────────────────────────────────────────────────────

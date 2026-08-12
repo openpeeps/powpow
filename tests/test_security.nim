@@ -686,12 +686,18 @@ when defined(windows):
     # (403) — resolveReal resolves junctions via GetFinalPathNameByHandleW.
     let tmpRoot = getTempDir() / "powpow_junction_root"
     let outside = getTempDir() / "powpow_junction_secret"
+    # A junction is a directory reparse point: Nim's removeDir walks into it and
+    # deleteFile on the junction fails with "Access is denied". Remove the
+    # reparse point with RemoveDirectory ("rd") before touching the roots — also
+    # clears junctions left behind by a previous failed run.
+    discard execShellCmd("cmd /c rd \"" & tmpRoot / "leak" & "\"")
     removeDir(tmpRoot)
     removeDir(outside)
     createDir(tmpRoot)
     createDir(outside)
     writeFile(outside / "secret.txt", "SECRET-OUTSIDE")
     defer:
+      discard execShellCmd("cmd /c rd \"" & tmpRoot / "leak" & "\"")
       removeDir(tmpRoot)
       removeDir(outside)
     discard execShellCmd("cmd /c mklink /J \"" & tmpRoot / "leak" & "\" \"" & outside & "\"")
@@ -882,7 +888,8 @@ test "test_ws_handshake_timeout_closes_stalled_connections":
   )
 
   var polls = 0
-  while not closed and polls < 10000:
+  let deadline = monoMs() + 5000
+  while not closed and monoMs() < deadline:
     loop.poll(1)
     inc polls
   assert closed, "stalled handshake connection should be closed by timeout"
@@ -964,7 +971,8 @@ test "test_ws_post_upgrade_idle_timeout_closes_silent_connection":
   )
 
   var polls = 0
-  while not closed and polls < 10000:
+  let deadline = monoMs() + 5000
+  while not closed and monoMs() < deadline:
     loop.poll(1)
     inc polls
   assert opened, "handshake should complete (101)"
@@ -1008,6 +1016,7 @@ test "test_ws_idle_timeout_activity_keeps_connection_open":
   )
 
   var polls = 0
+  let t0 = monoMs()
   # keep sending pings for ~400ms (well past idleTimeoutMs=150), then stop
   while polls < 400 and not closed:
     loop.poll(1)
@@ -1017,7 +1026,7 @@ test "test_ws_idle_timeout_activity_keeps_connection_open":
   if trafficTimer != TimerId(0):
     loop.cancelTimer(trafficTimer)
   # now stop sending; the idle timer must close it
-  while not closed and polls < 10000:
+  while not closed and monoMs() - t0 < 5000:
     loop.poll(1)
     inc polls
   assert closed, "connection must be closed once traffic stops"
