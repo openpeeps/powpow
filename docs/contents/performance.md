@@ -114,13 +114,6 @@ wrk -t4 -c100 -d5s -H "Connection: close" http://127.0.0.1:9000/
 
 There is also a dedicated loop benchmark: `tests/test_bench_event_loop.nim`.
 
-## Known optimization notes
-
-`plans/optimizations.md` documents a per-connection syscall analysis for the
-`Connection: close` path and a prioritized list of remaining perf work
-(`HttpRequest` pooling, faster status text, SIMD header parsing, zero-copy
-`getUrl`, keep-alive timer elimination).
-
 ## API reference
 
 - [SIMD scanning API](api/simdscan.md)
