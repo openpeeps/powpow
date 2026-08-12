@@ -70,8 +70,10 @@ type
     parserPool: seq[HttpParser]
     reqPool:   seq[HttpRequest]
     resPool:   seq[HttpResponse]
-    wsPool:    seq[pointer]   ## Idle WsConnection refs recycled by websocketUpgrade
-      ## (kept opaque to avoid an httpserver↔ws import cycle).
+    wsPool:    seq[ref RootObj]   ## Idle WsConnection refs recycled by websocketUpgrade
+      ## Typed as `ref RootObj` (not `pointer`) so ARC-family memory managers
+      ## retain the pooled WsConnection — a raw pointer does not hold a ref, so
+      ## a released ws could be freed while still in the pool and crash on reuse.
     sweepStale: seq[ConnHttp]  ## Scratch buffer reused by the timeout sweep so
       ## the periodic pass performs no per-sweep allocation.
     keepAliveMs: int
@@ -854,12 +856,12 @@ proc releaseParser(server: HttpServer, parser: HttpParser) {.inline.} =
     parser.reset()
     server.parserPool.add(parser)
 
-proc wsPoolPop*(server: HttpServer): pointer {.inline.} =
+proc wsPoolPop*(server: HttpServer): ref RootObj {.inline.} =
   ## Pop an idle WebSocket connection from the pool, or nil when empty.
-  ## Kept opaque (`pointer`) so httpserver does not need to know WsConnection.
+  ## Kept opaque (`ref RootObj`) so httpserver does not need to know WsConnection.
   if server.wsPool.len > 0: server.wsPool.pop() else: nil
 
-proc wsPoolAdd*(server: HttpServer, ws: pointer) {.inline.} =
+proc wsPoolAdd*(server: HttpServer, ws: ref RootObj) {.inline.} =
   ## Return an idle WebSocket connection to the pool (dropped when full).
   if server.wsPool.len < MaxWsPoolSize:
     server.wsPool.add(ws)

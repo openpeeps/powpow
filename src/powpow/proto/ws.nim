@@ -64,7 +64,7 @@ type
     wsPing         = 0x9
     wsPong         = 0xA
 
-  WsConnection* = ref object
+  WsConnection* = ref object of RootObj
     ## A WebSocket connection. Wraps a TCP connection with frame
     ## parsing, fragmentation reassembly, and control frame handling.
     conn*:       Connection       ## Underlying TCP connection
@@ -651,7 +651,7 @@ proc releaseWs(server: HttpServer, ws: WsConnection) =
   ws.onClose = nil
   ws.onError = nil
   if server != nil:
-    server.wsPoolAdd(cast[pointer](ws))
+    server.wsPoolAdd(cast[ref RootObj](ws))
 
 proc armIdleTimeout(ws: WsConnection) =
   ## Arm (or re-arm) the post-upgrade idle timer so it fires `idleTimeoutMs`
