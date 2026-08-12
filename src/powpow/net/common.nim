@@ -134,7 +134,7 @@ when defined(windows):
     importc: "getpeername", stdcall, dynlib: "ws2_32.dll".}
 
   proc inet_pton*(af: cint; src: cstring; dst: pointer): cint {.
-    importc: "InetPtonA", stdcall, dynlib: "ws2_32.dll".}
+    importc: "inet_pton", stdcall, dynlib: "ws2_32.dll".}
 
   proc htons*(hostshort: cushort): cushort {.
     importc: "htons", stdcall, dynlib: "ws2_32.dll".}
