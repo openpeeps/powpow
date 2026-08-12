@@ -55,6 +55,7 @@ are `nim c -r` one-liners; the multi-threaded one needs `--threads:on`.
 | [`fswatch.nim`](../examples/fswatch.nim) | File system watcher | `nim c -r examples/fswatch.nim` | watches `/tmp/powpow-test.txt` |
 | [`os_signals.nim`](../examples/os_signals.nim) | Graceful shutdown on SIGINT/SIGTERM | `nim c -r examples/os_signals.nim` | `http://127.0.0.1:9007`, Ctrl+C |
 | [`signal_bus.nim`](../examples/signal_bus.nim) | In-process pub/sub `SignalRelay` | `nim c -r examples/signal_bus.nim` | `http://localhost:9005/emit?signal=N` |
+| [`stream_pipe.nim`](../examples/stream_pipe.nim) | `IoStream` socketpair echo + EOF | `nim c -r examples/stream_pipe.nim` | none — terminal demo |
 | [`ratelimit_server.nim`](../examples/ratelimit_server.nim) | Sliding-window per-IP rate limiting | `nim c -r examples/ratelimit_server.nim` | `http://localhost:9003` (5 req/10s) |
 
 ## Suggested test commands
@@ -119,5 +120,5 @@ rm /tmp/powpow-test2.txt
 | 9010 / 9011 | `tcp_chat` / `tcp_client`, `udp_echo` |
 | 9020 / 9021 | `tcp_proxy` (and its backend) |
 | 9443 | `tls_server` |
-| none | `timers_scheduler`, `fswatch` |
+| none | `timers_scheduler`, `fswatch`, `stream_pipe` |
 | UDS path | `uds_server` (`/tmp/powpow.sock`) |

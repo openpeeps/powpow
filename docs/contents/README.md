@@ -27,6 +27,8 @@ multi-threaded servers.
 
 @core/fswatch.md
 
+@core/streams.md
+
 @core/dns.md
 
 ### Networking

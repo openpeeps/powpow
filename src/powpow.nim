@@ -55,6 +55,18 @@
 ##   SetConsoleCtrlHandler Ctrl+C (Windows) — no global signal handlers
 ## - Graceful shutdown on SIGINT/SIGTERM without blocking the loop
 ##
+## ### Stream I/O (`stream.nim`)
+## - `IoStream` wraps an arbitrary non-blocking fd and drives it from the loop
+## - Pipes, subprocess stdout, UDS and socketpair IPC; `newStreamPair` creates
+##   a full-duplex channel
+## - Connection-style write path: direct write drained until EAGAIN, remainder
+##   buffered and flushed on Write events; 32 MiB queued-write cap
+## - `pause`/`resume` read backpressure (a paused reader blocks the pipe writer)
+## - `close` is the single terminal transition and fires `onClose` exactly once;
+##   `closeAfterWrite` flushes then delivers EOF to the peer
+## - POSIX only (Windows IOCP is sockets-only); regular files work on kqueue but
+##   epoll rejects them
+##
 ## ### UDP Networking (`net/udp.nim`)
 ## - Non-blocking UDP server (bind) and client (connect)
 ## - recvfrom / sendto for connectionless communication

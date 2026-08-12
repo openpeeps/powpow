@@ -23,6 +23,7 @@ so `import powpow` brings in everything below.
 - [loop](loop.md) — the event loop, timers, fd events
 - [signal](signal.md) — `SignalRelay` bus and OS signals
 - [fswatch](fswatch.md) — file system watching
+- [stream](stream.md) — raw-fd streaming (`IoStream`)
 - [dns](dns.md) — the async resolver
 
 ## Networking

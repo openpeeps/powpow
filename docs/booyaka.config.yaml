@@ -9,7 +9,7 @@ appearance:
   show_toggle_right_sidebar: true
   container_width: "col-lg-10 mx-auto"
   content_width: "col-lg-7"
-  background_noise_opacity: 0.03
+  background_noise_opacity: 0.35
 git:
   enable_versioning: false
   enable_contributors_info: false
@@ -60,18 +60,14 @@ content:
       url: "https://github.com/copilot/"
       description: "Ask Copilot about this page"
 navbar:
-  - title: "Home"
-    url: "/"
-    icon: "icon-home"
   - title: "Overview"
     url: "/overview"
-    icon: "icon-book"
+  - title: "API Reference"
+    url: "https://openpeeps.github.io/powpow/"
   - title: "Examples"
     url: "/examples"
-    icon: "icon-braces"
   - title: "GitHub"
     url: "https://github.com/openpeeps/powpow"
-    icon: "icon-brand-github"
 
 sidebar_navigation:
   - name: "Getting Started"
@@ -99,6 +95,9 @@ sidebar_navigation:
       - title: "File system watching"
         url: "/core/fswatch"
         icon: "icon-files"
+      - title: "Streams"
+        url: "/core/streams"
+        icon: "icon-swap"
       - title: "Async DNS"
         url: "/core/dns"
         icon: "icon-world"

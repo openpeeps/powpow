@@ -31,6 +31,7 @@ nimble install powpow
 - **WebSocket** — RFC 6455, standalone and HTTP-upgrade modes
 - **TLS** — OpenSSL, implicit and STARTTLS-style upgrades
 - **Async DNS** — in-loop resolver, no blocking `getaddrinfo`
+- **Streams** — raw-fd I/O (`IoStream`): pipes, subprocess stdout, socketpair IPC, with read backpressure
 - **Multi-threaded** — `SO_REUSEPORT` workers, one event loop per core
 - **SIMD** — SSE2-accelerated HTTP message scanning
 

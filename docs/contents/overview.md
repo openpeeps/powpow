@@ -61,10 +61,11 @@ The aggregate module `src/powpow.nim` re-exports:
 - `types` — core shared types
 - `platform` — the active I/O backend (except `close`, which lives on `Loop`)
 - `loop` — the event loop
-- `net` — TCP, UDP, DNS, TLS, socket helpers
+- `net` — TCP, UDP, DNS, TLS, socket helpers, raw-fd streams
 - `proto` — HTTP, WebSocket, multi-threaded server, rate limiter
 - `signal` — the signal relay and OS signal handling
 - `fswatch` — file system monitoring
+- `stream` — raw-fd streaming (`IoStream`, re-exported via `net`)
 
 ## Feature matrix
 
@@ -76,6 +77,7 @@ The aggregate module `src/powpow.nim` re-exports:
 | Async DNS (`net/dns.nim`) | Done — in-loop resolver, `/etc/hosts` + `resolv.conf`, A/AAAA, TTL cache |
 | OS signals (`signal.nim`) | Done — signalfd (Linux), self-pipe (macOS/BSD/POSIX), Ctrl+C (Windows) |
 | File system watching (`fswatch.nim`) | Done — `kqueue` (macOS/BSD), `inotify` (Linux); Windows not yet implemented |
+| Raw-fd streaming (`stream.nim`) | Done — `IoStream` for pipes/socketpair/UDS/IPC; edge-triggered drain, write buffering, read backpressure; Windows not yet implemented |
 | HTTP/1.1 parser (`proto/http.nim`) | Done — incremental zero-copy, chunked, streaming, multipart |
 | HTTP server (`proto/httpserver.nim`) | Done — own-router design, static files, Range/conditional requests, pipelining |
 | WebSocket (`proto/ws.nim`) | Done — RFC 6455, standalone + upgrade, deflate |
@@ -129,6 +131,19 @@ The aggregate module `src/powpow.nim` re-exports:
 - Platform-native delivery: signalfd (Linux), self-pipe (macOS/BSD/POSIX),
   `SetConsoleCtrlHandler` Ctrl+C (Windows) — no global signal handlers
 - Graceful shutdown on SIGINT/SIGTERM without blocking the loop
+
+### Raw-fd streaming
+- `IoStream` wraps an arbitrary non-blocking fd and drives it from the loop
+- `openStream` for pipes, subprocess stdio, UDS and regular files; `newStreamPair`
+  creates a full-duplex `socketpair`
+- Connection-style write path: direct write drained until EAGAIN, remainder
+  buffered and flushed on Write events; 32 MiB queued-write cap
+- `pause`/`resume` give real read backpressure (a paused reader fills the kernel
+  pipe buffer and blocks the writer)
+- `close` is the single terminal transition and fires `onClose` exactly once;
+  `closeAfterWrite` flushes then delivers EOF to the peer
+- Platform notes: regular files work on kqueue but not epoll; Windows compiles
+  the module away (IOCP is sockets-only)
 
 ### HTTP/1.1 parser
 - Incremental, zero-copy parser — materialize strings lazily from byte offsets
