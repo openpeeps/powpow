@@ -49,6 +49,41 @@ The full documentation lives in [`docs/`](docs/contents/index.md):
 - [API reference](docs/contents/api/README.md) — per-module signatures (plus the [generated reference](https://openpeeps.github.io/powpow))
 - [Performance](docs/contents/performance.md), [Security](docs/contents/security.md), [Testing](docs/contents/testing.md)
 
+
+
+### Security
+
+Need to take input validation and DoS-resistance seriously. A dedicated security
+audit was performed; the high-priority findings it produced are fixed and
+covered by regression tests in [`tests/test_security.nim`](tests/test_security.nim).
+
+### Recommended production configuration
+
+For publicly reachable endpoints, set explicit caps instead of relying on the
+defaults (the `maxBodySize = 0` backstop is `MaxStreamBodySize`:
+
+```nim
+let server = newHttpServer(loop)
+server.maxBodySize    = 50 * 1024 * 1024      # 50 MB total request body
+server.maxStreamBodySize = 64 * 1024 * 1024   # hard cap even when maxBodySize=0
+server.maxFileSize    = 10 * 1024 * 1024      # 10 MB per uploaded file
+server.maxFieldSize   = 64 * 1024             # 64 KB per text field
+server.maxConnections = 4096                  # cap concurrent connections
+server.maxPipelineDepth = 4                   # cap pipelined requests
+server.readTimeoutMs  = 5_000                 # slowloris / partial-request close
+server.setKeepAliveTimeout(5_000)             # idle keep-alive close
+```
+
+The same caps apply to the standalone `WsServer` via `maxFrameSize`,
+`handshakeTimeoutMs`, `maxHandshakeSessions`, and (once enabled) a
+post-upgrade `idleTimeoutMs`.
+
+[Smuggler](https://github.com/openpeeps/smuggler) is a grammar-based
+HTTP/1.x request-smuggling fuzzer built for this library: it generates and
+mutates requests from a context-free grammar, detects CL/TE desyncs with an
+in-process oracle, and drives live servers with the two-request
+response-pairing technique.
+
 ## Examples (the fun part)
 Most web servers out there are all rainbows and flowers, until you upload or stream a file, and it transforms into a nightmare at runtime. PowPow is slowly moving toward a production-ready server. Everything below is runnable and lives in the `examples/` directory.
 
@@ -159,78 +194,6 @@ Requests/sec:  52687.29
 Transfer/sec:     26.98MB
 
 ```
-
-### Security
-
-Need to take input validation and DoS-resistance seriously. A dedicated security
-audit was performed; the high-priority findings it produced are fixed and
-covered by regression tests in [`tests/test_security.nim`](tests/test_security.nim).
-
-**Hardened by default:**
-- **Idle / read timeouts** — `readTimeoutMs` and `keepAliveMs` are now enforced
-  per connection, closing slowloris and idle keep-alive connections that never
-  complete their requests.
-- **Bounded header buffering** — an oversized header packet is rejected
-  (`414`/`431`) *before* the parser grows its buffer to the packet size, so a
-  hostile multi-megabyte header block cannot force a matching allocation.
-- **Overflow-safe `Content-Length`** — adversarial values (e.g. `2^63`) are
-  rejected instead of crashing or wrapping to a negative length, closing a
-  request-smuggling/desync primitive.
-- **Bounded streaming uploads** — streamed bodies (temp-file and multipart) are
-  capped even with `maxBodySize = 0`, and size-limit violations reply `413`
-  instead of raising an unhandled exception.
-- **WebSocket frame caps** — an absolute frame-size cap applies even in
-  `maxFrameSize = 0` ("unlimited") mode, preventing OOM on hostile 64-bit
-  lengths and unbounded fragmented-message assembly.
-- **Stack-safe response headers** — `sendFile`/`streamFile` header assembly
-  grows safely; long filenames or custom headers can no longer overflow a fixed
-  stack buffer.
-- **Path-confusion-proof static serving** — `serveFile` requires a real path
-  boundary under `fsRoot`, so a sibling directory sharing the prefix
-  (e.g. `/var/www2`) can no longer be served.
-- **Symlink-safe static serving** — served paths are resolved with `realpath`
-  and must stay under `fsRoot`; a symlink inside the root pointing outside is
-  rejected with `403`.
-- **Multipart per-file limits** — `server.maxFileSize` bounds a single uploaded
-  part independently of the total body cap (violations reply `413`).
-- **WebSocket handshake hardening** — `handshakeTimeoutMs` closes connections
-  that never complete the HTTP→WebSocket upgrade, and `maxHandshakeSessions`
-  caps in-flight handshakes (handshake-stall DoS defense).
-- **Strict header parsing** — obs-fold / leading-whitespace header lines are
-  rejected (`400`), and `Transfer-Encoding` enables chunked framing only when
-  the final token is exactly `chunked`.
-- **Thread-safe rate limiter** — `RateLimiter` guards its bucket table with a
-  lock, so it can be shared across multi-threaded server workers.
-- **TLS reflection guards** — the TLS `sendv` coalesce buffer is capped
-  (1 MB), so an attacker-controlled response echoed over TLS cannot force an
-  arbitrarily large allocation.
-
-### Recommended production configuration
-
-For publicly reachable endpoints, set explicit caps instead of relying on the
-defaults (the `maxBodySize = 0` backstop is `MaxStreamBodySize`:
-
-```nim
-let server = newHttpServer(loop)
-server.maxBodySize    = 50 * 1024 * 1024      # 50 MB total request body
-server.maxStreamBodySize = 64 * 1024 * 1024   # hard cap even when maxBodySize=0
-server.maxFileSize    = 10 * 1024 * 1024      # 10 MB per uploaded file
-server.maxFieldSize   = 64 * 1024             # 64 KB per text field
-server.maxConnections = 4096                  # cap concurrent connections
-server.maxPipelineDepth = 4                   # cap pipelined requests
-server.readTimeoutMs  = 5_000                 # slowloris / partial-request close
-server.setKeepAliveTimeout(5_000)             # idle keep-alive close
-```
-
-The same caps apply to the standalone `WsServer` via `maxFrameSize`,
-`handshakeTimeoutMs`, `maxHandshakeSessions`, and (once enabled) a
-post-upgrade `idleTimeoutMs`.
-
-[Smuggler](https://github.com/openpeeps/smuggler) is a grammar-based
-HTTP/1.x request-smuggling fuzzer built for this library: it generates and
-mutates requests from a context-free grammar, detects CL/TE desyncs with an
-in-process oracle, and drives live servers with the two-request
-response-pairing technique.
 
 ### Security roadmap
 
