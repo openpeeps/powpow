@@ -234,7 +234,9 @@ proc getHosts(): Table[string, seq[ResolvedIp]] =
     return parsedHosts
   parsedHostsOnce = true
   if fileExists(HostsPath):
-    for line in HostsPath.readFile().splitLines():
+    let content = HostsPath.readFile()
+    let lines = content.splitLines()
+    for line in lines:
       let line = line.strip()
       if line.len == 0 or line[0] == '#':
         continue
@@ -251,6 +253,11 @@ proc getHosts(): Table[string, seq[ResolvedIp]] =
         if key notin parsedHosts:
           parsedHosts[key] = @[]
         parsedHosts[key].add(ip)
+  # Modern Windows ships the hosts template with "127.0.0.1 localhost"
+  # commented out ("localhost name resolution is handled within DNS itself").
+  # localhost must always resolve to loopback, so guarantee it.
+  if "localhost" notin parsedHosts:
+    parsedHosts["localhost"] = @[parseIpLiteral("127.0.0.1")]
   result = parsedHosts
 
 proc parseResolvConf(): tuple[nameservers: seq[ResolvedIp], timeoutMs: int, attempts: int] =

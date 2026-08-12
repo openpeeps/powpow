@@ -40,6 +40,12 @@ proc formatIp(saAddr: Sockaddr_storage): string =
 const
   MaxBufPoolSize* = 1024
   MaxConnPoolSize* = 1024
+  ConnectTimeoutMs = 3000
+    ## How long a non-blocking connect may stay in progress before it is treated
+    ## as failed and the next resolved address is tried. On some platforms a
+    ## connect to an unreachable/refused address can hang without producing a
+    ## writable event (e.g. Windows loopback to an unused 127.0.0.x), so the
+    ## multi-address fallback must not depend on the OS refusing promptly.
   MaxWriteBufferSize = 32 * 1024 * 1024
     ## Per-connection cap on the queued write buffer. A client that stops
     ## reading while the server writes a large response (e.g. a TLS file
@@ -944,7 +950,11 @@ proc connect*(loop: Loop, address: string, port: int,
         return
 
       var tryIdx = 0
+      var connTimer: TimerId = TimerId(0)
       proc attemptNext() {.closure.} =
+        if connTimer != TimerId(0):
+          loop.cancelTimer(connTimer)
+          connTimer = TimerId(0)
         if tryIdx >= addrs.len:
           if onError != nil:
             onError("connect() failed on all resolved addresses for " & address)
@@ -1004,6 +1014,9 @@ proc connect*(loop: Loop, address: string, port: int,
           if conn.state == Closed: return
         else:
           conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
+            if connTimer != TimerId(0):
+              loop.cancelTimer(connTimer)
+              connTimer = TimerId(0)
             conn.loop.unregister(wfd)
             if conn.fd.int != wfd:
               # The watcher fired for a stale event after this connection's fd
@@ -1052,6 +1065,11 @@ proc connect*(loop: Loop, address: string, port: int,
                 if onClose != nil: onClose(conn)
             onConnect(conn)
             if conn.state == Closed: return
+          # The connect may never complete (no writable event on some platforms);
+          # fall back to the next address after a timeout instead of hanging.
+          connTimer = loop.addTimer(ConnectTimeoutMs) do (id: int):
+            conn.closeAndRelease()
+            attemptNext()
       attemptNext()
   )
 

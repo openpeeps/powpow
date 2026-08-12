@@ -515,8 +515,14 @@ proc poll*(p: Platform, timeoutMs: int): int =
   let hasSelectFds = p.listenFds.len > 0 or p.writeFds.len > 0
 
   let effectiveTimeout =
-    if timeoutMs < 0 and hasSelectFds:
-      50.DWORD
+    if hasSelectFds:
+      # select()-based fds (datagram reads, pending writes) never produce IOCP
+      # completions — select() only runs AFTER GetQueuedCompletionStatusEx
+      # returns. A long IOCP wait (e.g. a multi-second timer) would starve them
+      # and stall DNS/keep-alive handling. Cap the wait so select() runs
+      # regularly; keep the caller's timeout when it's already shorter.
+      if timeoutMs < 0: 50.DWORD
+      else: min(timeoutMs, 50).DWORD
     elif timeoutMs < 0:
       0xFFFFFFFF.DWORD
     else:
