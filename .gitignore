@@ -17,3 +17,7 @@ testresults/
 nimble.develop
 nimble.paths
 nimbledeps
+.cache/
+plans
+docs/_build
+docs/logs

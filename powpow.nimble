@@ -17,8 +17,32 @@ requires "checksums >= 0.2.2"
 
 # Tasks
 
+task test, "Run the unit test suite":
+  ## Compile+run every test_*.nim with a SHARED nimcache, so the powpow package
+  ## is built once and reused across all tests. The default nimble `test` task
+  ## rebuilds the whole package for every test file (~20 full compiles), which
+  ## is slow enough on a cold cache to look like a hang.
+  ##
+  ## `--threads:on` is always used: the threaded tests (test_ratelimit_threads,
+  ## test_ws_threads) require it and the rest are unaffected.
+  let cache = ".cache/nim/tests"
+  let tests = [
+    "test_bad_requests", "test_bench_event_loop", "test_dns", "test_findcrlf",
+    "test_firefox_regression", "test_http", "test_loop",
+    "test_multipart_streamer", "test_net", "test_ratelimit_threads",
+    "test_security", "test_signal", "test_sse2", "test_sse2_225",
+    "test_sse2_chunk", "test_sse2_direct", "test_sse2_raw", "test_stream",
+    "test_tls", "test_ws_pool", "test_ws_threads",
+  ]
+  for t in tests:
+    # --outdir keeps the produced test binaries in the (gitignored) cache dir
+    # instead of leaving them in tests/.
+    exec "nim c -r --threads:on --nimcache:" & cache &
+         " --outdir:" & cache & " tests/" & t & ".nim"
+
 task testSmuggler, "Fuzz powpow with the smuggler package (requires smuggler installed)":
   exec "nim c -r --threads:on tests/smuggler_integration.nim"
 
 task testThreads, "Thread-safety smoke tests (--threads:on)":
   exec "nim c -r --threads:on tests/test_ratelimit_threads.nim"
+  exec "nim c -r --threads:on tests/test_ws_threads.nim"

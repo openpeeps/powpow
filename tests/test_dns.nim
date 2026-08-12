@@ -274,8 +274,15 @@ test "test_dns_connect_via_hostname":
       server.close()
       loop.stop()
     ,
-    onError = proc(err: string) = discard,
+    onError = proc(err: string) =
+      # A stalled resolution/connect must not hang `loop.run()` forever.
+      loop.stop()
+    ,
   )
+  # Safety timeout: fail the test cleanly instead of hanging if DNS or the
+  # connect never completes.
+  discard loop.addTimer(5000) do (id: int):
+    loop.stop()
   loop.run()
 
   assert connected, "connect via hostname should succeed"
@@ -339,47 +346,59 @@ test "test_dns_multi_record":
   stopFakeDns(loop, fake)
   loop.close()
 
-test "test_dns_connect_fallback_across_addresses":
-  # multi.example resolves to [127.0.0.2, 127.0.0.1]; the echo server is on
-  # 127.0.0.1. connect() must fail on 127.0.0.2 (connection refused) then fall
-  # back to 127.0.0.1 and succeed.
-  let loop = newLoop()
-  loop.setDnsServers([("127.0.0.1", 29989)])
-  loop.configureDns(300, 2)
-  var fake = startFakeDns(loop, 29989)
-  fake.answers["multi.example"] = @["127.0.0.2", "127.0.0.1"]
+when not defined(macosx):
+  # Connecting to 127.0.0.2 is refused quickly on Linux/Windows loopback, which
+  # is what triggers the fallback. macOS drops the SYN (it never refuses
+  # non-127.0.0.1 loopback addresses), so the test cannot complete there — the
+  # fallback path is covered by Linux/Windows CI, and multi-address resolution
+  # is still tested above.
+  test "test_dns_connect_fallback_across_addresses":
+    # multi.example resolves to [127.0.0.2, 127.0.0.1]; the echo server is on
+    # 127.0.0.1. connect() must fail on 127.0.0.2 (connection refused) then fall
+    # back to 127.0.0.1 and succeed.
+    let loop = newLoop()
+    loop.setDnsServers([("127.0.0.1", 29989)])
+    loop.configureDns(300, 2)
+    var fake = startFakeDns(loop, 29989)
+    fake.answers["multi.example"] = @["127.0.0.2", "127.0.0.1"]
 
-  var server: TcpServer
-  server = newTcpServer(loop,
-    onAccept = proc(conn: Connection) = discard,
-    onData = proc(conn: Connection, data: openArray[byte]) =
-      discard conn.send(data)
-  )
-  server.listen("127.0.0.1", 29990)
+    var server: TcpServer
+    server = newTcpServer(loop,
+      onAccept = proc(conn: Connection) = discard,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        discard conn.send(data)
+    )
+    server.listen("127.0.0.1", 29990)
 
-  var connected = false
-  var received = ""
-  var failed = false
-  loop.connect("multi.example", 29990,
-    onConnect = proc(conn: Connection) =
-      connected = true
-      discard conn.send("fallback ok")
-    ,
-    onData = proc(conn: Connection, data: openArray[byte]) =
-      received = cast[string](@data)
-      conn.close()
-      server.close()
+    var connected = false
+    var received = ""
+    var failed = false
+    loop.connect("multi.example", 29990,
+      onConnect = proc(conn: Connection) =
+        connected = true
+        discard conn.send("fallback ok")
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        received = cast[string](@data)
+        conn.close()
+        server.close()
+        loop.stop()
+      ,
+      onError = proc(err: string) =
+        failed = true
+        echo "  (onError: ", err, ")"
+        # A total connect failure must not hang `loop.run()` forever.
+        loop.stop()
+      ,
+    )
+    # Safety timeout: fail the test cleanly instead of hanging if the fallback
+    # never reaches a reachable address.
+    discard loop.addTimer(5000) do (id: int):
       loop.stop()
-    ,
-    onError = proc(err: string) =
-      failed = true
-      echo "  (onError: ", err, ")"
-    ,
-  )
-  loop.run()
+    loop.run()
 
-  assert connected, "connect should fall back to the reachable address"
-  assert received == "fallback ok", "echo mismatch: " & received
-  assert not failed, "fallback should have succeeded"
-  stopFakeDns(loop, fake)
-  loop.close()
+    assert connected, "connect should fall back to the reachable address"
+    assert received == "fallback ok", "echo mismatch: " & received
+    assert not failed, "fallback should have succeeded"
+    stopFakeDns(loop, fake)
+    loop.close()
