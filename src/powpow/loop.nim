@@ -246,10 +246,8 @@ when iouEnabled:
     loop.timeoutPending = true
 
   proc flushPending(loop: Loop) =
-    ## Claim SQE slots for watcher/wake re-arms whose one-shot polls completed.
-    ## Does NOT submit: the single `io_uring_enter` in `poll()` submits every
-    ## queued SQE (re-arms + ops + timeout) in one call, so the loop performs
-    ## exactly one enter per iteration.
+    ## Re-arm watchers/wake whose one-shot polls completed, then submit all
+    ## queued SQEs (ops + re-arms + timeout) without waiting.
     var i = 0
     while i < loop.rearmQueue.len:
       let sqe = loop.ring.getSqe()
@@ -265,6 +263,7 @@ when iouEnabled:
       else:
         loop.watcherTokens.del(w.token)
     loop.armWake()
+    discard loop.ring.submit(0, 0)
 
   proc submitNow*(loop: Loop) {.gcsafe.} =
     ## Submit all queued SQEs to the kernel without waiting. Used by higher
@@ -899,6 +898,7 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
       loop.reaped = 0
     loop.reap()
     nEvents = loop.reaped
+    flushPending(loop)
   else:
     nEvents = loop.platform.poll(timeout)
     for i in 0 ..< nEvents:
