@@ -18,6 +18,10 @@ on:
         description: 'URL path'
         default: '/hello'
         required: false
+      compilation-flags:
+        description: 'Extra flags appended to the nim c benchmark server builds (e.g. -d:powpowIoUring)'
+        default: ''
+        required: false
 
 jobs:
   bench:
@@ -34,8 +38,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
       - run: sudo apt-get update && sudo apt-get install -y wrk
-      - run: nim c -d:release examples/httpserver.nim
-      - run: nim c -d:release --threads:on examples/httpserver_threads.nim
+      - run: nim c -d:release ${{ inputs.compilation-flags }} examples/httpserver.nim
+      - run: nim c -d:release --threads:on ${{ inputs.compilation-flags }} examples/httpserver_threads.nim
 
       - name: Record commit
         run: |
