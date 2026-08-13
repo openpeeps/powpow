@@ -33,6 +33,9 @@ const
   MaxStreamBodySize* = 512 * 1024 * 1024  ## Absolute cap for streamed bodies
     ## (onBodyData) when maxBodySize == 0: a hostile client can't drive
     ## unbounded disk/RAM via a streaming upload.
+  MinStreamBodySize* = 64 * 1024  ## Bodies smaller than this are always
+    ## buffered in the parser so `getBodyString`/`getBody` work; larger bodies
+    ## may be auto-streamed to a temp file when they arrive split across reads.
 
   httpNewLine = "\r\n"
   headerSep   = "\r\n\r\n"
