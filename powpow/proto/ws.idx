@@ -1,40 +1,42 @@
 nimTitle	ws	powpow/proto/ws.html	module powpow/proto/ws		0
-nim	DefaultMaxFrameSize	powpow/proto/ws.html#DefaultMaxFrameSize	const DefaultMaxFrameSize		47
-nim	wsContinuation	powpow/proto/ws.html#wsContinuation	WsFrameKind.wsContinuation		56
-nim	wsText	powpow/proto/ws.html#wsText	WsFrameKind.wsText		56
-nim	wsBinary	powpow/proto/ws.html#wsBinary	WsFrameKind.wsBinary		56
-nim	wsClose	powpow/proto/ws.html#wsClose	WsFrameKind.wsClose		56
-nim	wsPing	powpow/proto/ws.html#wsPing	WsFrameKind.wsPing		56
-nim	wsPong	powpow/proto/ws.html#wsPong	WsFrameKind.wsPong		56
-nim	WsFrameKind	powpow/proto/ws.html#WsFrameKind	enum WsFrameKind		56
-nim	WsConnection	powpow/proto/ws.html#WsConnection	type WsConnection		65
-nim	WsMessageCb	powpow/proto/ws.html#WsMessageCb	type WsMessageCb		87
-nim	WsCloseCb	powpow/proto/ws.html#WsCloseCb	type WsCloseCb		89
-nim	WsErrorCb	powpow/proto/ws.html#WsErrorCb	type WsErrorCb		91
-nim	WsOpenCb	powpow/proto/ws.html#WsOpenCb	type WsOpenCb		92
-nim	WsServer	powpow/proto/ws.html#WsServer	type WsServer		118
-nim	reset	powpow/proto/ws.html#reset,WsFrameParser	proc reset(p: WsFrameParser)		150
-nim	computeAcceptKey	powpow/proto/ws.html#computeAcceptKey,string	proc computeAcceptKey(clientKey: string): string		163
-nim	buildHandshakeResponse	powpow/proto/ws.html#buildHandshakeResponse,string	proc buildHandshakeResponse(acceptKey: string): string		169
-nim	sendHandshake	powpow/proto/ws.html#sendHandshake,Connection,string	proc sendHandshake(conn: Connection; clientKey: string)		177
-nim	writeFrame	powpow/proto/ws.html#writeFrame,Connection,int,openArray[byte]	proc writeFrame(conn: Connection; opcode: int; payload: openArray[byte])		183
-nim	writeFrameMasked	powpow/proto/ws.html#writeFrameMasked,Connection,int,openArray[byte],array[,uint8]	proc writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];\n                 mask: array[4, uint8])		216
-nim	sendText	powpow/proto/ws.html#sendText,WsConnection,string	proc sendText(ws: WsConnection; s: string)		256
-nim	sendBinary	powpow/proto/ws.html#sendBinary,WsConnection,openArray[byte]	proc sendBinary(ws: WsConnection; data: openArray[byte])		262
-nim	sendPing	powpow/proto/ws.html#sendPing,WsConnection,openArray[byte]	proc sendPing(ws: WsConnection; data: openArray[byte] = [])		268
-nim	sendPong	powpow/proto/ws.html#sendPong,WsConnection,openArray[byte]	proc sendPong(ws: WsConnection; data: openArray[byte] = [])		274
-nim	closeWs	powpow/proto/ws.html#closeWs,WsConnection,int,string	proc closeWs(ws: WsConnection; code: int = 1000; reason: string = "")		280
-nim	parseWsFrames	powpow/proto/ws.html#parseWsFrames,WsConnection,openArray[byte]	proc parseWsFrames(ws: WsConnection; data: openArray[byte])		384
-nim	newWsConnection	powpow/proto/ws.html#newWsConnection,Connection,int	proc newWsConnection(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize): WsConnection		552
-nim	newWsServer	powpow/proto/ws.html#newWsServer,Loop,int	proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer		660
-nim	newWsServer	powpow/proto/ws.html#newWsServer,int	proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer		674
-nim	start	powpow/proto/ws.html#start,WsServer	proc start(wss: WsServer)		678
-nim	onOpen	powpow/proto/ws.html#onOpen,WsServer,WsOpenCb	proc onOpen(wss: WsServer; cb: WsOpenCb)		682
-nim	onMessage	powpow/proto/ws.html#onMessage,WsServer,WsMessageCb	proc onMessage(wss: WsServer; cb: WsMessageCb)		686
-nim	onClose	powpow/proto/ws.html#onClose,WsServer,WsCloseCb	proc onClose(wss: WsServer; cb: WsCloseCb)		690
-nim	onError	powpow/proto/ws.html#onError,WsServer,WsErrorCb	proc onError(wss: WsServer; cb: WsErrorCb)		694
-nim	handshakeCount	powpow/proto/ws.html#handshakeCount,WsServer	proc handshakeCount(wss: WsServer): int		700
-nim	listen	powpow/proto/ws.html#listen,WsServer,string,int	proc listen(wss: WsServer; address: string; port: int)		725
-nim	close	powpow/proto/ws.html#close,WsServer	proc close(wss: WsServer)		878
-nim	websocketUpgrade	powpow/proto/ws.html#websocketUpgrade,HttpResponse,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int	proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;\n                 onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;\n                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil;\n                 maxFrameSize: int = DefaultMaxFrameSize): WsConnection		898
-nimgrp	newwsserver	powpow/proto/ws.html#newWsServer-procs-all	proc		660
+nim	DefaultMaxFrameSize	powpow/proto/ws.html#DefaultMaxFrameSize	const DefaultMaxFrameSize		49
+nim	wsContinuation	powpow/proto/ws.html#wsContinuation	WsFrameKind.wsContinuation		58
+nim	wsText	powpow/proto/ws.html#wsText	WsFrameKind.wsText		58
+nim	wsBinary	powpow/proto/ws.html#wsBinary	WsFrameKind.wsBinary		58
+nim	wsClose	powpow/proto/ws.html#wsClose	WsFrameKind.wsClose		58
+nim	wsPing	powpow/proto/ws.html#wsPing	WsFrameKind.wsPing		58
+nim	wsPong	powpow/proto/ws.html#wsPong	WsFrameKind.wsPong		58
+nim	WsFrameKind	powpow/proto/ws.html#WsFrameKind	enum WsFrameKind		58
+nim	WsConnection	powpow/proto/ws.html#WsConnection	type WsConnection		67
+nim	WsMessageCb	powpow/proto/ws.html#WsMessageCb	type WsMessageCb		98
+nim	WsCloseCb	powpow/proto/ws.html#WsCloseCb	type WsCloseCb		100
+nim	WsErrorCb	powpow/proto/ws.html#WsErrorCb	type WsErrorCb		102
+nim	WsOpenCb	powpow/proto/ws.html#WsOpenCb	type WsOpenCb		103
+nim	WsServer	powpow/proto/ws.html#WsServer	type WsServer		129
+nim	reset	powpow/proto/ws.html#reset,WsFrameParser	proc reset(p: WsFrameParser)		161
+nim	computeAcceptKey	powpow/proto/ws.html#computeAcceptKey,string	proc computeAcceptKey(clientKey: string): string		174
+nim	buildHandshakeResponse	powpow/proto/ws.html#buildHandshakeResponse,string	proc buildHandshakeResponse(acceptKey: string): string		180
+nim	sendHandshake	powpow/proto/ws.html#sendHandshake,Connection,string	proc sendHandshake(conn: Connection; clientKey: string)		188
+nim	writeFrame	powpow/proto/ws.html#writeFrame,Connection,int,openArray[byte]	proc writeFrame(conn: Connection; opcode: int; payload: openArray[byte])		194
+nim	writeFrameMasked	powpow/proto/ws.html#writeFrameMasked,Connection,int,openArray[byte],array[,uint8]	proc writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];\n                 mask: array[4, uint8])		227
+nim	sendText	powpow/proto/ws.html#sendText,WsConnection,string	proc sendText(ws: WsConnection; s: string)		295
+nim	sendBinary	powpow/proto/ws.html#sendBinary,WsConnection,openArray[byte]	proc sendBinary(ws: WsConnection; data: openArray[byte])		301
+nim	sendPing	powpow/proto/ws.html#sendPing,WsConnection,openArray[byte]	proc sendPing(ws: WsConnection; data: openArray[byte] = [])		307
+nim	sendPong	powpow/proto/ws.html#sendPong,WsConnection,openArray[byte]	proc sendPong(ws: WsConnection; data: openArray[byte] = [])		313
+nim	closeWs	powpow/proto/ws.html#closeWs,WsConnection,int,string	proc closeWs(ws: WsConnection; code: int = 1000; reason: string = "")		319
+nim	parseWsFrames	powpow/proto/ws.html#parseWsFrames,WsConnection,openArray[byte]	proc parseWsFrames(ws: WsConnection; data: openArray[byte])		423
+nim	newWsConnection	powpow/proto/ws.html#newWsConnection,Connection,int	proc newWsConnection(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize): WsConnection		591
+nim	newWsServer	powpow/proto/ws.html#newWsServer,Loop,int	proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer		713
+nim	newWsServer	powpow/proto/ws.html#newWsServer,int	proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer		727
+nim	start	powpow/proto/ws.html#start,WsServer	proc start(wss: WsServer)		731
+nim	onOpen	powpow/proto/ws.html#onOpen,WsServer,WsOpenCb	proc onOpen(wss: WsServer; cb: WsOpenCb)		735
+nim	onMessage	powpow/proto/ws.html#onMessage,WsServer,WsMessageCb	proc onMessage(wss: WsServer; cb: WsMessageCb)		739
+nim	onClose	powpow/proto/ws.html#onClose,WsServer,WsCloseCb	proc onClose(wss: WsServer; cb: WsCloseCb)		743
+nim	onError	powpow/proto/ws.html#onError,WsServer,WsErrorCb	proc onError(wss: WsServer; cb: WsErrorCb)		747
+nim	handshakeCount	powpow/proto/ws.html#handshakeCount,WsServer	proc handshakeCount(wss: WsServer): int		753
+nim	listen	powpow/proto/ws.html#listen,WsServer,string,int	proc listen(wss: WsServer; address: string; port: int)		778
+nim	close	powpow/proto/ws.html#close,WsServer	proc close(wss: WsServer)		946
+nim	websocketUpgrade	powpow/proto/ws.html#websocketUpgrade,HttpResponse,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int	proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;\n                 onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;\n                 onClose: WsCloseCb = nil; onError: WsErrorCb = nil;\n                 maxFrameSize: int = DefaultMaxFrameSize): WsConnection		966
+nim	upgradeToWs	powpow/proto/ws.html#upgradeToWs,Connection,string,string,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,int	proc upgradeToWs(conn: Connection; path: string = "/"; host: string = "";\n            onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;\n            onClose: WsCloseCb = nil; onError: WsErrorCb = nil;\n            maxFrameSize: int = DefaultMaxFrameSize;\n            handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs): WsConnection		1261
+nim	connectWs	powpow/proto/ws.html#connectWs,Loop,string,int,string,string,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,int	proc connectWs(loop: Loop; address: string; port: int; path: string = "/";\n          host: string = ""; onOpen: WsOpenCb = nil;\n          onMessage: WsMessageCb = nil; onClose: WsCloseCb = nil;\n          onError: WsErrorCb = nil; maxFrameSize: int = DefaultMaxFrameSize;\n          handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs): WsConnection		1288
+nimgrp	newwsserver	powpow/proto/ws.html#newWsServer-procs-all	proc		713

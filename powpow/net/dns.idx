@@ -1,0 +1,10 @@
+nimTitle	dns	powpow/net/dns.html	module powpow/net/dns		0
+nim	DnsCallback	powpow/net/dns.html#DnsCallback	type DnsCallback		42
+nim	ResolvedIp	powpow/net/dns.html#ResolvedIp	object ResolvedIp		44
+nim	DnsCacheEntry	powpow/net/dns.html#DnsCacheEntry	object DnsCacheEntry		49
+nim	DnsQuery	powpow/net/dns.html#DnsQuery	type DnsQuery		54
+nim	DnsResolver	powpow/net/dns.html#DnsResolver	type DnsResolver		68
+nim	resolveAddrAsync	powpow/net/dns.html#resolveAddrAsync,Loop,string,int,cint,proc(seq[Sockaddr_storage],string)	proc resolveAddrAsync(loop: Loop; address: string; port: int; sockType: cint; cb: proc (\n    addrs: seq[Sockaddr_storage]; err: string) {.closure.})		499
+nim	configureDns	powpow/net/dns.html#configureDns,Loop,int,int	proc configureDns(loop: Loop; timeoutMs: int; attempts: int)		550
+nim	setDnsServers	powpow/net/dns.html#setDnsServers,Loop,openArray[]	proc setDnsServers(loop: Loop; servers: openArray[(string, int)])		559
+nim	closeDns	powpow/net/dns.html#closeDns,Loop	proc closeDns(loop: Loop)		573

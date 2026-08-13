@@ -68,7 +68,8 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#10" id="60">Consts</a></summary>
     <ul class="simple simple-toc-section">
-      <li><a class="reference" href="#SSL_ERROR_NONE" title="SSL_ERROR_NONE = 0">SSL_ERROR_NONE</a></li>
+      <li><a class="reference" href="#SSL_CTRL_SET_TLSEXT_HOSTNAME" title="SSL_CTRL_SET_TLSEXT_HOSTNAME = 55">SSL_CTRL_SET_TLSEXT_HOSTNAME</a></li>
+<li><a class="reference" href="#SSL_ERROR_NONE" title="SSL_ERROR_NONE = 0">SSL_ERROR_NONE</a></li>
 <li><a class="reference" href="#SSL_ERROR_SSL" title="SSL_ERROR_SSL = 1">SSL_ERROR_SSL</a></li>
 <li><a class="reference" href="#SSL_ERROR_SYSCALL" title="SSL_ERROR_SYSCALL = 5">SSL_ERROR_SYSCALL</a></li>
 <li><a class="reference" href="#SSL_ERROR_WANT_READ" title="SSL_ERROR_WANT_READ = 2">SSL_ERROR_WANT_READ</a></li>
@@ -76,6 +77,7 @@
 <li><a class="reference" href="#SSL_ERROR_ZERO_RETURN" title="SSL_ERROR_ZERO_RETURN = 6">SSL_ERROR_ZERO_RETURN</a></li>
 <li><a class="reference" href="#SSL_FILETYPE_PEM" title="SSL_FILETYPE_PEM = 1">SSL_FILETYPE_PEM</a></li>
 <li><a class="reference" href="#SSL_VERIFY_NONE" title="SSL_VERIFY_NONE = 0">SSL_VERIFY_NONE</a></li>
+<li><a class="reference" href="#SSL_VERIFY_PEER" title="SSL_VERIFY_PEER = 1">SSL_VERIFY_PEER</a></li>
 
     </ul>
   </details>
@@ -84,8 +86,8 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#12" id="62">Procs</a></summary>
     <ul class="simple simple-toc-section">
-      <ul class="simple nested-toc-section">ERR_error_string
-  <li><a class="reference" href="#ERR_error_string%2Cculong%2Ccstring" title="ERR_error_string(e: culong; buf: cstring): cstring">ERR_error_string(e: culong; buf: cstring): cstring</a></li>
+      <ul class="simple nested-toc-section">ERR_error_string_n
+  <li><a class="reference" href="#ERR_error_string_n%2Cculong%2Ccstring%2Ccsize_t" title="ERR_error_string_n(e: culong; buf: cstring; len: csize_t)">ERR_error_string_n(e: culong; buf: cstring; len: csize_t)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">ERR_get_error
@@ -94,6 +96,10 @@
 </ul>
 <ul class="simple nested-toc-section">opensslError
   <li><a class="reference" href="#opensslError" title="opensslError(): string">opensslError(): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">SSL_ctrl
+  <li><a class="reference" href="#SSL_ctrl%2CSslPtr%2Ccint%2Ccint%2Cpointer" title="SSL_ctrl(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint">SSL_ctrl(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">SSL_CTX_check_private_key
@@ -106,6 +112,10 @@
 </ul>
 <ul class="simple nested-toc-section">SSL_CTX_new
   <li><a class="reference" href="#SSL_CTX_new%2Cpointer" title="SSL_CTX_new(m: pointer): SslCtx">SSL_CTX_new(m: pointer): SslCtx</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">SSL_CTX_set_default_verify_paths
+  <li><a class="reference" href="#SSL_CTX_set_default_verify_paths%2CSslCtx" title="SSL_CTX_set_default_verify_paths(c: SslCtx): cint">SSL_CTX_set_default_verify_paths(c: SslCtx): cint</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">SSL_CTX_set_verify
@@ -138,6 +148,10 @@
 </ul>
 <ul class="simple nested-toc-section">SSL_read
   <li><a class="reference" href="#SSL_read%2CSslPtr%2Cpointer%2Ccint" title="SSL_read(s: SslPtr; buf: pointer; num: cint): cint">SSL_read(s: SslPtr; buf: pointer; num: cint): cint</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">SSL_set1_host
+  <li><a class="reference" href="#SSL_set1_host%2CSslPtr%2Ccstring" title="SSL_set1_host(s: SslPtr; hostname: cstring): cint">SSL_set1_host(s: SslPtr; hostname: cstring): cint</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">SSL_set_accept_state
@@ -209,7 +223,15 @@
 <div class="section" id="10">
   <h1><a class="toc-backref" href="#10">Consts</a></h1>
   <dl class="item">
-    <div id="SSL_ERROR_NONE">
+    <div id="SSL_CTRL_SET_TLSEXT_HOSTNAME">
+  <dt><pre><a href="#SSL_CTRL_SET_TLSEXT_HOSTNAME"><span class="Identifier">SSL_CTRL_SET_TLSEXT_HOSTNAME</span></a> <span class="Other">=</span> <span class="DecNumber">55</span></pre></dt>
+  <dd>
+    
+    <tt class="docutils literal"><span class="pre"><span class="Identifier">SSL_set_tlsext_host_name</span></span></tt> is a macro over <tt class="docutils literal"><span class="pre"><span class="Identifier">SSL_ctrl</span></span></tt> in OpenSSL 1.1.1+/3, so it is not linkable; use SSL_ctrl with this command for SNI.
+    
+  </dd>
+</div>
+<div id="SSL_ERROR_NONE">
   <dt><pre><a href="#SSL_ERROR_NONE"><span class="Identifier">SSL_ERROR_NONE</span></a> <span class="Other">=</span> <span class="DecNumber">0</span></pre></dt>
   <dd>
     
@@ -273,16 +295,24 @@
     
   </dd>
 </div>
+<div id="SSL_VERIFY_PEER">
+  <dt><pre><a href="#SSL_VERIFY_PEER"><span class="Identifier">SSL_VERIFY_PEER</span></a> <span class="Other">=</span> <span class="DecNumber">1</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
 
   </dl>
 </div>
 <div class="section" id="12">
   <h1><a class="toc-backref" href="#12">Procs</a></h1>
   <dl class="item">
-    <div id="ERR_error_string-procs-all">
-  <div id="ERR_error_string,culong,cstring">
-  <dt><pre><span class="Keyword">proc</span> <a href="#ERR_error_string%2Cculong%2Ccstring"><span class="Identifier">ERR_error_string</span></a><span class="Other">(</span><span class="Identifier">e</span><span class="Other">:</span> <span class="Identifier">culong</span><span class="Other">;</span> <span class="Identifier">buf</span><span class="Other">:</span> <span class="Identifier">cstring</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">cstring</span> {.
-    <span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;ERR_error_string&quot;</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <div id="ERR_error_string_n-procs-all">
+  <div id="ERR_error_string_n,culong,cstring,csize_t">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ERR_error_string_n%2Cculong%2Ccstring%2Ccsize_t"><span class="Identifier">ERR_error_string_n</span></a><span class="Other">(</span><span class="Identifier">e</span><span class="Other">:</span> <span class="Identifier">culong</span><span class="Other">;</span> <span class="Identifier">buf</span><span class="Other">:</span> <span class="Identifier">cstring</span><span class="Other">;</span> <span class="Identifier">len</span><span class="Other">:</span> <span class="Identifier">csize_t</span><span class="Other">)</span> {.
+    <span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;ERR_error_string_n&quot;</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -308,7 +338,19 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#opensslError"><span class="Identifier">opensslError</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Most recent OpenSSL error from the queue, or &quot;&quot; if empty.
+    Most recent OpenSSL error from the queue, or &quot;&quot; if empty. Uses the length-bounded ERR_error_string_n (ERR_error_string's static buffer is not thread-safe, and the unbounded form can overflow a fixed buffer).
+    
+  </dd>
+</div>
+
+</div>
+<div id="SSL_ctrl-procs-all">
+  <div id="SSL_ctrl,SslPtr,cint,cint,pointer">
+  <dt><pre><span class="Keyword">proc</span> <a href="#SSL_ctrl%2CSslPtr%2Ccint%2Ccint%2Cpointer"><span class="Identifier">SSL_ctrl</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#SslPtr"><span class="Identifier">SslPtr</span></a><span class="Other">;</span> <span class="Identifier">cmd</span><span class="Other">:</span> <span class="Identifier">cint</span><span class="Other">;</span> <span class="Identifier">larg</span><span class="Other">:</span> <span class="Identifier">cint</span><span class="Other">;</span> <span class="Identifier">parg</span><span class="Other">:</span> <span class="Identifier">pointer</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">cint</span> {.
+    <span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;SSL_ctrl&quot;</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
     
   </dd>
 </div>
@@ -342,6 +384,19 @@
   <div id="SSL_CTX_new,pointer">
   <dt><pre><span class="Keyword">proc</span> <a href="#SSL_CTX_new%2Cpointer"><span class="Identifier">SSL_CTX_new</span></a><span class="Other">(</span><span class="Identifier">m</span><span class="Other">:</span> <span class="Identifier">pointer</span><span class="Other">)</span><span class="Other">:</span> <a href="#SslCtx"><span class="Identifier">SslCtx</span></a> {.<span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;SSL_CTX_new&quot;</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
                                        <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="SSL_CTX_set_default_verify_paths-procs-all">
+  <div id="SSL_CTX_set_default_verify_paths,SslCtx">
+  <dt><pre><span class="Keyword">proc</span> <a href="#SSL_CTX_set_default_verify_paths%2CSslCtx"><span class="Identifier">SSL_CTX_set_default_verify_paths</span></a><span class="Other">(</span><span class="Identifier">c</span><span class="Other">:</span> <a href="#SslCtx"><span class="Identifier">SslCtx</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">cint</span> {.
+    <span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;SSL_CTX_set_default_verify_paths&quot;</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -446,6 +501,18 @@
 </div>
 
 </div>
+<div id="SSL_set1_host-procs-all">
+  <div id="SSL_set1_host,SslPtr,cstring">
+  <dt><pre><span class="Keyword">proc</span> <a href="#SSL_set1_host%2CSslPtr%2Ccstring"><span class="Identifier">SSL_set1_host</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#SslPtr"><span class="Identifier">SslPtr</span></a><span class="Other">;</span> <span class="Identifier">hostname</span><span class="Other">:</span> <span class="Identifier">cstring</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">cint</span> {.
+    <span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;SSL_set1_host&quot;</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="SSL_set_accept_state-procs-all">
   <div id="SSL_set_accept_state,SslPtr">
   <dt><pre><span class="Keyword">proc</span> <a href="#SSL_set_accept_state%2CSslPtr"><span class="Identifier">SSL_set_accept_state</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#SslPtr"><span class="Identifier">SslPtr</span></a><span class="Other">)</span> {.<span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;SSL_set_accept_state&quot;</span><span class="Other">,</span>
@@ -540,7 +607,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:55 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:19 UTC</small>
       </div>
     </div>
   </div>

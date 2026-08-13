@@ -1,8 +1,28 @@
 nimTitle	signal	powpow/signal.html	module powpow/signal		0
-nim	ListenerHandle	powpow/signal.html#ListenerHandle	type ListenerHandle		9
-nim	SignalRelay	powpow/signal.html#SignalRelay	type SignalRelay		15
-nim	newSignalRelay	powpow/signal.html#newSignalRelay,Loop,int	proc newSignalRelay(loop: Loop; maxSignals: int): SignalRelay		20
-nim	listen	powpow/signal.html#listen,SignalRelay,int,Callback	proc listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle		27
-nim	listenOnce	powpow/signal.html#listenOnce,SignalRelay,int,Callback	proc listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle		33
-nim	unlisten	powpow/signal.html#unlisten,ListenerHandle	proc unlisten(li: ListenerHandle)		39
-nim	emit	powpow/signal.html#emit,SignalRelay,int	proc emit(relay: SignalRelay; signalId: int)		49
+nim	SignalHup	powpow/signal.html#SignalHup	OsSignal.SignalHup		39
+nim	SignalInt	powpow/signal.html#SignalInt	OsSignal.SignalInt		39
+nim	SignalQuit	powpow/signal.html#SignalQuit	OsSignal.SignalQuit		39
+nim	SignalUsr1	powpow/signal.html#SignalUsr1	OsSignal.SignalUsr1		39
+nim	SignalUsr2	powpow/signal.html#SignalUsr2	OsSignal.SignalUsr2		39
+nim	SignalPipe	powpow/signal.html#SignalPipe	OsSignal.SignalPipe		39
+nim	SignalAlarm	powpow/signal.html#SignalAlarm	OsSignal.SignalAlarm		39
+nim	SignalTerm	powpow/signal.html#SignalTerm	OsSignal.SignalTerm		39
+nim	SignalUrgent	powpow/signal.html#SignalUrgent	OsSignal.SignalUrgent		39
+nim	SignalChild	powpow/signal.html#SignalChild	OsSignal.SignalChild		39
+nim	SignalIo	powpow/signal.html#SignalIo	OsSignal.SignalIo		39
+nim	OsSignal	powpow/signal.html#OsSignal	enum OsSignal		39
+nim	signalNumber	powpow/signal.html#signalNumber,OsSignal	proc signalNumber(s: OsSignal): cint		52
+nim	ListenerHandle	powpow/signal.html#ListenerHandle	type ListenerHandle		72
+nim	newSignalRelay	powpow/signal.html#newSignalRelay,Loop,int	proc newSignalRelay(loop: Loop; maxSignals: int): SignalRelay		83
+nim	newOsSignalRelay	powpow/signal.html#newOsSignalRelay,Loop	proc newOsSignalRelay(loop: Loop): SignalRelay		90
+nim	listen	powpow/signal.html#listen,SignalRelay,int,Callback	proc listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle		94
+nim	listen	powpow/signal.html#listen,SignalRelay,OsSignal,Callback	proc listen(relay: SignalRelay; signal: OsSignal; cb: Callback): ListenerHandle		100
+nim	listenOnce	powpow/signal.html#listenOnce,SignalRelay,int,Callback	proc listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle		104
+nim	listenOnce	powpow/signal.html#listenOnce,SignalRelay,OsSignal,Callback	proc listenOnce(relay: SignalRelay; signal: OsSignal; cb: Callback): ListenerHandle		110
+nim	unlisten	powpow/signal.html#unlisten,ListenerHandle	proc unlisten(li: ListenerHandle)		113
+nim	emit	powpow/signal.html#emit,SignalRelay,int	proc emit(relay: SignalRelay; signalId: int)		123
+nim	SIG_BLOCK	powpow/signal.html#SIG_BLOCK	var SIG_BLOCK		144
+nim	watchOsSignal	powpow/signal.html#watchOsSignal,SignalRelay,OsSignal	proc watchOsSignal(relay: SignalRelay; signal: OsSignal)		342
+nim	watchOsSignals	powpow/signal.html#watchOsSignals,SignalRelay,openArray[OsSignal]	proc watchOsSignals(relay: SignalRelay; signals: openArray[OsSignal])		355
+nimgrp	listenonce	powpow/signal.html#listenOnce-procs-all	proc		104
+nimgrp	listen	powpow/signal.html#listen-procs-all	proc		94

@@ -100,6 +100,10 @@
   <li><a class="reference" href="#initNet" title="initNet()">initNet()</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">isIpAddress
+  <li><a class="reference" href="#isIpAddress%2Cstring" title="isIpAddress(address: string): bool">isIpAddress(address: string): bool</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">lastSocketError
   <li><a class="reference" href="#lastSocketError" title="lastSocketError(): cint">lastSocketError(): cint</a></li>
 
@@ -114,6 +118,12 @@
 </ul>
 <ul class="simple nested-toc-section">resolveAddr
   <li><a class="reference" href="#resolveAddr%2Cstring%2Cint%2Cint" title="resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage">resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">resolveAddrAll
+  <li><a class="reference" href="#resolveAddrAll%2Cstring%2Cint%2Cint" title="resolveAddrAll(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): seq[
+    Sockaddr_storage]">resolveAddrAll(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): seq[
+    Sockaddr_storage]</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">seekFile
@@ -148,6 +158,10 @@
 </ul>
 <ul class="simple nested-toc-section">setTcpNoDelay
   <li><a class="reference" href="#setTcpNoDelay%2CSocketHandle" title="setTcpNoDelay(fd: SocketHandle)">setTcpNoDelay(fd: SocketHandle)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">sockaddrFromIp
+  <li><a class="reference" href="#sockaddrFromIp%2Cstring%2Cint" title="sockaddrFromIp(ip: string; port: int): Sockaddr_storage">sockaddrFromIp(ip: string; port: int): Sockaddr_storage</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">sockClose
@@ -335,6 +349,17 @@
 </div>
 
 </div>
+<div id="isIpAddress-procs-all">
+  <div id="isIpAddress,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#isIpAddress%2Cstring"><span class="Identifier">isIpAddress</span></a><span class="Other">(</span><span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when <tt class="docutils literal"><span class="pre"><span class="Identifier">address</span></span></tt> is a numeric IPv4 or IPv6 literal (no DNS needed).
+    
+  </dd>
+</div>
+
+</div>
 <div id="lastSocketError-procs-all">
   <div id="lastSocketError">
   <dt><pre><span class="Keyword">proc</span> <a href="#lastSocketError"><span class="Identifier">lastSocketError</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">cint</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -376,7 +401,20 @@
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Resolve <tt class="docutils literal"><span class="pre"><span class="Identifier">address</span><span class="Punctuation">:</span><span class="Identifier">port</span></span></tt> into a <tt class="docutils literal"><span class="pre"><span class="Identifier">Sockaddr_storage</span></span></tt> ready for <tt class="docutils literal"><span class="pre"><span class="Keyword">bind</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">connect</span></span></tt>. Works for both IPv4 and IPv6.
+    Resolve <tt class="docutils literal"><span class="pre"><span class="Identifier">address</span><span class="Punctuation">:</span><span class="Identifier">port</span></span></tt> into the FIRST socket address ready for <tt class="docutils literal"><span class="pre"><span class="Keyword">bind</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">connect</span></span></tt>. Works for both IPv4 and IPv6. For multi-address fallback use <tt class="docutils literal"><span class="pre"><span class="Identifier">resolveAddrAll</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
+<div id="resolveAddrAll-procs-all">
+  <div id="resolveAddrAll,string,int,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrAll%2Cstring%2Cint%2Cint"><span class="Identifier">resolveAddrAll</span></a><span class="Other">(</span><span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">sockType</span> <span class="Other">=</span> <span class="Identifier">SOCK_STREAM</span><span class="Other">;</span>
+                    <span class="Identifier">protocol</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">Sockaddr_storage</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Resolve <tt class="docutils literal"><span class="pre"><span class="Identifier">address</span><span class="Punctuation">:</span><span class="Identifier">port</span></span></tt> into ALL returned socket addresses (walks the <tt class="docutils literal"><span class="pre"><span class="Identifier">addrinfo</span></span></tt> chain, so hosts with multiple A/AAAA records yield multiple candidates). The caller may try them in order for connect fallback.
     
   </dd>
 </div>
@@ -475,6 +513,18 @@
 </div>
 
 </div>
+<div id="sockaddrFromIp-procs-all">
+  <div id="sockaddrFromIp,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sockaddrFromIp%2Cstring%2Cint"><span class="Identifier">sockaddrFromIp</span></a><span class="Other">(</span><span class="Identifier">ip</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Sockaddr_storage</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Build a socket address from a numeric IPv4/IPv6 literal without calling getaddrinfo (which blocks on the resolver). Raises NetError otherwise.
+    
+  </dd>
+</div>
+
+</div>
 <div id="sockClose-procs-all">
   <div id="sockClose,SocketHandle">
   <dt><pre><span class="Keyword">proc</span> <a href="#sockClose%2CSocketHandle"><span class="Identifier">sockClose</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -561,7 +611,7 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Scatter-gather write. On Windows, concatenates buffers and calls send.
+    Scatter-gather write. On Windows there is no synchronous writev, so a loop of send() calls (one per iovec) would cost N syscalls vs 1 on POSIX — the HTTP response path routinely builds ~7 iovecs. Coalesce small writes into a single send() call instead.
     
   </dd>
 </div>
@@ -577,7 +627,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:55 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:19 UTC</small>
       </div>
     </div>
   </div>

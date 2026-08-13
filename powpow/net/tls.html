@@ -78,7 +78,7 @@
 
 </ul>
 <ul class="simple nested-toc-section">newClientTlsContext
-  <li><a class="reference" href="#newClientTlsContext" title="newClientTlsContext(): SslContext">newClientTlsContext(): SslContext</a></li>
+  <li><a class="reference" href="#newClientTlsContext" title="newClientTlsContext(verifyPeer = true): SslContext">newClientTlsContext(verifyPeer = true): SslContext</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">newServerTlsContext
@@ -86,7 +86,7 @@
 
 </ul>
 <ul class="simple nested-toc-section">wrapTls
-  <li><a class="reference" href="#wrapTls%2CConnection%2CSslContext" title="wrapTls(conn: Connection; ctx: SslContext)">wrapTls(conn: Connection; ctx: SslContext)</a></li>
+  <li><a class="reference" href="#wrapTls%2CConnection%2CSslContext%2Cstring" title="wrapTls(conn: Connection; ctx: SslContext; serverName = &quot;&quot;)">wrapTls(conn: Connection; ctx: SslContext; serverName = &quot;&quot;)</a></li>
 
 </ul>
 
@@ -172,11 +172,11 @@
 </div>
 <div id="newClientTlsContext-procs-all">
   <div id="newClientTlsContext">
-  <dt><pre><span class="Keyword">proc</span> <a href="#newClientTlsContext"><span class="Identifier">newClientTlsContext</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <a href="#SslContext"><span class="Identifier">SslContext</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">SslError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#newClientTlsContext"><span class="Identifier">newClientTlsContext</span></a><span class="Other">(</span><span class="Identifier">verifyPeer</span> <span class="Other">=</span> <span class="Identifier">true</span><span class="Other">)</span><span class="Other">:</span> <a href="#SslContext"><span class="Identifier">SslContext</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">SslError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Creates a client-side TLS context with peer verification disabled.
+    Creates a client-side TLS context. With <tt class="docutils literal"><span class="pre"><span class="Identifier">verifyPeer</span></span></tt> (the default) the peer certificate chain is verified against the system CA store, so untrusted / self-signed servers are rejected — set it to <tt class="docutils literal"><span class="pre"><span class="Identifier">false</span></span></tt> only for self-signed or testing servers.
     
   </dd>
 </div>
@@ -195,13 +195,14 @@
 
 </div>
 <div id="wrapTls-procs-all">
-  <div id="wrapTls,Connection,SslContext">
-  <dt><pre><span class="Keyword">proc</span> <a href="#wrapTls%2CConnection%2CSslContext"><span class="Identifier">wrapTls</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">ctx</span><span class="Other">:</span> <a href="#SslContext"><span class="Identifier">SslContext</span></a><span class="Other">)</span> {.
+  <div id="wrapTls,Connection,SslContext,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#wrapTls%2CConnection%2CSslContext%2Cstring"><span class="Identifier">wrapTls</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">ctx</span><span class="Other">:</span> <a href="#SslContext"><span class="Identifier">SslContext</span></a><span class="Other">;</span> <span class="Identifier">serverName</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">SslError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     <p>Wrap an existing connected <tt class="docutils literal"><span class="pre"><span class="Identifier">Connection</span></span></tt> in TLS and begin a non-blocking handshake. For a server this is used for implicit TLS (e.g. SMTP 465) or an in-place STARTTLS upgrade; for a client it must be called from the connect callback.</p>
+<p>For clients, pass <tt class="docutils literal"><span class="pre"><span class="Identifier">serverName</span></span></tt> (the host that was connected to) to send SNI and enforce hostname verification — the peer certificate must match it in addition to the chain.</p>
 <p>The handshake completes asynchronously on the event loop; any data sent with <tt class="docutils literal"><span class="pre"><span class="Identifier">conn</span><span class="Operator">.</span><span class="Identifier">send</span></span></tt> before it completes is buffered and flushed once TLS is active.</p>
 
     
@@ -219,7 +220,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:55 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:19 UTC</small>
       </div>
     </div>
   </div>

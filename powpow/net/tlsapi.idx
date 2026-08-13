@@ -3,30 +3,35 @@ nim	SslCtx	powpow/net/tlsapi.html#SslCtx	type SslCtx		21
 nim	SslPtr	powpow/net/tlsapi.html#SslPtr	type SslPtr		22
 nim	SSL_FILETYPE_PEM	powpow/net/tlsapi.html#SSL_FILETYPE_PEM	const SSL_FILETYPE_PEM		25
 nim	SSL_VERIFY_NONE	powpow/net/tlsapi.html#SSL_VERIFY_NONE	const SSL_VERIFY_NONE		26
-nim	SSL_ERROR_NONE	powpow/net/tlsapi.html#SSL_ERROR_NONE	const SSL_ERROR_NONE		28
-nim	SSL_ERROR_SSL	powpow/net/tlsapi.html#SSL_ERROR_SSL	const SSL_ERROR_SSL		29
-nim	SSL_ERROR_WANT_READ	powpow/net/tlsapi.html#SSL_ERROR_WANT_READ	const SSL_ERROR_WANT_READ		30
-nim	SSL_ERROR_WANT_WRITE	powpow/net/tlsapi.html#SSL_ERROR_WANT_WRITE	const SSL_ERROR_WANT_WRITE		31
-nim	SSL_ERROR_SYSCALL	powpow/net/tlsapi.html#SSL_ERROR_SYSCALL	const SSL_ERROR_SYSCALL		32
-nim	SSL_ERROR_ZERO_RETURN	powpow/net/tlsapi.html#SSL_ERROR_ZERO_RETURN	const SSL_ERROR_ZERO_RETURN		33
-nim	TLS_server_method	powpow/net/tlsapi.html#TLS_server_method	proc TLS_server_method(): pointer		35
-nim	TLS_client_method	powpow/net/tlsapi.html#TLS_client_method	proc TLS_client_method(): pointer		36
-nim	SSL_CTX_new	powpow/net/tlsapi.html#SSL_CTX_new,pointer	proc SSL_CTX_new(m: pointer): SslCtx		38
-nim	SSL_CTX_free	powpow/net/tlsapi.html#SSL_CTX_free,SslCtx	proc SSL_CTX_free(c: SslCtx)		39
-nim	SSL_CTX_use_certificate_file	powpow/net/tlsapi.html#SSL_CTX_use_certificate_file,SslCtx,cstring,cint	proc SSL_CTX_use_certificate_file(c: SslCtx; file: cstring; typ: cint): cint		40
-nim	SSL_CTX_use_PrivateKey_file	powpow/net/tlsapi.html#SSL_CTX_use_PrivateKey_file,SslCtx,cstring,cint	proc SSL_CTX_use_PrivateKey_file(c: SslCtx; file: cstring; typ: cint): cint		42
-nim	SSL_CTX_check_private_key	powpow/net/tlsapi.html#SSL_CTX_check_private_key,SslCtx	proc SSL_CTX_check_private_key(c: SslCtx): cint		44
-nim	SSL_CTX_set_verify	powpow/net/tlsapi.html#SSL_CTX_set_verify,SslCtx,cint,pointer	proc SSL_CTX_set_verify(c: SslCtx; mode: cint; cb: pointer)		46
-nim	SSL_new	powpow/net/tlsapi.html#SSL_new,SslCtx	proc SSL_new(c: SslCtx): SslPtr		49
-nim	SSL_free	powpow/net/tlsapi.html#SSL_free,SslPtr	proc SSL_free(s: SslPtr)		50
-nim	SSL_set_fd	powpow/net/tlsapi.html#SSL_set_fd,SslPtr,cint	proc SSL_set_fd(s: SslPtr; fd: cint): cint		51
-nim	SSL_set_accept_state	powpow/net/tlsapi.html#SSL_set_accept_state,SslPtr	proc SSL_set_accept_state(s: SslPtr)		52
-nim	SSL_set_connect_state	powpow/net/tlsapi.html#SSL_set_connect_state,SslPtr	proc SSL_set_connect_state(s: SslPtr)		53
-nim	SSL_do_handshake	powpow/net/tlsapi.html#SSL_do_handshake,SslPtr	proc SSL_do_handshake(s: SslPtr): cint		54
-nim	SSL_read	powpow/net/tlsapi.html#SSL_read,SslPtr,pointer,cint	proc SSL_read(s: SslPtr; buf: pointer; num: cint): cint		55
-nim	SSL_write	powpow/net/tlsapi.html#SSL_write,SslPtr,pointer,cint	proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint		56
-nim	SSL_shutdown	powpow/net/tlsapi.html#SSL_shutdown,SslPtr	proc SSL_shutdown(s: SslPtr): cint		57
-nim	SSL_get_error	powpow/net/tlsapi.html#SSL_get_error,SslPtr,cint	proc SSL_get_error(s: SslPtr; ret: cint): cint		58
-nim	ERR_get_error	powpow/net/tlsapi.html#ERR_get_error	proc ERR_get_error(): culong		60
-nim	ERR_error_string	powpow/net/tlsapi.html#ERR_error_string,culong,cstring	proc ERR_error_string(e: culong; buf: cstring): cstring		61
-nim	opensslError	powpow/net/tlsapi.html#opensslError	proc opensslError(): string		64
+nim	SSL_VERIFY_PEER	powpow/net/tlsapi.html#SSL_VERIFY_PEER	const SSL_VERIFY_PEER		27
+nim	SSL_ERROR_NONE	powpow/net/tlsapi.html#SSL_ERROR_NONE	const SSL_ERROR_NONE		29
+nim	SSL_ERROR_SSL	powpow/net/tlsapi.html#SSL_ERROR_SSL	const SSL_ERROR_SSL		30
+nim	SSL_ERROR_WANT_READ	powpow/net/tlsapi.html#SSL_ERROR_WANT_READ	const SSL_ERROR_WANT_READ		31
+nim	SSL_ERROR_WANT_WRITE	powpow/net/tlsapi.html#SSL_ERROR_WANT_WRITE	const SSL_ERROR_WANT_WRITE		32
+nim	SSL_ERROR_SYSCALL	powpow/net/tlsapi.html#SSL_ERROR_SYSCALL	const SSL_ERROR_SYSCALL		33
+nim	SSL_ERROR_ZERO_RETURN	powpow/net/tlsapi.html#SSL_ERROR_ZERO_RETURN	const SSL_ERROR_ZERO_RETURN		34
+nim	TLS_server_method	powpow/net/tlsapi.html#TLS_server_method	proc TLS_server_method(): pointer		36
+nim	TLS_client_method	powpow/net/tlsapi.html#TLS_client_method	proc TLS_client_method(): pointer		37
+nim	SSL_CTX_new	powpow/net/tlsapi.html#SSL_CTX_new,pointer	proc SSL_CTX_new(m: pointer): SslCtx		39
+nim	SSL_CTX_free	powpow/net/tlsapi.html#SSL_CTX_free,SslCtx	proc SSL_CTX_free(c: SslCtx)		40
+nim	SSL_CTX_use_certificate_file	powpow/net/tlsapi.html#SSL_CTX_use_certificate_file,SslCtx,cstring,cint	proc SSL_CTX_use_certificate_file(c: SslCtx; file: cstring; typ: cint): cint		41
+nim	SSL_CTX_use_PrivateKey_file	powpow/net/tlsapi.html#SSL_CTX_use_PrivateKey_file,SslCtx,cstring,cint	proc SSL_CTX_use_PrivateKey_file(c: SslCtx; file: cstring; typ: cint): cint		43
+nim	SSL_CTX_check_private_key	powpow/net/tlsapi.html#SSL_CTX_check_private_key,SslCtx	proc SSL_CTX_check_private_key(c: SslCtx): cint		45
+nim	SSL_CTX_set_verify	powpow/net/tlsapi.html#SSL_CTX_set_verify,SslCtx,cint,pointer	proc SSL_CTX_set_verify(c: SslCtx; mode: cint; cb: pointer)		47
+nim	SSL_CTX_set_default_verify_paths	powpow/net/tlsapi.html#SSL_CTX_set_default_verify_paths,SslCtx	proc SSL_CTX_set_default_verify_paths(c: SslCtx): cint		49
+nim	SSL_new	powpow/net/tlsapi.html#SSL_new,SslCtx	proc SSL_new(c: SslCtx): SslPtr		52
+nim	SSL_free	powpow/net/tlsapi.html#SSL_free,SslPtr	proc SSL_free(s: SslPtr)		53
+nim	SSL_set_fd	powpow/net/tlsapi.html#SSL_set_fd,SslPtr,cint	proc SSL_set_fd(s: SslPtr; fd: cint): cint		54
+nim	SSL_set_accept_state	powpow/net/tlsapi.html#SSL_set_accept_state,SslPtr	proc SSL_set_accept_state(s: SslPtr)		55
+nim	SSL_set_connect_state	powpow/net/tlsapi.html#SSL_set_connect_state,SslPtr	proc SSL_set_connect_state(s: SslPtr)		56
+nim	SSL_do_handshake	powpow/net/tlsapi.html#SSL_do_handshake,SslPtr	proc SSL_do_handshake(s: SslPtr): cint		57
+nim	SSL_read	powpow/net/tlsapi.html#SSL_read,SslPtr,pointer,cint	proc SSL_read(s: SslPtr; buf: pointer; num: cint): cint		58
+nim	SSL_write	powpow/net/tlsapi.html#SSL_write,SslPtr,pointer,cint	proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint		59
+nim	SSL_shutdown	powpow/net/tlsapi.html#SSL_shutdown,SslPtr	proc SSL_shutdown(s: SslPtr): cint		60
+nim	SSL_get_error	powpow/net/tlsapi.html#SSL_get_error,SslPtr,cint	proc SSL_get_error(s: SslPtr; ret: cint): cint		61
+nim	SSL_ctrl	powpow/net/tlsapi.html#SSL_ctrl,SslPtr,cint,cint,pointer	proc SSL_ctrl(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint		62
+nim	SSL_set1_host	powpow/net/tlsapi.html#SSL_set1_host,SslPtr,cstring	proc SSL_set1_host(s: SslPtr; hostname: cstring): cint		64
+nim	SSL_CTRL_SET_TLSEXT_HOSTNAME	powpow/net/tlsapi.html#SSL_CTRL_SET_TLSEXT_HOSTNAME	const SSL_CTRL_SET_TLSEXT_HOSTNAME		67
+nim	ERR_get_error	powpow/net/tlsapi.html#ERR_get_error	proc ERR_get_error(): culong		71
+nim	ERR_error_string_n	powpow/net/tlsapi.html#ERR_error_string_n,culong,cstring,csize_t	proc ERR_error_string_n(e: culong; buf: cstring; len: csize_t)		72
+nim	opensslError	powpow/net/tlsapi.html#opensslError	proc opensslError(): string		75

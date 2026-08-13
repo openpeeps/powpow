@@ -5,6 +5,6 @@ nim	TlsRole	powpow/net/tls.html#TlsRole	enum TlsRole		39
 nim	SslContext	powpow/net/tls.html#SslContext	type SslContext		42
 nim	SslError	powpow/net/tls.html#SslError	object SslError		46
 nim	newServerTlsContext	powpow/net/tls.html#newServerTlsContext,string,string	proc newServerTlsContext(certFile, keyFile: string): SslContext		49
-nim	newClientTlsContext	powpow/net/tls.html#newClientTlsContext	proc newClientTlsContext(): SslContext		75
-nim	wrapTls	powpow/net/tls.html#wrapTls,Connection,SslContext	proc wrapTls(conn: Connection; ctx: SslContext)		87
-nim	isTlsActive	powpow/net/tls.html#isTlsActive,Connection	proc isTlsActive(conn: Connection): bool		116
+nim	newClientTlsContext	powpow/net/tls.html#newClientTlsContext	proc newClientTlsContext(verifyPeer = true): SslContext		75
+nim	wrapTls	powpow/net/tls.html#wrapTls,Connection,SslContext,string	proc wrapTls(conn: Connection; ctx: SslContext; serverName = "")		95
+nim	isTlsActive	powpow/net/tls.html#isTlsActive,Connection	proc isTlsActive(conn: Connection): bool		132

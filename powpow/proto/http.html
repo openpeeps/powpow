@@ -78,7 +78,9 @@
   bodyStreamed*: int64       ## Bytes streamed via callback so far
   streamingBody*: bool       ## true when body is being streamed to callback
   methodCache*: HttpMethod
-  phase*: ParsePhase">HttpParser</a></li>
+  phase*: ParsePhase
+  responseMode*: bool
+  statusCode*: HttpCode">HttpParser</a></li>
 <li><a class="reference" href="#HttpRequest" title="HttpRequest = ref object
   parser*: HttpParser
   httpMethod*: HttpMethod
@@ -134,8 +136,13 @@
 <li><a class="reference" href="#feed%2CHttpParser%2Cstring" title="feed(p: HttpParser; data: string): ParsePhase">feed(p: HttpParser; data: string): ParsePhase</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">finalizeCloseDelimited
+  <li><a class="reference" href="#finalizeCloseDelimited%2CHttpParser" title="finalizeCloseDelimited(p: HttpParser)">finalizeCloseDelimited(p: HttpParser)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">getBody
-  <li><a class="reference" href="#getBody%2CHttpRequest" title="getBody(req: HttpRequest): seq[byte]">getBody(req: HttpRequest): seq[byte]</a></li>
+  <li><a class="reference" href="#getBody%2CHttpParser" title="getBody(p: HttpParser): seq[byte]">getBody(p: HttpParser): seq[byte]</a></li>
+<li><a class="reference" href="#getBody%2CHttpRequest" title="getBody(req: HttpRequest): seq[byte]">getBody(req: HttpRequest): seq[byte]</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getBodyStream
@@ -155,15 +162,22 @@
 
 </ul>
 <ul class="simple nested-toc-section">getConnectionClose
-  <li><a class="reference" href="#getConnectionClose%2CHttpRequest" title="getConnectionClose(req: HttpRequest): bool">getConnectionClose(req: HttpRequest): bool</a></li>
+  <li><a class="reference" href="#getConnectionClose%2CHttpParser" title="getConnectionClose(p: HttpParser): bool">getConnectionClose(p: HttpParser): bool</a></li>
+<li><a class="reference" href="#getConnectionClose%2CHttpRequest" title="getConnectionClose(req: HttpRequest): bool">getConnectionClose(req: HttpRequest): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getContentLength
-  <li><a class="reference" href="#getContentLength%2CHttpRequest" title="getContentLength(req: HttpRequest): int">getContentLength(req: HttpRequest): int</a></li>
+  <li><a class="reference" href="#getContentLength%2CHttpParser" title="getContentLength(p: HttpParser): int">getContentLength(p: HttpParser): int</a></li>
+<li><a class="reference" href="#getContentLength%2CHttpRequest" title="getContentLength(req: HttpRequest): int">getContentLength(req: HttpRequest): int</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getHeaders
-  <li><a class="reference" href="#getHeaders%2CHttpRequest" title="getHeaders(req: HttpRequest): HttpHeaders">getHeaders(req: HttpRequest): HttpHeaders</a></li>
+  <li><a class="reference" href="#getHeaders%2CHttpParser" title="getHeaders(p: HttpParser): HttpHeaders">getHeaders(p: HttpParser): HttpHeaders</a></li>
+<li><a class="reference" href="#getHeaders%2CHttpRequest" title="getHeaders(req: HttpRequest): HttpHeaders">getHeaders(req: HttpRequest): HttpHeaders</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">getHttpMinor
+  <li><a class="reference" href="#getHttpMinor%2CHttpParser" title="getHttpMinor(p: HttpParser): int">getHttpMinor(p: HttpParser): int</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getMethod
@@ -190,12 +204,28 @@
   <li><a class="reference" href="#getRequest%2CHttpParser" title="getRequest(p: HttpParser): HttpRequest">getRequest(p: HttpParser): HttpRequest</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">getStatusCode
+  <li><a class="reference" href="#getStatusCode%2CHttpParser" title="getStatusCode(p: HttpParser): HttpCode">getStatusCode(p: HttpParser): HttpCode</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">getStatusText
+  <li><a class="reference" href="#getStatusText%2CHttpParser" title="getStatusText(p: HttpParser): lent string">getStatusText(p: HttpParser): lent string</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">getUrl
   <li><a class="reference" href="#getUrl%2CHttpRequest" title="getUrl(req: HttpRequest): lent string">getUrl(req: HttpRequest): lent string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">headerBytes
   <li><a class="reference" href="#headerBytes%2CHttpRequest" title="headerBytes(req: HttpRequest): int">headerBytes(req: HttpRequest): int</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">headersDone
+  <li><a class="reference" href="#headersDone%2CHttpParser" title="headersDone(p: HttpParser): bool">headersDone(p: HttpParser): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">isChunked
+  <li><a class="reference" href="#isChunked%2CHttpParser" title="isChunked(p: HttpParser): bool">isChunked(p: HttpParser): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">isComplete
@@ -330,7 +360,9 @@
   <span class="Identifier">bodyStreamed</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>       <span class="Comment">## Bytes streamed via callback so far</span>
   <span class="Identifier">streamingBody</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>       <span class="Comment">## true when body is being streamed to callback</span>
   <span class="Identifier">methodCache</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpMethod</span>
-  <span class="Identifier">phase</span><span class="Operator">*</span><span class="Other">:</span> <a href="#ParsePhase"><span class="Identifier">ParsePhase</span></a></pre></dt>
+  <span class="Identifier">phase</span><span class="Operator">*</span><span class="Other">:</span> <a href="#ParsePhase"><span class="Identifier">ParsePhase</span></a>
+  <span class="Identifier">responseMode</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">statusCode</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">HttpCode</span></pre></dt>
   <dd>
     
     Incremental HTTP/1.1 request parser.
@@ -479,8 +511,27 @@
 </div>
 
 </div>
+<div id="finalizeCloseDelimited-procs-all">
+  <div id="finalizeCloseDelimited,HttpParser">
+  <dt><pre><span class="Keyword">proc</span> <a href="#finalizeCloseDelimited%2CHttpParser"><span class="Identifier">finalizeCloseDelimited</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    For a response without Content-Length / Transfer-Encoding whose body is delimited by connection close, promote every buffered byte after the header section to the body. Call when the peer closes the connection and the response was otherwise complete.
+    
+  </dd>
+</div>
+
+</div>
 <div id="getBody-procs-all">
-  <div id="getBody,HttpRequest">
+  <div id="getBody,HttpParser">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getBody%2CHttpParser"><span class="Identifier">getBody</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Get the response body. Returns empty seq if no body.
+    
+  </dd>
+</div>
+<div id="getBody,HttpRequest">
   <dt><pre><span class="Keyword">proc</span> <a href="#getBody%2CHttpRequest"><span class="Identifier">getBody</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -540,7 +591,16 @@
 
 </div>
 <div id="getConnectionClose-procs-all">
-  <div id="getConnectionClose,HttpRequest">
+  <div id="getConnectionClose,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#getConnectionClose%2CHttpParser"><span class="Identifier">getConnectionClose</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="getConnectionClose,HttpRequest">
   <dt><pre><span class="Keyword">func</span> <a href="#getConnectionClose%2CHttpRequest"><span class="Identifier">getConnectionClose</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -552,7 +612,16 @@
 
 </div>
 <div id="getContentLength-procs-all">
-  <div id="getContentLength,HttpRequest">
+  <div id="getContentLength,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#getContentLength%2CHttpParser"><span class="Identifier">getContentLength</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="getContentLength,HttpRequest">
   <dt><pre><span class="Keyword">func</span> <a href="#getContentLength%2CHttpRequest"><span class="Identifier">getContentLength</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -564,9 +633,30 @@
 
 </div>
 <div id="getHeaders-procs-all">
-  <div id="getHeaders,HttpRequest">
+  <div id="getHeaders,HttpParser">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getHeaders%2CHttpParser"><span class="Identifier">getHeaders</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">HttpHeaders</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Materialize the response headers (response mode).
+    
+  </dd>
+</div>
+<div id="getHeaders,HttpRequest">
   <dt><pre><span class="Keyword">proc</span> <a href="#getHeaders%2CHttpRequest"><span class="Identifier">getHeaders</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">HttpHeaders</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="getHttpMinor-procs-all">
+  <div id="getHttpMinor,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#getHttpMinor%2CHttpParser"><span class="Identifier">getHttpMinor</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                        <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -650,6 +740,30 @@
 </div>
 
 </div>
+<div id="getStatusCode-procs-all">
+  <div id="getStatusCode,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#getStatusCode%2CHttpParser"><span class="Identifier">getStatusCode</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">HttpCode</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="getStatusText-procs-all">
+  <div id="getStatusText,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#getStatusText%2CHttpParser"><span class="Identifier">getStatusText</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="getUrl-procs-all">
   <div id="getUrl,HttpRequest">
   <dt><pre><span class="Keyword">proc</span> <a href="#getUrl%2CHttpRequest"><span class="Identifier">getUrl</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -665,6 +779,29 @@
   <div id="headerBytes,HttpRequest">
   <dt><pre><span class="Keyword">func</span> <a href="#headerBytes%2CHttpRequest"><span class="Identifier">headerBytes</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="headersDone-procs-all">
+  <div id="headersDone,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#headersDone%2CHttpParser"><span class="Identifier">headersDone</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                        <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="isChunked-procs-all">
+  <div id="isChunked,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#isChunked%2CHttpParser"><span class="Identifier">isChunked</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -891,7 +1028,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:56 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
       </div>
     </div>
   </div>

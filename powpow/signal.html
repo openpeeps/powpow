@@ -62,7 +62,27 @@
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#ListenerHandle" title="ListenerHandle = ref object">ListenerHandle</a></li>
-<li><a class="reference" href="#SignalRelay" title="SignalRelay = ref object">SignalRelay</a></li>
+<li><a class="reference" href="#OsSignal" title="OsSignal = enum
+  SignalHup = 1,            ## SIGHUP  — hangup / daemon reload
+  SignalInt = 2,            ## SIGINT  — Ctrl+C
+  SignalQuit = 3,           ## SIGQUIT — Ctrl+\
+  SignalUsr1 = 10,          ## SIGUSR1 — user-defined 1 (Linux 10, macOS/BSD 30)
+  SignalUsr2 = 12,          ## SIGUSR2 — user-defined 2 (Linux 12, macOS/BSD 31)
+  SignalPipe = 13,          ## SIGPIPE — write to a closed pipe/socket (SIG_IGN by default in powpow)
+  SignalAlarm = 14,         ## SIGALRM — alarm clock
+  SignalTerm = 15,          ## SIGTERM — termination request
+  SignalUrgent = 16,        ## SIGURG  — urgent data on a socket
+  SignalChild = 17,         ## SIGCHLD — child stopped/exited (Linux 17, macOS/BSD 20)
+  SignalIo = 29              ## SIGIO   — async I/O ready (Linux 29, macOS/BSD 23)">OsSignal</a></li>
+
+    </ul>
+  </details>
+</li>
+<li>
+  <details open>
+    <summary><a class="reference reference-toplevel" href="#8" id="58">Vars</a></summary>
+    <ul class="simple simple-toc-section">
+      <li><a class="reference" href="#SIG_BLOCK" title="SIG_BLOCK {.importc: &quot;SIG_BLOCK&quot;, header: &quot;&lt;signal.h&gt;&quot;.}: cint">SIG_BLOCK</a></li>
 
     </ul>
   </details>
@@ -76,19 +96,37 @@
 
 </ul>
 <ul class="simple nested-toc-section">listen
-  <li><a class="reference" href="#listen%2CSignalRelay%2Cint%2CCallback" title="listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle">listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle</a></li>
+  <li><a class="reference" href="#listen%2CSignalRelay%2COsSignal%2CCallback" title="listen(relay: SignalRelay; signal: OsSignal; cb: Callback): ListenerHandle">listen(relay: SignalRelay; signal: OsSignal; cb: Callback): ListenerHandle</a></li>
+<li><a class="reference" href="#listen%2CSignalRelay%2Cint%2CCallback" title="listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle">listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">listenOnce
-  <li><a class="reference" href="#listenOnce%2CSignalRelay%2Cint%2CCallback" title="listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle">listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle</a></li>
+  <li><a class="reference" href="#listenOnce%2CSignalRelay%2COsSignal%2CCallback" title="listenOnce(relay: SignalRelay; signal: OsSignal; cb: Callback): ListenerHandle">listenOnce(relay: SignalRelay; signal: OsSignal; cb: Callback): ListenerHandle</a></li>
+<li><a class="reference" href="#listenOnce%2CSignalRelay%2Cint%2CCallback" title="listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle">listenOnce(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">newOsSignalRelay
+  <li><a class="reference" href="#newOsSignalRelay%2CLoop" title="newOsSignalRelay(loop: Loop): SignalRelay">newOsSignalRelay(loop: Loop): SignalRelay</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">newSignalRelay
   <li><a class="reference" href="#newSignalRelay%2CLoop%2Cint" title="newSignalRelay(loop: Loop; maxSignals: int): SignalRelay">newSignalRelay(loop: Loop; maxSignals: int): SignalRelay</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">signalNumber
+  <li><a class="reference" href="#signalNumber%2COsSignal" title="signalNumber(s: OsSignal): cint">signalNumber(s: OsSignal): cint</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">unlisten
   <li><a class="reference" href="#unlisten%2CListenerHandle" title="unlisten(li: ListenerHandle)">unlisten(li: ListenerHandle)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">watchOsSignal
+  <li><a class="reference" href="#watchOsSignal%2CSignalRelay%2COsSignal" title="watchOsSignal(relay: SignalRelay; signal: OsSignal)">watchOsSignal(relay: SignalRelay; signal: OsSignal)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">watchOsSignals
+  <li><a class="reference" href="#watchOsSignals%2CSignalRelay%2CopenArray%5BOsSignal%5D" title="watchOsSignals(relay: SignalRelay; signals: openArray[OsSignal])">watchOsSignals(relay: SignalRelay; signals: openArray[OsSignal])</a></li>
 
 </ul>
 
@@ -103,7 +141,18 @@
     
     <div id="tocRoot"></div>
     
-    <p class="module-desc"></p>
+    <p class="module-desc"><p>powpow/signal.nim — In-process signal/event relay AND OS signal delivery.</p>
+<p><tt class="docutils literal"><span class="pre"><span class="Identifier">SignalRelay</span></span></tt> is a small pub/sub bus: <tt class="docutils literal"><span class="pre"><span class="Identifier">relay</span><span class="Operator">.</span><span class="Identifier">emit</span><span class="Punctuation">(</span><span class="Identifier">signalId</span><span class="Punctuation">)</span></span></tt> defers the subscribed callbacks onto the event loop (safe to call from any callback).</p>
+<p><tt class="docutils literal"><span class="pre"><span class="Identifier">watchOsSignal</span></span></tt> bridges real OS signals (SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGUSR1/2, SIGIO, SIGCHLD, ...) into the relay, so</p>
+<p>let relay = newOsSignalRelay(loop) discard relay.listen(SignalInt) do (): loop.stop() relay.watchOsSignals(<a class="reference internal" href="#SignalInt, SignalTerm">SignalInt, SignalTerm</a>)</p>
+<p>delivers those signals through the loop instead of the default action. Delivery is platform-native, with no global signal handlers:</p>
+<ul class="simple"><li>Linux:        signalfd (the signals are blocked and queued to an fd)</li>
+<li>macOS / BSD:  self-pipe — a minimal async-signal-safe sigaction handler forwards the signal through a pipe registered on the loop (the same approach libuv uses; kqueue EVFILT_SIGNAL proved unreliable for a second blocked+pending signal)</li>
+<li>other POSIX:  self-pipe (as above)</li>
+<li>Windows:      SetConsoleCtrlHandler maps Ctrl+C to a synthetic SIGINT</li>
+</ul>
+<p>SIGKILL / SIGSTOP cannot be caught; SIGSEGV / SIGABRT / SIGILL / SIGFPE / SIGBUS / SIGTRAP are intentionally not exposed (they indicate bugs and should crash).</p>
+</p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
   <dl class="item">
@@ -121,8 +170,33 @@
     
   </dd>
 </div>
-<div id="SignalRelay">
-  <dt><pre><a href="#SignalRelay"><span class="Identifier">SignalRelay</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
+<div id="OsSignal">
+  <dt><pre><a href="#OsSignal"><span class="Identifier">OsSignal</span></a> <span class="Other">=</span> <span class="Keyword">enum</span>
+  <span class="Identifier">SignalHup</span> <span class="Other">=</span> <span class="DecNumber">1</span><span class="Other">,</span>            <span class="Comment">## SIGHUP  — hangup / daemon reload</span>
+  <span class="Identifier">SignalInt</span> <span class="Other">=</span> <span class="DecNumber">2</span><span class="Other">,</span>            <span class="Comment">## SIGINT  — Ctrl+C</span>
+  <span class="Identifier">SignalQuit</span> <span class="Other">=</span> <span class="DecNumber">3</span><span class="Other">,</span>           <span class="Comment">## SIGQUIT — Ctrl+\</span>
+  <span class="Identifier">SignalUsr1</span> <span class="Other">=</span> <span class="DecNumber">10</span><span class="Other">,</span>          <span class="Comment">## SIGUSR1 — user-defined 1 (Linux 10, macOS/BSD 30)</span>
+  <span class="Identifier">SignalUsr2</span> <span class="Other">=</span> <span class="DecNumber">12</span><span class="Other">,</span>          <span class="Comment">## SIGUSR2 — user-defined 2 (Linux 12, macOS/BSD 31)</span>
+  <span class="Identifier">SignalPipe</span> <span class="Other">=</span> <span class="DecNumber">13</span><span class="Other">,</span>          <span class="Comment">## SIGPIPE — write to a closed pipe/socket (SIG_IGN by default in powpow)</span>
+  <span class="Identifier">SignalAlarm</span> <span class="Other">=</span> <span class="DecNumber">14</span><span class="Other">,</span>         <span class="Comment">## SIGALRM — alarm clock</span>
+  <span class="Identifier">SignalTerm</span> <span class="Other">=</span> <span class="DecNumber">15</span><span class="Other">,</span>          <span class="Comment">## SIGTERM — termination request</span>
+  <span class="Identifier">SignalUrgent</span> <span class="Other">=</span> <span class="DecNumber">16</span><span class="Other">,</span>        <span class="Comment">## SIGURG  — urgent data on a socket</span>
+  <span class="Identifier">SignalChild</span> <span class="Other">=</span> <span class="DecNumber">17</span><span class="Other">,</span>         <span class="Comment">## SIGCHLD — child stopped/exited (Linux 17, macOS/BSD 20)</span>
+  <span class="Identifier">SignalIo</span> <span class="Other">=</span> <span class="DecNumber">29</span>              <span class="Comment">## SIGIO   — async I/O ready (Linux 29, macOS/BSD 23)</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+  </dl>
+</div>
+<div class="section" id="8">
+  <h1><a class="toc-backref" href="#8">Vars</a></h1>
+  <dl class="item">
+    <div id="SIG_BLOCK">
+  <dt><pre><a href="#SIG_BLOCK"><span class="Identifier">SIG_BLOCK</span></a> {.<span class="Identifier">importc</span><span class="Other">:</span> <span class="StringLit">&quot;SIG_BLOCK&quot;</span><span class="Other">,</span> <span class="Identifier">header</span><span class="Other">:</span> <span class="StringLit">&quot;&lt;signal.h&gt;&quot;</span>.}<span class="Other">:</span> <span class="Identifier">cint</span></pre></dt>
   <dd>
     
     
@@ -137,7 +211,7 @@
   <dl class="item">
     <div id="emit-procs-all">
   <div id="emit,SignalRelay,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#emit%2CSignalRelay%2Cint"><span class="Identifier">emit</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <a href="#SignalRelay"><span class="Identifier">SignalRelay</span></a><span class="Other">;</span> <span class="Identifier">signalId</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#emit%2CSignalRelay%2Cint"><span class="Identifier">emit</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span><span class="Other">;</span> <span class="Identifier">signalId</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -147,8 +221,17 @@
 
 </div>
 <div id="listen-procs-all">
-  <div id="listen,SignalRelay,int,Callback">
-  <dt><pre><span class="Keyword">proc</span> <a href="#listen%2CSignalRelay%2Cint%2CCallback"><span class="Identifier">listen</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <a href="#SignalRelay"><span class="Identifier">SignalRelay</span></a><span class="Other">;</span> <span class="Identifier">signalId</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#Callback"><span class="Identifier">Callback</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#ListenerHandle"><span class="Identifier">ListenerHandle</span></a> {.
+  <div id="listen,SignalRelay,OsSignal,Callback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#listen%2CSignalRelay%2COsSignal%2CCallback"><span class="Identifier">listen</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span><span class="Other">;</span> <span class="Identifier">signal</span><span class="Other">:</span> <a href="#OsSignal"><span class="Identifier">OsSignal</span></a><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#Callback"><span class="Identifier">Callback</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#ListenerHandle"><span class="Identifier">ListenerHandle</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Listen to an OS signal (maps to the platform's numeric signal value).
+    
+  </dd>
+</div>
+<div id="listen,SignalRelay,int,Callback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#listen%2CSignalRelay%2Cint%2CCallback"><span class="Identifier">listen</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span><span class="Other">;</span> <span class="Identifier">signalId</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#Callback"><span class="Identifier">Callback</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#ListenerHandle"><span class="Identifier">ListenerHandle</span></a> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -159,8 +242,17 @@
 
 </div>
 <div id="listenOnce-procs-all">
-  <div id="listenOnce,SignalRelay,int,Callback">
-  <dt><pre><span class="Keyword">proc</span> <a href="#listenOnce%2CSignalRelay%2Cint%2CCallback"><span class="Identifier">listenOnce</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <a href="#SignalRelay"><span class="Identifier">SignalRelay</span></a><span class="Other">;</span> <span class="Identifier">signalId</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#Callback"><span class="Identifier">Callback</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#ListenerHandle"><span class="Identifier">ListenerHandle</span></a> {.
+  <div id="listenOnce,SignalRelay,OsSignal,Callback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#listenOnce%2CSignalRelay%2COsSignal%2CCallback"><span class="Identifier">listenOnce</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span><span class="Other">;</span> <span class="Identifier">signal</span><span class="Other">:</span> <a href="#OsSignal"><span class="Identifier">OsSignal</span></a><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#Callback"><span class="Identifier">Callback</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#ListenerHandle"><span class="Identifier">ListenerHandle</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="listenOnce,SignalRelay,int,Callback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#listenOnce%2CSignalRelay%2Cint%2CCallback"><span class="Identifier">listenOnce</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span><span class="Other">;</span> <span class="Identifier">signalId</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#Callback"><span class="Identifier">Callback</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#ListenerHandle"><span class="Identifier">ListenerHandle</span></a> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -170,13 +262,36 @@
 </div>
 
 </div>
+<div id="newOsSignalRelay-procs-all">
+  <div id="newOsSignalRelay,Loop">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newOsSignalRelay%2CLoop"><span class="Identifier">newOsSignalRelay</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    A relay sized to cover real OS signal numbers (including SIGTERM = 15).
+    
+  </dd>
+</div>
+
+</div>
 <div id="newSignalRelay-procs-all">
   <div id="newSignalRelay,Loop,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#newSignalRelay%2CLoop%2Cint"><span class="Identifier">newSignalRelay</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">maxSignals</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <a href="#SignalRelay"><span class="Identifier">SignalRelay</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#newSignalRelay%2CLoop%2Cint"><span class="Identifier">newSignalRelay</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">maxSignals</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="signalNumber-procs-all">
+  <div id="signalNumber,OsSignal">
+  <dt><pre><span class="Keyword">proc</span> <a href="#signalNumber%2COsSignal"><span class="Identifier">signalNumber</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#OsSignal"><span class="Identifier">OsSignal</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">cint</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Numeric signal value on the current platform.
     
   </dd>
 </div>
@@ -193,6 +308,30 @@
 </div>
 
 </div>
+<div id="watchOsSignal-procs-all">
+  <div id="watchOsSignal,SignalRelay,OsSignal">
+  <dt><pre><span class="Keyword">proc</span> <a href="#watchOsSignal%2CSignalRelay%2COsSignal"><span class="Identifier">watchOsSignal</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span><span class="Other">;</span> <span class="Identifier">signal</span><span class="Other">:</span> <a href="#OsSignal"><span class="Identifier">OsSignal</span></a><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Deliver the OS signal <tt class="docutils literal"><span class="pre"><span class="Identifier">signal</span></span></tt> to <tt class="docutils literal"><span class="pre"><span class="Identifier">relay</span></span></tt> (as <tt class="docutils literal"><span class="pre"><span class="Identifier">relay</span><span class="Operator">.</span><span class="Identifier">emit</span><span class="Punctuation">(</span><span class="Identifier">signal</span><span class="Punctuation">)</span></span></tt> on the loop). Idempotent. Requires a relay sized past the numeric signal value — <tt class="docutils literal"><span class="pre"><span class="Identifier">newOsSignalRelay</span></span></tt> covers all signals.
+    
+  </dd>
+</div>
+
+</div>
+<div id="watchOsSignals-procs-all">
+  <div id="watchOsSignals,SignalRelay,openArray[OsSignal]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#watchOsSignals%2CSignalRelay%2CopenArray%5BOsSignal%5D"><span class="Identifier">watchOsSignals</span></a><span class="Other">(</span><span class="Identifier">relay</span><span class="Other">:</span> <span class="Identifier">SignalRelay</span><span class="Other">;</span> <span class="Identifier">signals</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><a href="#OsSignal"><span class="Identifier">OsSignal</span></a><span class="Other">]</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Deliver each OS signal in <tt class="docutils literal"><span class="pre"><span class="Identifier">signals</span></span></tt> to <tt class="docutils literal"><span class="pre"><span class="Identifier">relay</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
 
   </dl>
 </div>
@@ -203,7 +342,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:56 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
       </div>
     </div>
   </div>

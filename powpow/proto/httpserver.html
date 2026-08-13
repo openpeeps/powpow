@@ -63,7 +63,10 @@
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#ConnHttp" title="ConnHttp = ref object">ConnHttp</a></li>
-<li><a class="reference" href="#HttpResponse" title="HttpResponse = ref object">HttpResponse</a></li>
+<li><a class="reference" href="#HttpResponse" title="HttpResponse = ref object
+  server*: HttpServer ## owning server (set on acquire) — used by
+                      ## `websocketUpgrade` to detach the connection from the HTTP session
+                      ## tracking / timeout sweep when the caller omits the `server` argument">HttpResponse</a></li>
 <li><a class="reference" href="#HttpServer" title="HttpServer = ref object
   handler*: OnRequestCallback
   sslCtx*: tls.SslContext
@@ -238,11 +241,11 @@
 
 </ul>
 <ul class="simple nested-toc-section">wsPoolAdd
-  <li><a class="reference" href="#wsPoolAdd%2CHttpServer%2Cpointer" title="wsPoolAdd(server: HttpServer; ws: pointer)">wsPoolAdd(server: HttpServer; ws: pointer)</a></li>
+  <li><a class="reference" href="#wsPoolAdd%2CHttpServer%2Cref.RootObj" title="wsPoolAdd(server: HttpServer; ws: ref RootObj)">wsPoolAdd(server: HttpServer; ws: ref RootObj)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">wsPoolPop
-  <li><a class="reference" href="#wsPoolPop%2CHttpServer" title="wsPoolPop(server: HttpServer): pointer">wsPoolPop(server: HttpServer): pointer</a></li>
+  <li><a class="reference" href="#wsPoolPop%2CHttpServer" title="wsPoolPop(server: HttpServer): ref RootObj">wsPoolPop(server: HttpServer): ref RootObj</a></li>
 
 </ul>
 
@@ -286,7 +289,10 @@
   </dd>
 </div>
 <div id="HttpResponse">
-  <dt><pre><a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
+  <dt><pre><a href="#HttpResponse"><span class="Identifier">HttpResponse</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
+  <span class="Identifier">server</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a> <span class="Comment">## owning server (set on acquire) — used by</span>
+                      <span class="Comment">## `websocketUpgrade` to detach the connection from the HTTP session</span>
+                      <span class="Comment">## tracking / timeout sweep when the caller omits the `server` argument</span></pre></dt>
   <dd>
     
     Build and send an HTTP response.
@@ -603,7 +609,7 @@
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Send an error response and close the connection.
+    Send an error response and close the connection. When no <tt class="docutils literal"><span class="pre"><span class="Identifier">msg</span></span></tt> is given, the body defaults to the status code's reason phrase (statusText).
     
   </dd>
 </div>
@@ -747,9 +753,9 @@
 
 </div>
 <div id="wsPoolAdd-procs-all">
-  <div id="wsPoolAdd,HttpServer,pointer">
-  <dt><pre><span class="Keyword">proc</span> <a href="#wsPoolAdd%2CHttpServer%2Cpointer"><span class="Identifier">wsPoolAdd</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">ws</span><span class="Other">:</span> <span class="Identifier">pointer</span><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="wsPoolAdd,HttpServer,ref.RootObj">
+  <dt><pre><span class="Keyword">proc</span> <a href="#wsPoolAdd%2CHttpServer%2Cref.RootObj"><span class="Identifier">wsPoolAdd</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">ws</span><span class="Other">:</span> <span class="Keyword">ref</span> <span class="Identifier">RootObj</span><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Return an idle WebSocket connection to the pool (dropped when full).
@@ -760,11 +766,11 @@
 </div>
 <div id="wsPoolPop-procs-all">
   <div id="wsPoolPop,HttpServer">
-  <dt><pre><span class="Keyword">proc</span> <a href="#wsPoolPop%2CHttpServer"><span class="Identifier">wsPoolPop</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">pointer</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#wsPoolPop%2CHttpServer"><span class="Identifier">wsPoolPop</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Keyword">ref</span> <span class="Identifier">RootObj</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Pop an idle WebSocket connection from the pool, or nil when empty. Kept opaque (<tt class="docutils literal"><span class="pre"><span class="Identifier">pointer</span></span></tt>) so httpserver does not need to know WsConnection.
+    Pop an idle WebSocket connection from the pool, or nil when empty. Kept opaque (<tt class="docutils literal"><span class="pre"><span class="Keyword">ref</span> <span class="Identifier">RootObj</span></span></tt>) so httpserver does not need to know WsConnection.
     
   </dd>
 </div>
@@ -780,7 +786,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:56 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
       </div>
     </div>
   </div>

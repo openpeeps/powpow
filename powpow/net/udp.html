@@ -91,7 +91,9 @@
 
 </ul>
 <ul class="simple nested-toc-section">sendTo
-  <li><a class="reference" href="#sendTo%2CUdpSocket%2CopenArray%5Bbyte%5D%2Cstring%2Cint" title="sendTo(sock: UdpSocket; data: openArray[byte]; address: string; port: int): int">sendTo(sock: UdpSocket; data: openArray[byte]; address: string; port: int): int</a></li>
+  <li><a class="reference" href="#sendTo%2CUdpSocket%2CopenArray%5Bbyte%5D%2CSockaddr_storage" title="sendTo(sock: UdpSocket; data: openArray[byte]; addrBuf: Sockaddr_storage): int">sendTo(sock: UdpSocket; data: openArray[byte]; addrBuf: Sockaddr_storage): int</a></li>
+<li><a class="reference" href="#sendTo%2CUdpSocket%2CopenArray%5Bbyte%5D%2Cstring%2Cint" title="sendTo(sock: UdpSocket; data: openArray[byte]; address: string; port: int): int">sendTo(sock: UdpSocket; data: openArray[byte]; address: string; port: int): int</a></li>
+<li><a class="reference" href="#sendTo%2CUdpSocket%2Cstring%2CSockaddr_storage" title="sendTo(sock: UdpSocket; data: string; addrBuf: Sockaddr_storage): int">sendTo(sock: UdpSocket; data: string; addrBuf: Sockaddr_storage): int</a></li>
 <li><a class="reference" href="#sendTo%2CUdpSocket%2Cstring%2Cstring%2Cint" title="sendTo(sock: UdpSocket; data: string; address: string; port: int): int">sendTo(sock: UdpSocket; data: string; address: string; port: int): int</a></li>
 
 </ul>
@@ -198,9 +200,27 @@
 
 </div>
 <div id="sendTo-procs-all">
-  <div id="sendTo,UdpSocket,openArray[byte],string,int">
+  <div id="sendTo,UdpSocket,openArray[byte],Sockaddr_storage">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sendTo%2CUdpSocket%2CopenArray%5Bbyte%5D%2CSockaddr_storage"><span class="Identifier">sendTo</span></a><span class="Other">(</span><span class="Identifier">sock</span><span class="Other">:</span> <a href="#UdpSocket"><span class="Identifier">UdpSocket</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">addrBuf</span><span class="Other">:</span> <span class="Identifier">Sockaddr_storage</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.
+    <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Send a datagram to an already-resolved peer address (no re-resolution).
+    
+  </dd>
+</div>
+<div id="sendTo,UdpSocket,openArray[byte],string,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#sendTo%2CUdpSocket%2CopenArray%5Bbyte%5D%2Cstring%2Cint"><span class="Identifier">sendTo</span></a><span class="Other">(</span><span class="Identifier">sock</span><span class="Other">:</span> <a href="#UdpSocket"><span class="Identifier">UdpSocket</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.
     <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="sendTo,UdpSocket,string,Sockaddr_storage">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sendTo%2CUdpSocket%2Cstring%2CSockaddr_storage"><span class="Identifier">sendTo</span></a><span class="Other">(</span><span class="Identifier">sock</span><span class="Other">:</span> <a href="#UdpSocket"><span class="Identifier">UdpSocket</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">addrBuf</span><span class="Other">:</span> <span class="Identifier">Sockaddr_storage</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.
+    <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -228,7 +248,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-10 09:40:55 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
       </div>
     </div>
   </div>
