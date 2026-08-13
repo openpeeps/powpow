@@ -843,7 +843,8 @@ proc listen*(wss: WsServer, address: string, port: int) =
         wss.conns[fd] = ws
 
         # Re-register fd for raw WebSocket frame handling
-        conn.loop.unregister(fd)
+        # Re-register in place (register() replaces the existing watcher; an
+        # unregister first would orphan the in-flight WSARecv on Windows/IOCP).
         conn.loop.register(fd, {Read}, edgeTriggered = true,
           callback = proc(efd: int, ev: set[EventType]) =
             if ws.conn == nil: return
@@ -1030,8 +1031,8 @@ proc websocketUpgrade*(
       ws.armIdleTimeout()
 
     # Re-register the fd for raw WebSocket frame handling.
-    # We need to unregister the old HTTP handler first.
-    conn.loop.unregister(conn.fd.int)
+    # register() replaces the existing watcher; unregistering first would
+    # orphan the in-flight WSARecv on Windows/IOCP and lose the first frame.
     conn.loop.register(conn.fd.int, {Read}, edgeTriggered = true,
       callback = proc(fd: int, ev: set[EventType]) =
         # The ws may already be released (conn detached) if a stale event slips
@@ -1199,7 +1200,6 @@ proc registerClientFd(ws: WsConnection) =
   ## connection is established. Drives the handshake to completion, then
   ## dispatches frames through `parseWsFrames`.
   let conn = ws.conn
-  conn.loop.unregister(conn.fd.int)
   conn.loop.register(conn.fd.int, {Read}, edgeTriggered = true,
     callback = proc(fd: int, ev: set[EventType]) =
       if ws.conn == nil: return

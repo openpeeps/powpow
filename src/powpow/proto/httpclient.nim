@@ -320,13 +320,18 @@ proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
             failReq(st, client, "connection closed before response completed")
           return
         else:
-          when not defined(windows):
+          when defined(windows):
+            # getReadData < 0: a WSARecv is in flight with no data buffered
+            # yet — wait for the next completion instead of treating it as an
+            # error (mirrors POSIX EAGAIN).
+            break
+          else:
             if sockWouldBlock():
               break
             if sockInterrupted():
               continue
-          failReq(st, client, "recv error")
-          return
+            failReq(st, client, "recv error")
+            return
       if (Hup in ev or Error in ev) and conn.state == Connected and st.active:
         if st.parser.phase == PhaseComplete:
           if st.pendingCloseDelimited or st.closeDelimitedResponse():
@@ -362,7 +367,10 @@ proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
     discard conn.send(reqHeaders)
     if bodyBytes.len > 0:
       discard conn.send(bodyBytes)
-    conn.loop.unregister(conn.fd.int)
+    # Re-register in place: register() already replaces the existing watcher.
+    # Unregistering first would trash the fd state while its WSARecv is still
+    # in flight on Windows/IOCP, so the response bytes would land in the trash
+    # and be lost (hanging the request or surfacing as a connection error).
     conn.loop.register(conn.fd.int, {Read, Write}, edgeTriggered = true,
       callback = proc(fd: int, ev: set[EventType]) =
         onFd(st, client, fd, ev))
