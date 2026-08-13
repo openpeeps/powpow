@@ -496,9 +496,23 @@ when iouEnabled:
     if conn.sendFileFd < 0:
       if conn.writeBuf.len > 0:
         conn.armWrite()
+      elif conn.closePending:
+        conn.closePending = false
+        conn.finishClose()
+        if conn.server != nil:
+          conn.server.releaseConnection(conn)
+        else:
+          if conn.readBuf != nil:
+            releaseBuf(conn.loop, conn.readBuf)
+            conn.readBuf = nil
       elif conn.closeAfterFlush:
         conn.close()
         conn.fireClose()
+      elif conn.shutdownAfterSend:
+        conn.state = Closing
+        sockShutdown(conn.fd, shutWrVal())
+      else:
+        conn.armRead()
       return
     if conn.writeToken != 0 or conn.sendFileToken != 0:
       return
