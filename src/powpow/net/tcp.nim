@@ -301,80 +301,11 @@ when iouEnabled:
 
   # ── Read path ────────────────────────────────────────────────────────────────
 
-  when defined(powpowBufferSelect):
-    proc onBufferReadComplete(conn: Connection, res: int32, flags: uint32) =
-      ## Completion for a multishot RECV over the shared provided-buffer group.
-      ## The RECV stays armed (IORING_CQE_F_MORE) across reads; each completion
-      ## carries the selected buffer id (upper 16 bits of cqe.flags on modern
-      ## kernels, res' upper 16 bits on older ones). The buffer is recycled right
-      ## after the data is delivered so the kernel can select it for the next
-      ## event without a re-arm.
-      if conn.state == Closed or conn.state == Connecting:
-        return
-      if (flags and IORING_CQE_F_MORE) == 0:
-        conn.readToken = 0
-      if res == -ECANCELED:
-        # Canceled (close/takeover); the connection or the new owner manages reads.
-        return
-      if res == -ENOBUFS:
-        # The group is momentarily empty: every buffer is held by completions
-        # still in this reap batch, which recycle each as they are processed.
-        # Re-arm next iteration once the recycles are submitted.
-        conn.loop.deferCall(proc() =
-          if conn.state != Closed and conn.readToken == 0:
-            conn.armRead())
-        return
-      if res < 0:
-        if res == -ECONNRESET or res == -ECONNABORTED or res == -ENOTCONN or
-           res == -EPIPE or res == -ECONNREFUSED:
-          conn.close()
-          conn.fireClose()
-          return
-        # EAGAIN / spurious: keep waiting; re-arm only if the op ended.
-        if conn.readToken == 0:
-          conn.armRead()
-        return
-      if res == 0:
-        # EOF (peer closed or shutdown)
-        conn.close()
-        conn.fireClose()
-        return
-      let bytes = res and 0xFFFF
-      # The selected buffer id is delivered in the upper 16 bits of cqe.flags
-      # on newer kernels (IORING_CQE_BUFFER_SHIFT); older kernels packed it in
-      # res' upper 16 bits. res' low 16 bits hold the byte count in both.
-      let bufId =
-        if (flags and 0xFFFF0000'u32) != 0: (flags shr 16).int
-        else: (res shr 16).int
-      if conn.state != Connected:
-        # write side shut down (graceful close): discard stragglers, wait for FIN
-        conn.loop.recycleReadBuf(bufId)
-        if conn.readToken == 0:
-          conn.armRead()
-        return
-      let buf = conn.loop.readBufAt(bufId)
-      if conn.tlsState != TlsOff:
-        # STARTTLS-style upgrade: the multishot RECV is already armed and keeps
-        # reading; feed the ciphertext to SSL instead of the plaintext path.
-        conn.handleTlsData(buf, bytes)
-        conn.afterData()
-        conn.loop.recycleReadBuf(bufId)
-        if conn.state == Closed: return
-        if conn.readToken == 0:
-          conn.armRead()
-        return
-      if conn.onDataCb != nil:
-        conn.onDataCb(conn, buf.toOpenArray(0, bytes - 1))
-      elif conn.server != nil and conn.server.onData != nil:
-        conn.server.onData(conn, buf.toOpenArray(0, bytes - 1))
-      conn.afterData()
-      conn.loop.recycleReadBuf(bufId)
-      if conn.state == Closed:
-        return
-      if conn.readToken == 0:
-        conn.armRead()
-
-  proc onReadComplete(conn: Connection, res: int32, flags: uint32) =
+  proc onReadComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+    if conn.readToken != token:
+      # Stale completion from a previous lifecycle (a pooled connection reused
+      # for a new client); the current read token belongs to a newer op.
+      return
     conn.readToken = 0
     if conn.state == Closed or conn.state == Connecting:
       return
@@ -431,26 +362,6 @@ when iouEnabled:
         if conn.readToken != 0:
           conn.loop.cancelOp(conn.readToken)
           conn.readToken = 0)
-    when defined(powpowBufferSelect):
-      if conn.tlsState == TlsOff and conn.loop.bufferSelectEnabled():
-        # Multishot RECV over the shared provided-buffer group: one submission
-        # stays armed for the connection's lifetime. Each completion delivers a
-        # group buffer that is recycled right after delivery, so reads need no
-        # per-read re-arm and no per-connection read buffer.
-        let sqe = conn.loop.getOpSqe()
-        if sqe == nil:
-          conn.loop.deferCall(proc() =
-            if conn.state != Closed:
-              conn.armRead())
-          return
-        sqe.opcode = IORING_OP_RECV.uint8
-        sqe.fd = conn.fd.int32
-        sqe.flags = IOSQE_BUFFER_SELECT.uint8
-        sqe.ioprio = IORING_RECV_MULTISHOT.uint16
-        sqe.setBufGroup(ReadBufBgid)
-        conn.readToken = conn.loop.commitOp(sqe, proc(res: int32, flags: uint32) =
-          conn.onBufferReadComplete(res, flags))
-        return
     let sqe = conn.loop.getOpSqe()
     if sqe == nil:
       conn.loop.deferCall(proc() =
@@ -461,12 +372,14 @@ when iouEnabled:
     sqe.fd = conn.fd.int32
     sqe.paddr = cast[uint64](conn.readBuf)
     sqe.len = conn.readBufLen.uint32
-    conn.readToken = conn.loop.commitOp(sqe, proc(res: int32, flags: uint32) =
-      conn.onReadComplete(res, flags))
+    conn.readToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
+      conn.onReadComplete(token, res, flags))
 
   # ── Write path ───────────────────────────────────────────────────────────────
 
-  proc onWriteComplete(conn: Connection, res: int32, flags: uint32) =
+  proc onWriteComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+    if conn.writeToken != token:
+      return
     conn.writeToken = 0
     if conn.state != Connected and conn.state != Closing and not conn.closePending:
       return
@@ -541,8 +454,8 @@ when iouEnabled:
     sqe.fd = conn.fd.int32
     sqe.paddr = cast[uint64](addr conn.writeBuf[start])
     sqe.len = (conn.writeBuf.len - start).uint32
-    conn.writeToken = conn.loop.commitOp(sqe, proc(res: int32, flags: uint32) =
-      conn.onWriteComplete(res, flags))
+    conn.writeToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
+      conn.onWriteComplete(token, res, flags))
 
   # ── sendfile (READ + SEND pump) ──────────────────────────────────────────────
 
@@ -553,7 +466,9 @@ when iouEnabled:
         sqe.fd = conn.fd.int32
         sqe.paddr = cast[uint64](addr conn.sendChunk[0])
         sqe.len = n.uint32
-      , proc(res2: int32, flags2: uint32) =
+      , proc(token: uint64, res2: int32, flags2: uint32) =
+        if conn.writeToken != token:
+          return
         conn.writeToken = 0
         if conn.state == Closed:
           return
@@ -597,7 +512,9 @@ when iouEnabled:
           sqe.paddr = cast[uint64](addr conn.sendChunk[0])
           sqe.len = toRead.uint32
           sqe.off = conn.sendFileOff.uint64
-        , proc(res: int32, flags: uint32) =
+        , proc(token: uint64, res: int32, flags: uint32) =
+          if conn.sendFileToken != token:
+            return
           conn.sendFileToken = 0
           if conn.state == Closed:
             return
@@ -810,7 +727,9 @@ when iouEnabled:
     sqe.fd = conn.fd.int32
     sqe.paddr = cast[uint64](addr conn.tlsOutBuf[start])
     sqe.len = (conn.tlsOutBuf.len - start).uint32
-    conn.tlsWriteToken = conn.loop.commitOp(sqe, proc(res: int32, flags: uint32) =
+    conn.tlsWriteToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
+      if conn.tlsWriteToken != token:
+        return
       conn.tlsWriteToken = 0
       if conn.state != Connected and conn.state != Closing and not conn.closePending:
         return
@@ -982,55 +901,14 @@ when iouEnabled:
     if server.acceptToken != 0:
       return
     server.acceptAddrLen = sizeof(server.acceptAddr).SockLen
-    when defined(powpowBufferSelect):
-      if kernelAtLeast(6, 0):
-        # Multishot accept: one submission stays armed and delivers each accepted
-        # client fd as a completion (IORING_CQE_F_MORE keeps it alive), so there
-        # is no re-arm round-trip per connection. Multishot accept cannot fill a
-        # per-accept sockaddr (addr/addr_len must be NULL, else -EINVAL), so the
-        # client address is read from the accepted socket via getpeername.
-        let sqe = server.loop.getOpSqe()
-        if sqe == nil:
-          server.loop.deferCall(proc() = server.armAccept())
-          return
-        sqe.opcode = IORING_OP_ACCEPT.uint8
-        sqe.fd = server.fd.int32
-        sqe.opFlags = IORING_ACCEPT_MULTISHOT.uint32
-        server.acceptToken = server.loop.commitOp(sqe, proc(res: int32, flags: uint32) =
-          if (flags and IORING_CQE_F_MORE) == 0:
-            server.acceptToken = 0
-          if server.fd.int < 0:
-            return
-          if res < 0:
-            if (flags and IORING_CQE_F_MORE) != 0:
-              return
-            server.armAccept()
-            return
-          let clientFd = SocketHandle(res)
-          setNonBlocking(clientFd)
-          setTcpNoDelay(clientFd)
-          if server.maxConnections > 0 and
-             server.fdConn.len >= server.maxConnections:
-            sockClose(clientFd)
-            return
-          let conn = server.acquireConnection(clientFd)
-          var peerLen = sizeof(conn.clientAddr).SockLen
-          if getpeername(clientFd, cast[ptr Sockaddr](addr conn.clientAddr), addr peerLen) != 0:
-            zeroMem(addr conn.clientAddr, sizeof(conn.clientAddr))
-          if server.onAccept != nil:
-            server.onAccept(conn)
-          if conn.state == Closed:
-            server.releaseConnection(conn)
-            return
-          server.fdConn[clientFd.int] = conn
-          conn.armRead())
-        return
     server.acceptToken = server.loop.submitOp(proc(sqe: ptr IoUringSqe) =
         sqe.opcode = IORING_OP_ACCEPT.uint8
         sqe.fd = server.fd.int32
         sqe.paddr = cast[uint64](addr server.acceptAddr)
         sqe.off = cast[uint64](addr server.acceptAddrLen)  # kernel 5.15: socklen_t* in addr2
-      , proc(res: int32, flags: uint32) =
+      , proc(token: uint64, res: int32, flags: uint32) =
+        if server.acceptToken != token:
+          return
         server.acceptToken = 0
         if server.fd.int < 0:
           return
@@ -1229,7 +1107,9 @@ when iouEnabled:
               sqe.fd = fd.int32
               sqe.paddr = cast[uint64](addr conn.connectAddr)
               sqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
-            , proc(res: int32, flags: uint32) =
+            , proc(token: uint64, res: int32, flags: uint32) =
+              if conn.connectToken != token:
+                return
               conn.connectToken = 0
               if connTimer != TimerId(0):
                 loop.cancelTimer(connTimer)
@@ -1294,7 +1174,9 @@ when iouEnabled:
           sqe.fd = fd.int32
           sqe.paddr = cast[uint64](addr conn.connectAddr)
           sqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
-        , proc(res: int32, flags: uint32) =
+        , proc(token: uint64, res: int32, flags: uint32) =
+          if conn.connectToken != token:
+            return
           conn.connectToken = 0
           if conn.state == Closed:
             return

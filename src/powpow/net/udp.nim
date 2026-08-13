@@ -79,13 +79,17 @@ when iouEnabled:
     )
 
   proc armRecv(sock: UdpSocket) =
-    if sock.recvToken != 0: return
+    if sock.recvToken != 0 or sock.fd.int < 0:
+      return
     sock.recvToken = sock.loop.submitOp(proc(sqe: ptr IoUringSqe) =
         sqe.opcode = IORING_OP_RECVMSG.uint8
         sqe.fd = sock.fd.int32
         sqe.paddr = cast[uint64](addr sock.msgHdr)
         sqe.len = 1
-      , proc(res: int32, flags: uint32) =
+      , proc(token: uint64, res: int32, flags: uint32) =
+        if sock.recvToken != token:
+          # Stale completion from a previous lifecycle (closed/reused socket).
+          return
         sock.recvToken = 0
         if res > 0:
           if sock.onData != nil:
@@ -126,7 +130,9 @@ when iouEnabled:
         sqe.fd = sock.fd.int32
         sqe.paddr = cast[uint64](addr sock.sendMsgHdr)
         sqe.len = 1
-      , proc(res: int32, flags: uint32) =
+      , proc(token: uint64, res: int32, flags: uint32) =
+        if sock.sendToken != token:
+          return
         sock.sendToken = 0
         if sock.sendQueue.len > 0:
           sock.sendQueue.delete(0)

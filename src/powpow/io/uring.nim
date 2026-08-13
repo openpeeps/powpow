@@ -17,7 +17,6 @@ when not defined(linux):
   {.error: "powpow/io/uring: io_uring backend requires Linux".}
 
 import std/posix
-import std/strutils
 import ../types
 
 const
@@ -50,26 +49,8 @@ const
   IORING_OP_SEND*         = 26
   IORING_OP_RECV*         = 27
   IORING_OP_SPLICE*       = 30
-  IORING_OP_PROVIDE_BUFFERS* = 31
-  IORING_OP_REMOVE_BUFFERS*  = 32
 
   IOSQE_IO_LINK* = 4
-
-  # sqe.flags bits
-  IOSQE_FIXED_FILE*    = 0x1
-  IOSQE_BUFFER_SELECT* = 0x20   # (1U << 5): select buffer from sqe->buf_group
-
-  # send/recv flags carried in sqe.ioprio
-  IORING_RECV_MULTISHOT* = 2    # (1U << 1): multishot recv, sets IORING_CQE_F_MORE
-
-  # accept flags carried in sqe.opFlags (accept_flags)
-  IORING_ACCEPT_MULTISHOT* = 1  # (1U << 0): multishot accept, sets IORING_CQE_F_MORE
-
-  # cqe.flags bits
-  IORING_CQE_F_BUFFER* = 1      # buffer-select completion; buffer id is in the
-                                # upper 16 bits of cqe.flags (IORING_CQE_BUFFER_SHIFT)
-                                # on modern kernels, res' upper 16 bits on older
-  IORING_CQE_F_MORE*   = 2      # parent SQE will produce more CQEs (multishot)
 
   # poll() masks (linux/poll.h)
   POLLIN*    = 0x1
@@ -150,22 +131,6 @@ proc iouSyscall(num, a1, a2, a3, a4, a5, a6: clong): clong {.
 proc ioUringEnter(fd: cint, toSubmit, minComplete, flags: cuint): cint =
   iouSyscall(IoUringEnterNum, fd.clong, toSubmit.clong, minComplete.clong,
              flags.clong, 0, 0).cint
-
-proc setBufGroup*(sqe: ptr IoUringSqe, bgid: uint16) {.inline.} =
-  ## Store the buffer group id in the SQE's `buf_index` field (first two bytes
-  ## of the pad region) for ops using IOSQE_BUFFER_SELECT.
-  cast[ptr uint16](addr sqe.pad[0])[] = bgid
-
-proc kernelAtLeast*(major, minor: int): bool {.gcsafe.} =
-  ## Feature check against the running kernel (for ops like multishot recv that
-  ## are version-gated rather than exposed via `IoUringParams.features`).
-  try:
-    let v = readFile("/proc/sys/kernel/osrelease").split('.')
-    if v.len >= 2:
-      result = parseInt(v[0]) > major or
-               (parseInt(v[0]) == major and parseInt(v[1]) >= minor)
-  except CatchableError:
-    result = false
 
 # ── Ring ─────────────────────────────────────────────────────────────────────
 
