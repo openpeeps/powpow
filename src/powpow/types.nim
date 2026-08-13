@@ -7,10 +7,14 @@
 ## powpow/types.nim — Core types shared across all modules.
 
 const
-  iouEnabled* = defined(features.powpow.io_uring) or defined(powpowIoUring)
+  iouEnabled* = defined(linux) and
+    (defined(features.powpow.io_uring) or defined(powpowIoUring))
     ## Compile-time switch for the Linux io_uring backend. Activated via the
     ## nimble/clue `--features:io_uring` mechanism (which defines
     ## `features.powpow.io_uring`) or directly with `-d:powpowIoUring`.
+    ## Linux-only: on other OSes the flag is a no-op and the default backend
+    ## (epoll/kqueue/IOCP) is used, so passing `-d:powpowIoUring` on Windows or
+    ## macOS cannot pull in the Linux-only io/uring module.
     ## Guard backend-specific code with `when iouEnabled:`.
 
 type
