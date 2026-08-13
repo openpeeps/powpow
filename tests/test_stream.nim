@@ -158,7 +158,15 @@ when not defined(windows):
 
     discard loop.addTimer(10) do (id: int):
       b.close()
-      let n = a.write("late")
+      # After the peer closes, the kernel propagates ECONNRESET to writes on
+      # `a` asynchronously (close() returns before the peer socket is marked
+      # dead). The first write may briefly succeed by buffering; keep writing
+      # until the error surfaces.
+      var n = a.write("late")
+      var attempts = 0
+      while n != -1 and attempts < 64:
+        n = a.write("late")
+        inc attempts
       doAssert n == -1, "write to closed peer should fail, got " & $n
 
     discard loop.addTimer(50) do (id: int):
