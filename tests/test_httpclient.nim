@@ -141,25 +141,26 @@ test "sync_http_connect_refused":
     discard client.get("http://127.0.0.1:19979/")
   client.close()
 
-test "sync_http_uds":
-  let sockPath = getTempDir() & "powpow_httpclient_test.sock"
-  let client = newHttpClient()
-  let server = newTcpServer(client.getLoop(),
-    onAccept = proc(conn: Connection) = discard,
-    onData = proc(conn: Connection, data: openArray[byte]) =
-      discard conn.send("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
-    ,
-    onClose = proc(conn: Connection) = discard,
-  )
-  server.listenUnix(sockPath)
+when not defined(windows):
+  test "sync_http_uds":
+    let sockPath = getTempDir() & "powpow_httpclient_test.sock"
+    let client = newHttpClient()
+    let server = newTcpServer(client.getLoop(),
+      onAccept = proc(conn: Connection) = discard,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        discard conn.send("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+      ,
+      onClose = proc(conn: Connection) = discard,
+    )
+    server.listenUnix(sockPath)
 
-  let res = client.get("http://localhost/", [], unixSocket = sockPath)
-  check res.getStatusCode() == Http200
-  check res.getBodyString() == "hello"
+    let res = client.get("http://localhost/", [], unixSocket = sockPath)
+    check res.getStatusCode() == Http200
+    check res.getBodyString() == "hello"
 
-  server.close()
-  client.close()
-  removeFile(sockPath)
+    server.close()
+    client.close()
+    removeFile(sockPath)
 
 # ── Async tests (await-able; server lives on the async client's loop) ───────
 

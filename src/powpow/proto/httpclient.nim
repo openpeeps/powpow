@@ -262,7 +262,7 @@ proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
         client.idleParser = nil
         conn.close()
       return
-    if Error in ev:
+    if Error in ev and Read notin ev:
       failReq(st, client, "connection error")
       return
     if conn.tlsState == TlsHandshaking:
@@ -327,7 +327,7 @@ proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
               continue
           failReq(st, client, "recv error")
           return
-      if Hup in ev and conn.state == Connected and st.active:
+      if (Hup in ev or Error in ev) and conn.state == Connected and st.active:
         if st.parser.phase == PhaseComplete:
           if st.pendingCloseDelimited or st.closeDelimitedResponse():
             st.parser.finalizeCloseDelimited()

@@ -847,7 +847,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
         conn.loop.register(fd, {Read}, edgeTriggered = true,
           callback = proc(efd: int, ev: set[EventType]) =
             if ws.conn == nil: return
-            if Error in ev:
+            if Error in ev and Read notin ev:
               if not ws.onClose.isNil:
                 ws.onClose(ws, 1006, "Connection lost")
               ws.conn.close()
@@ -906,7 +906,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
                     return
               # Hup was reported but the drain neither parsed a close frame nor
               # hit EOF — the connection was lost without a close handshake.
-              if Hup in ev and ws.conn.state == Connected:
+              if (Hup in ev or Error in ev) and ws.conn.state == Connected:
                 if not ws.onClose.isNil:
                   ws.onClose(ws, 1006, "Connection lost")
                 ws.conn.close()
@@ -1037,7 +1037,7 @@ proc websocketUpgrade*(
         # The ws may already be released (conn detached) if a stale event slips
         # through — never dereference a nil connection.
         if ws.conn == nil: return
-        if Error in ev:
+        if Error in ev and Read notin ev:
           if not ws.onClose.isNil:
             ws.onClose(ws, 1006, "Connection lost")
           ws.conn.close()
@@ -1203,7 +1203,7 @@ proc registerClientFd(ws: WsConnection) =
   conn.loop.register(conn.fd.int, {Read}, edgeTriggered = true,
     callback = proc(fd: int, ev: set[EventType]) =
       if ws.conn == nil: return
-      if Error in ev:
+      if Error in ev and Read notin ev:
         if not ws.handshakeDone:
           if not ws.onError.isNil:
             ws.onError(ws, "Connection lost during WebSocket handshake")
