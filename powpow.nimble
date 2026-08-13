@@ -31,8 +31,9 @@ task test, "Run the unit test suite":
     "test_firefox_regression", "test_http", "test_loop",
     "test_multipart_streamer", "test_net", "test_ratelimit_threads",
     "test_security", "test_signal", "test_sse2", "test_sse2_225",
-    "test_sse2_chunk", "test_sse2_direct", "test_sse2_raw", "test_stream",
-    "test_tls", "test_ws_pool", "test_ws_threads",
+    "test_sse2_chunk", "test_sse2_direct", "test_sse2_raw",     "test_stream",
+    "test_tls", "test_httpclient", "test_httpclient_security",
+    "test_ws_client", "test_ws_pool", "test_ws_threads",
   ]
   for t in tests:
     # --outdir keeps the produced test binaries in the (gitignored) cache dir

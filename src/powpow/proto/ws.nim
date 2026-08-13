@@ -28,7 +28,7 @@
 ##     websocketUpgrade(res, req, onOpen, onMessage, onClose)
 ##   ```
 
-import std/[httpcore, base64, tables, strutils]
+import std/[httpcore, base64, tables, strutils, random]
 import pkg/checksums/sha1
 when defined(threads):
   import std/threads
@@ -85,6 +85,15 @@ type
     lastActive: int64
     idleTimer:  TimerId
     idleTimeoutMs: int
+    # Client mode (RFC 6455 §5.1): clients mask outgoing frames and accept
+    # unmasked incoming frames; servers are the opposite.
+    clientMode: bool
+    sendMask: array[4, uint8]     ## Per-connection mask key for client frames
+    clientKey: string             ## Sec-WebSocket-Key sent in the handshake
+    expectedAccept: string        ## Expected Sec-WebSocket-Accept response
+    handshakeBuf: seq[byte]       ## Buffered handshake response bytes
+    handshakeDone: bool           ## True once the 101 upgrade completed
+    handshakeTimer: TimerId
 
   WsMessageCb* = proc(ws: WsConnection, kind: WsFrameKind,
                        data: openArray[byte]) {.closure.}
@@ -253,6 +262,14 @@ proc writeFrameMasked*(conn: Connection, opcode: int, payload: openArray[byte],
       masked[i] = uint8(payload[i]) xor mask[i mod 4]
     discard conn.send(masked)
 
+proc writeFrameFor(ws: WsConnection, opcode: int, payload: openArray[byte]) =
+  ## Write a frame honouring the connection's mode: client frames are masked,
+  ## server frames are not (RFC 6455 §5.1).
+  if ws.clientMode:
+    ws.conn.writeFrameMasked(opcode, payload, ws.sendMask)
+  else:
+    ws.conn.writeFrame(opcode, payload)
+
 # ── WsConnection send helpers ────────────────────────────────────────────────
 
 proc sendSafe(ws: WsConnection, opcode: int, data: openArray[byte]) =
@@ -271,9 +288,9 @@ proc sendSafe(ws: WsConnection, opcode: int, data: openArray[byte]) =
       let loop = conn.loop
       loop.postToLoop(proc() =
         if ws.conn == conn and conn.state == Connected:
-          conn.writeFrame(opcode, payload))
+          ws.writeFrameFor(opcode, payload))
       return
-  conn.writeFrame(opcode, data)
+  ws.writeFrameFor(opcode, data)
 
 proc sendText*(ws: WsConnection, s: string) {.inline.} =
   if s.len == 0:
@@ -311,7 +328,7 @@ proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
     payload[1] = uint8(code and 0xFF)
     for i, ch in reason:
       payload[2 + i] = uint8(ch.ord and 0xFF)
-  ws.conn.writeFrame(0x8, payload)
+  ws.writeFrameFor(0x8, payload)
   ws.conn.close()
 
 # ── Frame parser (incremental, state-machine) ────────────────────────────────
@@ -383,18 +400,18 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
       reason = newString(plen - 2)
       copyMem(addr reason[0], unsafeAddr p.payload[2], plen - 2)
     if plen > 0:
-      ws.conn.writeFrame(0x8, p.payload.toOpenArray(0, plen - 1))
+      ws.writeFrameFor(0x8, p.payload.toOpenArray(0, plen - 1))
     else:
-      ws.conn.writeFrame(0x8, [])
+      ws.writeFrameFor(0x8, [])
     if not ws.onClose.isNil:
       ws.onClose(ws, closeCode, reason)
     ws.conn.close()
     return
   of 0x9:
     if plen > 0:
-      ws.conn.writeFrame(0xA, p.payload.toOpenArray(0, plen - 1))
+      ws.writeFrameFor(0xA, p.payload.toOpenArray(0, plen - 1))
     else:
-      ws.conn.writeFrame(0xA, [])
+      ws.writeFrameFor(0xA, [])
   of 0xA:
     discard
   else:
@@ -436,7 +453,7 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
       p.masked = (b1 shr 7) == 1
       let len7 = b1 and 0x7F
 
-      if not p.masked:
+      if not p.masked and not ws.clientMode:
         ws.closeWs(1002, "Unmasked frame from client")
         return
 
@@ -583,6 +600,13 @@ proc newWsConnection*(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize)
     lastActive: monoMs(),
     idleTimer: TimerId(0),
     idleTimeoutMs: 0,
+    clientMode: false,
+    sendMask: [0'u8, 0, 0, 0],
+    clientKey: "",
+    expectedAccept: "",
+    handshakeBuf: @[],
+    handshakeDone: false,
+    handshakeTimer: TimerId(0),
   )
 
 proc resetWs(ws: WsConnection; conn: Connection; maxFrameSize: int) =
@@ -600,6 +624,13 @@ proc resetWs(ws: WsConnection; conn: Connection; maxFrameSize: int) =
   ws.idleTimeoutMs = 0
   ws.lastActive = monoMs()
   ws.parser.reset()
+  ws.clientMode = false
+  ws.sendMask = [0'u8, 0, 0, 0]
+  ws.clientKey = ""
+  ws.expectedAccept = ""
+  ws.handshakeBuf.setLen(0)
+  ws.handshakeDone = false
+  ws.handshakeTimer = TimerId(0)
 
 proc acquireWsConnection(wss: WsServer, conn: Connection): WsConnection =
   ## Get a WsConnection for `conn`, recycling one from the pool when available.
@@ -816,7 +847,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
         conn.loop.register(fd, {Read}, edgeTriggered = true,
           callback = proc(efd: int, ev: set[EventType]) =
             if ws.conn == nil: return
-            if Error in ev or Hup in ev:
+            if Error in ev:
               if not ws.onClose.isNil:
                 ws.onClose(ws, 1006, "Connection lost")
               ws.conn.close()
@@ -828,7 +859,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
               if ws.conn.flushWriteBuffer():
                 if ws.conn.state == Connected:
                   ws.conn.loop.modify(efd, {Read})
-            if Read in ev:
+            if Read in ev or Hup in ev:
               var buf: array[65536, byte]
               while true:
                 when defined(windows):
@@ -873,6 +904,15 @@ proc listen*(wss: WsServer, address: string, port: int) =
                       wss.conns.del(efd)
                       wss.releaseWsConnection(ws)
                     return
+              # Hup was reported but the drain neither parsed a close frame nor
+              # hit EOF — the connection was lost without a close handshake.
+              if Hup in ev and ws.conn.state == Connected:
+                if not ws.onClose.isNil:
+                  ws.onClose(ws, 1006, "Connection lost")
+                ws.conn.close()
+                if efd in wss.conns:
+                  wss.conns.del(efd)
+                  wss.releaseWsConnection(ws)
         )
 
         # Fire onOpen
@@ -997,7 +1037,7 @@ proc websocketUpgrade*(
         # The ws may already be released (conn detached) if a stale event slips
         # through — never dereference a nil connection.
         if ws.conn == nil: return
-        if Error in ev or Hup in ev:
+        if Error in ev:
           if not ws.onClose.isNil:
             ws.onClose(ws, 1006, "Connection lost")
           ws.conn.close()
@@ -1009,7 +1049,7 @@ proc websocketUpgrade*(
           if ws.conn.flushWriteBuffer():
             if ws.conn.state == Connected:
               ws.conn.loop.modify(fd, {Read})
-        if Read in ev:
+        if Read in ev or Hup in ev:
           var buf: array[65536, byte]
           while true:
             when defined(windows):
@@ -1046,6 +1086,13 @@ proc websocketUpgrade*(
                 ws.conn.close()
                 owner.releaseWs(ws)
                 return
+          # Hup was reported but the drain neither parsed a close frame nor hit
+          # EOF — the connection was lost without a close handshake.
+          if Hup in ev and ws.conn.state == Connected:
+            if not ws.onClose.isNil:
+              ws.onClose(ws, 1006, "Connection lost")
+            ws.conn.close()
+            owner.releaseWs(ws)
     )
 
     # Fire onOpen
@@ -1053,3 +1100,230 @@ proc websocketUpgrade*(
       ws.onOpen(ws)
 
     return ws
+
+# ── WebSocket client ─────────────────────────────────────────────────────────
+
+proc prepareClientWs(maxFrameSize: int): WsConnection =
+  ## Create a client-mode WsConnection with a fresh Sec-WebSocket-Key and
+  ## per-connection mask, both sourced from the OS-seeded std/random RNG.
+  result = newWsConnection(nil, maxFrameSize)
+  result.clientMode = true
+  var rng = initRand()
+  var keyBytes: array[16, byte]
+  for i in 0 ..< 16:
+    keyBytes[i] = byte(rng.rand(255))
+  result.clientKey = base64.encode(keyBytes)
+  result.expectedAccept = computeAcceptKey(result.clientKey)
+  for i in 0 ..< 4:
+    result.sendMask[i] = uint8(rng.rand(255))
+
+proc sendHandshakeRequest(ws: WsConnection, path, host: string) =
+  ## Send the RFC 6455 client upgrade request over the connected TCP socket.
+  let p = if path.len > 0: path else: "/"
+  let h = if host.len > 0: host else: "localhost"
+  let req = "GET " & p & " HTTP/1.1\r\n" &
+            "Host: " & h & "\r\n" &
+            "Upgrade: websocket\r\n" &
+            "Connection: Upgrade\r\n" &
+            "Sec-WebSocket-Key: " & ws.clientKey & "\r\n" &
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+  discard ws.conn.send(req)
+
+proc armClientHandshakeTimeout(ws: WsConnection, timeoutMs: int) =
+  ## Close the connection if the handshake does not complete in time.
+  if timeoutMs <= 0: return
+  ws.handshakeTimer = ws.conn.loop.addTimer(timeoutMs) do (id: int):
+    ws.handshakeTimer = TimerId(0)
+    if not ws.handshakeDone:
+      if not ws.onError.isNil:
+        ws.onError(ws, "WebSocket handshake timed out")
+      ws.conn.close()
+
+proc finishHandshake(ws: WsConnection): bool =
+  ## Advance the client handshake with the buffered response bytes. Returns
+  ## true once the handshake phase is resolved — either upgraded (onOpen fired
+  ## and any leftover bytes fed to the frame parser) or failed with the
+  ## connection closed. Returns false when more data is required.
+  const MaxHandshakeSize = 8192
+  if ws.handshakeBuf.len > MaxHandshakeSize:
+    if not ws.onError.isNil:
+      ws.onError(ws, "WebSocket handshake response too large")
+    ws.conn.close()
+    return true
+  var resp = newString(ws.handshakeBuf.len)
+  if ws.handshakeBuf.len > 0:
+    copyMem(addr resp[0], unsafeAddr ws.handshakeBuf[0], ws.handshakeBuf.len)
+  let headerEnd = resp.find("\r\n\r\n")
+  if headerEnd < 0:
+    return false  # not enough data yet
+  if ws.handshakeTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.handshakeTimer)
+    ws.handshakeTimer = TimerId(0)
+  let lines = resp[0 ..< headerEnd].split("\r\n")
+  var statusOk = false
+  var acceptOk = false
+  var statusLine = ""
+  for i, line in lines:
+    if i == 0:
+      statusLine = line
+      let parts = line.split(" ")
+      statusOk = parts.len >= 2 and parts[1] == "101"
+    else:
+      let colon = line.find(":")
+      if colon > 0:
+        let name = line[0 ..< colon].strip().toLowerAscii()
+        let value = line[colon + 1 .. ^1].strip()
+        if name == "sec-websocket-accept":
+          acceptOk = value == ws.expectedAccept
+  if not statusOk:
+    if not ws.onError.isNil:
+      ws.onError(ws, "WebSocket handshake rejected (expected 101, got: " & statusLine & ")")
+    ws.conn.close()
+    return true
+  if not acceptOk:
+    if not ws.onError.isNil:
+      ws.onError(ws, "WebSocket handshake failed: Sec-WebSocket-Accept mismatch")
+    ws.conn.close()
+    return true
+  ws.handshakeBuf.setLen(0)
+  ws.handshakeDone = true
+  if not ws.onOpen.isNil:
+    ws.onOpen(ws)
+  let leftoverStart = headerEnd + 4
+  if resp.len > leftoverStart:
+    ws.parseWsFrames(resp.toOpenArrayByte(leftoverStart, resp.high))
+  true
+
+proc registerClientFd(ws: WsConnection) =
+  ## Re-register the fd for raw WebSocket frame handling once the TCP
+  ## connection is established. Drives the handshake to completion, then
+  ## dispatches frames through `parseWsFrames`.
+  let conn = ws.conn
+  conn.loop.unregister(conn.fd.int)
+  conn.loop.register(conn.fd.int, {Read}, edgeTriggered = true,
+    callback = proc(fd: int, ev: set[EventType]) =
+      if ws.conn == nil: return
+      if Error in ev:
+        if not ws.handshakeDone:
+          if not ws.onError.isNil:
+            ws.onError(ws, "Connection lost during WebSocket handshake")
+        elif not ws.onClose.isNil:
+          ws.onClose(ws, 1006, "Connection lost")
+        ws.conn.close()
+        return
+      if Write in ev:
+        if ws.conn.flushWriteBuffer():
+          if ws.conn.state == Connected:
+            ws.conn.loop.modify(fd, {Read})
+      if Read in ev or Hup in ev:
+        var buf: array[65536, byte]
+        while true:
+          let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
+          if n > 0:
+            if ws.handshakeDone:
+              ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+              if ws.conn.state != Connected:
+                return
+            else:
+              ws.handshakeBuf.add(buf.toOpenArray(0, n - 1))
+              if not ws.finishHandshake():
+                discard  # wait for more response bytes
+              if ws.conn.state != Connected:
+                return
+          elif n == 0:
+            if not ws.handshakeDone:
+              if not ws.onError.isNil:
+                ws.onError(ws, "Connection closed during WebSocket handshake")
+            elif not ws.onClose.isNil:
+              ws.onClose(ws, 1006, "")
+            ws.conn.close()
+            return
+          else:
+            if sockWouldBlock():
+              break
+            if sockInterrupted():
+              continue
+            if not ws.onError.isNil:
+              ws.onError(ws, "recv error: " & $lastSocketError())
+            ws.conn.close()
+            return
+        # Hup was reported but the drain neither parsed a close frame nor hit
+        # EOF — the connection was lost without a close handshake.
+        if Hup in ev and ws.conn.state == Connected:
+          if not ws.handshakeDone:
+            if not ws.onError.isNil:
+              ws.onError(ws, "Connection lost during WebSocket handshake")
+          elif not ws.onClose.isNil:
+            ws.onClose(ws, 1006, "Connection lost")
+          ws.conn.close()
+  )
+
+proc upgradeToWs*(
+    conn: Connection,
+    path: string = "/",
+    host: string = "",
+    onOpen: WsOpenCb = nil,
+    onMessage: WsMessageCb = nil,
+    onClose: WsCloseCb = nil,
+    onError: WsErrorCb = nil,
+    maxFrameSize: int = DefaultMaxFrameSize,
+    handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs,
+): WsConnection =
+  ## Upgrade an already-connected TCP `conn` to a WebSocket client. Sends the
+  ## RFC 6455 handshake and takes over the fd for frame handling. `onOpen`
+  ## fires once the server accepts the upgrade; `onError` fires (and the
+  ## connection is closed) if the server rejects it or the handshake stalls.
+  ## Returns the WsConnection so it can be stored for later sends.
+  let ws = prepareClientWs(maxFrameSize)
+  ws.conn = conn
+  ws.onOpen = onOpen
+  ws.onMessage = onMessage
+  ws.onClose = onClose
+  ws.onError = onError
+  ws.sendHandshakeRequest(path, host)
+  ws.armClientHandshakeTimeout(handshakeTimeoutMs)
+  ws.registerClientFd()
+  ws
+
+proc connectWs*(
+    loop: Loop,
+    address: string,
+    port: int,
+    path: string = "/",
+    host: string = "",
+    onOpen: WsOpenCb = nil,
+    onMessage: WsMessageCb = nil,
+    onClose: WsCloseCb = nil,
+    onError: WsErrorCb = nil,
+    maxFrameSize: int = DefaultMaxFrameSize,
+    handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs,
+): WsConnection =
+  ## Non-blocking WebSocket client connect. DNS is resolved on the loop (see
+  ## `connect`), then the TCP connection is upgraded to WebSocket via
+  ## `upgradeToWs`. Returns the WsConnection immediately; the handshake runs
+  ## asynchronously and `onOpen` fires when the upgrade completes.
+  let ws = prepareClientWs(maxFrameSize)
+  ws.onOpen = onOpen
+  ws.onMessage = onMessage
+  ws.onClose = onClose
+  ws.onError = onError
+  let effHost = if host.len > 0: host else: address
+  loop.connect(address, port,
+    onConnect = proc(conn: Connection) =
+      ws.conn = conn
+      ws.sendHandshakeRequest(path, effHost)
+      ws.armClientHandshakeTimeout(handshakeTimeoutMs)
+      ws.registerClientFd()
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      discard  # upgradeToWs re-registers the fd; reads bypass loop.connect
+    ,
+    onClose = proc(conn: Connection) =
+      if not ws.handshakeDone and not ws.onError.isNil:
+        ws.onError(ws, "Connection closed during WebSocket handshake")
+    ,
+    onError = proc(err: string) =
+      if not ws.onError.isNil:
+        ws.onError(ws, err)
+  )
+  ws

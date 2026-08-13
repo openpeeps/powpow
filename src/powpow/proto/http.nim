@@ -110,6 +110,20 @@ type
     phase*:     ParsePhase
     errorCode:  HttpCode
 
+    # Response mode (client-side parsing). When `responseMode` is true the
+    # first line is parsed as "HTTP/x.y <code> <reason>" instead of a request
+    # line; everything downstream (headers, Content-Length, chunked, body) is
+    # shared with request parsing.
+    responseMode*: bool
+    statusCode*:   HttpCode
+    statusTextStart: int
+    statusTextLen:   int
+    statusTextCache: string
+    respHeaders:   HttpHeaders
+    respHeadersReady: bool
+    respBody:      seq[byte]
+    respBodyReady: bool
+
   HttpRequest* = ref object
     ## A parsed HTTP request with lazy accessor methods.
     parser*:     HttpParser
@@ -212,6 +226,15 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     expectContinue: false,
     phase:         PhaseRequestLine,
     errorCode:     Http200,
+    responseMode:  false,
+    statusCode:    Http200,
+    statusTextStart: 0,
+    statusTextLen:   0,
+    statusTextCache: "",
+    respHeaders:   nil,
+    respHeadersReady: false,
+    respBody:      @[],
+    respBodyReady: false,
   )
 
 proc reset*(p: HttpParser) =
@@ -247,6 +270,14 @@ proc reset*(p: HttpParser) =
   p.contentTypeVal.setLen(0)
   p.contentTypeStart = -1
   p.contentTypeLen = 0
+  p.statusCode    = Http200
+  p.statusTextStart = 0
+  p.statusTextLen   = 0
+  p.statusTextCache.setLen(0)
+  p.respHeaders  = nil
+  p.respHeadersReady = false
+  p.respBody.setLen(0)
+  p.respBodyReady = false
   if p.buf.len > 8192:
     p.buf.setLen(4096)
 
@@ -300,6 +331,14 @@ proc resetForNext*(p: HttpParser) =
   p.contentTypeVal.setLen(0)
   p.contentTypeStart = -1
   p.contentTypeLen = 0
+  p.statusCode    = Http200
+  p.statusTextStart = 0
+  p.statusTextLen   = 0
+  p.statusTextCache.setLen(0)
+  p.respHeaders  = nil
+  p.respHeadersReady = false
+  p.respBody.setLen(0)
+  p.respBodyReady = false
 
 func phase*(p: HttpParser): ParsePhase {.inline.} = p.phase
 
@@ -402,6 +441,65 @@ proc parseRequestLine(p: HttpParser): bool =
     return false
 
   # Advance past the request line \r\n
+  p.phase = PhaseHeaders
+  return true
+
+proc parseResponseLine(p: HttpParser): bool =
+  ## Parse "HTTP/x.y <code> <reason>\r\n" from the buffer (client side).
+  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+  let crlf = findCRLF(buf, 0, p.bufLen)
+  if crlf < 0:
+    if p.bufLen > MaxRequestLine:
+      p.phase = PhaseError
+      p.errorCode = Http400
+      return false
+    return false  # need more data
+
+  # "HTTP/x.y"
+  if crlf < 8 or
+     char(buf[0]) != 'H' or char(buf[1]) != 'T' or char(buf[2]) != 'T' or
+     char(buf[3]) != 'P' or char(buf[4]) != '/':
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
+  let majCh = char(buf[5])
+  let minCh = char(buf[7])
+  if majCh < '0' or majCh > '9' or minCh < '0' or minCh > '9':
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
+  p.httpMajor = int(majCh) - ord('0')
+  p.httpMinor = int(minCh) - ord('0')
+  if p.httpMajor != 1 or p.httpMinor > 1:
+    p.phase = PhaseError
+    p.errorCode = Http505
+    return false
+
+  var i = 8
+  while i < crlf and (char(buf[i]) == ' ' or char(buf[i]) == '\t'):
+    inc i
+
+  # Status code: exactly three digits
+  if i + 3 > crlf:
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
+  let d1 = char(buf[i]); let d2 = char(buf[i+1]); let d3 = char(buf[i+2])
+  if d1 < '0' or d1 > '9' or d2 < '0' or d2 > '9' or d3 < '0' or d3 > '9':
+    p.phase = PhaseError
+    p.errorCode = Http400
+    return false
+  p.statusCode = HttpCode((ord(d1) - ord('0')) * 100 +
+                          (ord(d2) - ord('0')) * 10 +
+                          (ord(d3) - ord('0')))
+  i += 3
+
+  # Reason phrase (optional; recorded as byte offsets for lazy materialization)
+  while i < crlf and (char(buf[i]) == ' ' or char(buf[i]) == '\t'):
+    inc i
+  p.statusTextStart = i
+  p.statusTextLen   = crlf - i
+
   p.phase = PhaseHeaders
   return true
 
@@ -918,7 +1016,9 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
         copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], headRoom)
         p.bufLen += headRoom
       if p.phase == PhaseRequestLine:
-        if not p.parseRequestLine(): return p.phase
+        let ok = if p.responseMode: p.parseResponseLine()
+                 else: p.parseRequestLine()
+        if not ok: return p.phase
       if p.phase == PhaseHeaders:
         if not p.scanHeaders(): return p.phase
       if p.phase == PhaseBody:
@@ -947,7 +1047,9 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
 
   # State machine advancement
   if p.phase == PhaseRequestLine:
-    if not p.parseRequestLine():
+    let ok = if p.responseMode: p.parseResponseLine()
+             else: p.parseRequestLine()
+    if not ok:
       return p.phase
 
   if p.phase == PhaseHeaders:
@@ -1019,7 +1121,9 @@ proc tryAdvance*(p: HttpParser) =
   ## Used after `resetForNext()` to process pipelined request bytes.
   if p.phase in {PhaseComplete, PhaseError}: return
   if p.phase == PhaseRequestLine:
-    if not p.parseRequestLine(): return
+    let ok = if p.responseMode: p.parseResponseLine()
+             else: p.parseRequestLine()
+    if not ok: return
   if p.phase == PhaseHeaders:
     if not p.scanHeaders(): return
   if p.phase == PhaseBody:
@@ -1146,55 +1250,120 @@ proc getUrl*(req: HttpRequest): lent string =
         copyMem(addr req.urlVal[0], unsafeAddr path[0], path.len)
   req.urlVal
 
-proc getHeaders*(req: HttpRequest): HttpHeaders =
-  if not req.headersReady:
-    let p = req.parser
-    let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
-    if req.headersVal.isNil:
-      req.headersVal = newHttpHeaders()
-    else:
-      req.headersVal.clear()
-    var i = 0
-    # Skip request line
+proc materializeHeaders(p: HttpParser, h: HttpHeaders) =
+  ## Scan the header section of `p.buf` (skipping the first line — a request
+  ## or a response status line) and fill `h`. Shared by request and response
+  ## accessors.
+  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+  h.clear()
+  var i = 0
+  # Skip the first line
+  while i < p.headerEnd - 1:
+    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+      i += 2
+      break
+    inc i
+  # Parse headers — scan for colon directly in buffer, avoid intermediate line string
+  while i < p.headerEnd - 1:
+    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+      inc i, 2
+      continue
+    let lineStart = i
     while i < p.headerEnd - 1:
-      if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
-        i += 2
+      if char(buf[i]) == '\r':
         break
       inc i
-    # Parse headers — scan for colon directly in buffer, avoid intermediate line string
-    while i < p.headerEnd - 1:
-      if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
-        inc i, 2
-        continue
-      let lineStart = i
-      while i < p.headerEnd - 1:
-        if char(buf[i]) == '\r':
-          break
-        inc i
-      let lineLen = i - lineStart
-      if lineLen > 0:
-        var colonPos = lineStart
-        while colonPos < i and char(buf[colonPos]) != ':':
-          inc colonPos
-        if colonPos < i and colonPos > lineStart:
-          let keyLen = colonPos - lineStart
-          var key = newString(keyLen)
-          copyMem(addr key[0], addr buf[lineStart], keyLen)
-          var valStart = colonPos + 1
-          while valStart < i and char(buf[valStart]) == ' ':
-            inc valStart
-          let valLen = i - valStart
-          if valLen > 0:
-            var value = newString(valLen)
-            copyMem(addr value[0], addr buf[valStart], valLen)
-            req.headersVal.add(key, value)
-          else:
-            req.headersVal.add(key, "")
-      if i < p.headerEnd - 1 and char(buf[i]) == '\r':
-        inc i
+    let lineLen = i - lineStart
+    if lineLen > 0:
+      var colonPos = lineStart
+      while colonPos < i and char(buf[colonPos]) != ':':
+        inc colonPos
+      if colonPos < i and colonPos > lineStart:
+        let keyLen = colonPos - lineStart
+        var key = newString(keyLen)
+        copyMem(addr key[0], addr buf[lineStart], keyLen)
+        var valStart = colonPos + 1
+        while valStart < i and char(buf[valStart]) == ' ':
+          inc valStart
+        let valLen = i - valStart
+        if valLen > 0:
+          var value = newString(valLen)
+          copyMem(addr value[0], addr buf[valStart], valLen)
+          h.add(key, value)
+        else:
+          h.add(key, "")
+    if i < p.headerEnd - 1 and char(buf[i]) == '\r':
       inc i
+    inc i
+
+proc getHeaders*(req: HttpRequest): HttpHeaders =
+  if not req.headersReady:
+    if req.headersVal.isNil:
+      req.headersVal = newHttpHeaders()
+    req.parser.materializeHeaders(req.headersVal)
     req.headersReady = true
   return req.headersVal
+
+proc getHeaders*(p: HttpParser): HttpHeaders =
+  ## Materialize the response headers (response mode).
+  if not p.respHeadersReady:
+    if p.respHeaders.isNil:
+      p.respHeaders = newHttpHeaders()
+    p.materializeHeaders(p.respHeaders)
+    p.respHeadersReady = true
+  p.respHeaders
+
+func getStatusCode*(p: HttpParser): HttpCode {.inline.} =
+  p.statusCode
+
+func getHttpMinor*(p: HttpParser): int {.inline.} =
+  p.httpMinor
+
+func isChunked*(p: HttpParser): bool {.inline.} =
+  p.transferChunked
+
+func headersDone*(p: HttpParser): bool {.inline.} =
+  p.headerEnd >= 0
+
+func getStatusText*(p: HttpParser): lent string =
+  if p.statusTextCache.len == 0 and p.statusTextLen > 0:
+    let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+    p.statusTextCache.setLen(p.statusTextLen)
+    copyMem(addr p.statusTextCache[0], addr buf[p.statusTextStart], p.statusTextLen)
+  p.statusTextCache
+
+func getContentLength*(p: HttpParser): int {.inline.} =
+  p.contentLength
+
+func getConnectionClose*(p: HttpParser): bool {.inline.} =
+  p.connectionClose
+
+proc getBody*(p: HttpParser): seq[byte] =
+  ## Get the response body. Returns empty seq if no body.
+  if not p.respBodyReady:
+    if p.transferChunked and p.chunkBodyLen > 0:
+      p.respBody.setLen(p.chunkBodyLen)
+      copyMem(addr p.respBody[0], addr p.buf[p.headerEnd], p.chunkBodyLen)
+    elif p.contentLength > 0 and p.bufLen >= p.contentEnd:
+      p.respBody.setLen(p.contentLength)
+      copyMem(addr p.respBody[0], addr p.buf[p.headerEnd], p.contentLength)
+    else:
+      p.respBody.setLen(0)
+    p.respBodyReady = true
+  p.respBody
+
+proc finalizeCloseDelimited*(p: HttpParser) =
+  ## For a response without Content-Length / Transfer-Encoding whose body is
+  ## delimited by connection close, promote every buffered byte after the
+  ## header section to the body. Call when the peer closes the connection and
+  ## the response was otherwise complete.
+  if p.transferChunked or p.contentLength >= 0: return
+  let remaining = p.bufLen - p.headerEnd
+  if remaining > 0:
+    p.contentLength = remaining
+    p.bodyLen = remaining
+    p.phase = PhaseComplete
+    p.respBodyReady = false
 
 func getContentLength*(req: HttpRequest): int {.inline.} =
   req.parser.contentLength
