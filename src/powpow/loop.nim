@@ -384,8 +384,28 @@ proc close*(loop: Loop) =
       discard posix.close(loop.wakeFd)
       loop.wakeFd = -1
     loop.ring.close()
+    # Drop every retained closure/connection reference so a closed loop forms no
+    # reference cycles. If left populated, opCbs → callback → Connection → loop
+    # keeps the whole object graph alive and the ORC cycle collector later
+    # traverses (and crashes on) it under GC pressure.
+    loop.opCbs.clear()
+    loop.watcherTokens.clear()
+    loop.writabilityHooks.setLen(0)
+    loop.writabilityTokens.clear()
+    loop.takeoverCbs.clear()
+    loop.rearmQueue.setLen(0)
   else:
     loop.platform.close()
+
+  loop.deferred.clear()
+  loop.idleCbs.clear()
+  for level in 0 ..< 4:
+    for slot in 0 ..< 256:
+      loop.wheel[level][slot] = nil
+  loop.pausedList.setLen(0)
+  loop.cancelled.clear()
+  loop.timerMap.clear()
+  loop.totalTimers = 0
 
 # ── Timer wheel ──────────────────────────────────────────────────────────────
 
