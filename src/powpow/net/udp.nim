@@ -54,6 +54,7 @@ type
     when iouEnabled:
       recvToken:  uint64
       sendToken:  uint64
+      fixedFd:    bool   # fd is registered in the loop's fixed-file table
       sendQueue:  seq[PendingSend]
       sendMsgHdr: MsgHdr
       sendIov:    IOVec
@@ -84,6 +85,8 @@ when iouEnabled:
     sock.recvToken = sock.loop.submitOp(proc(sqe: ptr IoUringSqe) =
         sqe.opcode = IORING_OP_RECVMSG.uint8
         sqe.fd = sock.fd.int32
+        if sock.fixedFd:
+          sqe.flags = IOSQE_FIXED_FILE.uint8
         sqe.paddr = cast[uint64](addr sock.msgHdr)
         sqe.len = 1
       , proc(token: uint64, res: int32, flags: uint32) =
@@ -128,6 +131,8 @@ when iouEnabled:
     sock.sendToken = sock.loop.submitOp(proc(sqe: ptr IoUringSqe) =
         sqe.opcode = IORING_OP_SENDMSG.uint8
         sqe.fd = sock.fd.int32
+        if sock.fixedFd:
+          sqe.flags = IOSQE_FIXED_FILE.uint8
         sqe.paddr = cast[uint64](addr sock.sendMsgHdr)
         sqe.len = 1
       , proc(token: uint64, res: int32, flags: uint32) =
@@ -151,6 +156,9 @@ proc close*(sock: UdpSocket) =
       sock.sendToken = 0
     sock.sendQueue.setLen(0)
     sock.loop.unregisterFd(sock.fd.int)
+    if sock.fixedFd:
+      sock.loop.unregisterFixedFd(sock.fd.int)
+      sock.fixedFd = false
   else:
     sock.loop.unregister(sock.fd.int)
   sockClose(sock.fd)
@@ -282,6 +290,7 @@ proc bindUdp*(loop: Loop, address: string, port: int,
   )
 
   when iouEnabled:
+    sock.fixedFd = loop.registerFixedFd(fd.int)
     sock.initMsgHdr()
     sock.armRecv()
   else:
@@ -318,6 +327,7 @@ proc connectUdp*(loop: Loop, address: string, port: int,
   )
 
   when iouEnabled:
+    sock.fixedFd = loop.registerFixedFd(fd.int)
     sock.connected = true
     if onData != nil:
       sock.initMsgHdr()

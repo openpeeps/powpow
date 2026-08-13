@@ -46,6 +46,10 @@ when iouEnabled:
     importc: "eventfd", header: "<sys/eventfd.h>".}
   const EFD_NONBLOCK = 0x800
 
+  const
+    WatcherTokenTag = 1'u64 shl 63        # completion is an fd watcher (POLL_ADD)
+    WritabilityTokenTag = 1'u64 shl 62    # completion is a one-shot writability poll
+
 # ── Timer wheel types ────────────────────────────────────────────────────────
 
 type
@@ -216,6 +220,8 @@ when iouEnabled:
     if sqe == nil: return
     sqe.opcode = IORING_OP_POLL_ADD.uint8
     sqe.fd = loop.wakeFd
+    if loop.ring.isFixedFd(loop.wakeFd):
+      sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.opFlags = uring.POLLIN.uint32
     sqe.userData = loop.wakeToken
     loop.wakeArmed = true
@@ -245,9 +251,10 @@ when iouEnabled:
     sqe.userData = loop.timeoutToken
     loop.timeoutPending = true
 
-  proc flushPending(loop: Loop) =
-    ## Re-arm watchers/wake whose one-shot polls completed, then submit all
-    ## queued SQEs (ops + re-arms + timeout) without waiting.
+  proc flushQueued(loop: Loop) =
+    ## Re-arm watchers/wake whose one-shot polls completed, claiming SQE slots
+    ## for them. Does NOT submit: the single blocking `io_uring_enter` in
+    ## `poll()` submits every queued SQE (re-arms + ops + timeout) in one call.
     var i = 0
     while i < loop.rearmQueue.len:
       let sqe = loop.ring.getSqe()
@@ -263,13 +270,24 @@ when iouEnabled:
       else:
         loop.watcherTokens.del(w.token)
     loop.armWake()
-    discard loop.ring.submit(0, 0)
 
   proc submitNow*(loop: Loop) {.gcsafe.} =
     ## Submit all queued SQEs to the kernel without waiting. Used by higher
     ## layers (e.g. UDP send) that must guarantee an operation is in flight
     ## before the caller can tear the resource down.
     discard loop.ring.submit(0, 0)
+
+  proc registerFixedFd*(loop: Loop, fd: int): bool {.gcsafe.} =
+    ## Install `fd` into the ring's fixed-file table (slot[fd] = fd). Returns
+    ## true when the fd is now eligible for IOSQE_FIXED_FILE ops.
+    loop.ring.updateFixedFile(fd, fd.cint)
+
+  proc unregisterFixedFd*(loop: Loop, fd: int) {.gcsafe.} =
+    ## Clear slot[fd] in the fixed-file table. Must run before `close(fd)` so
+    ## the fd number is still owned while the slot is cleared (avoids a reuse
+    ## race where a fresh connection grabs the same number before we release
+    ## the slot).
+    discard loop.ring.updateFixedFile(fd, -1)
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -310,6 +328,7 @@ proc newLoop*(entries = 4096): Loop =
     result.wakeFd = eventfd(0, EFD_NONBLOCK)
     if result.wakeFd < 0:
       raise newException(OSError, "powpow io_uring: eventfd() failed for wake")
+    discard result.ring.registerFixedFiles(result.wakeFd)
     inc result.nextToken
     result.wakeToken = result.nextToken
     result.armWake()
@@ -437,7 +456,7 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
   loop.fdWatchers[fd] = watcher
   when iouEnabled:
     inc loop.nextToken
-    watcher.token = loop.nextToken
+    watcher.token = loop.nextToken or WatcherTokenTag
     loop.watcherTokens[watcher.token] = fd
     # A higher layer may be taking an op-driven connection over with its own
     # readiness watcher; let it cancel its in-flight ops first.
@@ -514,7 +533,7 @@ proc modify*(loop: Loop, fd: int, events: set[EventType]) {.inline.} =
       let sqe = loop.ring.getSqe()
       if sqe != nil:
         inc loop.nextToken
-        let token = loop.nextToken
+        let token = loop.nextToken or WritabilityTokenTag
         loop.writabilityTokens[token] = fd
         sqe.opcode = IORING_OP_POLL_ADD.uint8
         sqe.fd = fd.cint
@@ -844,24 +863,26 @@ when iouEnabled:
         loop.drainWake()
       elif ud == loop.timeoutToken:
         loop.timeoutPending = false
-      else:
+      elif (ud and WatcherTokenTag) != 0:
+        # Watcher completion: token encodes the category, so no hash probes
+        # are needed to rule out the (more frequent) op completions.
         let fd = loop.watcherTokens.getOrDefault(ud, -1)
         if fd != -1:
           loop.dispatchWatcher(fd, ud, res)
           inc loop.reaped
-        else:
-          let wfd = loop.writabilityTokens.getOrDefault(ud, -1)
-          if wfd != -1:
-            loop.writabilityTokens.del(ud)
-            if res >= 0:
-              for cb in loop.writabilityHooks:
-                cb(wfd)
-          else:
-            let cb = loop.opCbs.getOrDefault(ud)
-            if cb != nil:
-              loop.opCbs.del(ud)
-              cb(ud, res, fl)
-              inc loop.reaped
+      elif (ud and WritabilityTokenTag) != 0:
+        let wfd = loop.writabilityTokens.getOrDefault(ud, -1)
+        if wfd != -1:
+          loop.writabilityTokens.del(ud)
+          if res >= 0:
+            for cb in loop.writabilityHooks:
+              cb(wfd)
+      else:
+        let cb = loop.opCbs.getOrDefault(ud)
+        if cb != nil:
+          loop.opCbs.del(ud)
+          cb(ud, res, fl)
+          inc loop.reaped
 
 # ── main loop ────────────────────────────────────────────────────────────────
 
@@ -881,24 +902,28 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
 
   var nEvents = 0
   when iouEnabled:
-    flushPending(loop)
+    # One io_uring_enter per iteration. Completions are reaped first (posted by
+    # the previous iteration's enter); the submit below then puts every newly-
+    # queued SQE — ops queued by the callbacks just dispatched (read/write
+    # re-arms), watcher re-arms, the wake poll, and the timeout — in flight.
+    # We only block when the iteration did no work (nEvents == 0): after busy
+    # iterations we submit without waiting and return immediately, otherwise a
+    # completion that already settled the caller's condition (e.g. a sync HTTP
+    # response setting `done`) would be stuck behind the blocking enter.
+    loop.reap()
+    nEvents = loop.reaped
+    flushQueued(loop)
     var minComplete: cuint = 0
-    if timeout >= 0:
-      if timeout > 0:
-        armTimeout(loop, timeout)
+    if nEvents == 0:
+      if timeout >= 0:
+        if timeout > 0:
+          armTimeout(loop, timeout)
+          minComplete = 1
+      else:
         minComplete = 1
-    else:
-      minComplete = 1
-    # Single enter per poll: submits every queued SQE (re-arms, ops queued by
-    # callbacks last iteration, the timeout) and blocks for a completion.
     var ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
     while ret == -EINTR:
       ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
-    if ret < 0:
-      loop.reaped = 0
-    loop.reap()
-    nEvents = loop.reaped
-    flushPending(loop)
   else:
     nEvents = loop.platform.poll(timeout)
     for i in 0 ..< nEvents:

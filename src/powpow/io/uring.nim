@@ -50,6 +50,18 @@ const
   IORING_OP_RECV*         = 27
   IORING_OP_SPLICE*       = 30
 
+  # sqe.flags bits
+  IOSQE_FIXED_FILE* = 0x1   # (1U << 0): treat sqe.fd as a fixed-file table index
+
+  # io_uring_register(2) opcodes (linux/io_uring.h)
+  IORING_REGISTER_FILES*          = 2
+  IORING_UNREGISTER_FILES*        = 3
+  IORING_REGISTER_FILES_UPDATE*   = 6
+
+  # fixed-file table size (configurable via -d:powpowFixedFiles=N). Fds at or
+  # above this are served by direct (non-fixed) ops.
+  FixedFilesTableSize* = when defined(powpowFixedFiles): powpowFixedFiles else: 8192
+
   IOSQE_IO_LINK* = 4
 
   # poll() masks (linux/poll.h)
@@ -123,6 +135,12 @@ type
     tvSec*:  int64
     tvNsec*: int64
 
+  IoUringFilesUpdate* = object
+    ## struct io_uring_files_update — for IORING_REGISTER_FILES_UPDATE.
+    offset*: uint32
+    resv*:   uint32
+    fds*:    uint64   # pointer to the int32 fd array to install
+
 # ── Raw syscalls ─────────────────────────────────────────────────────────────
 
 proc iouSyscall(num, a1, a2, a3, a4, a5, a6: clong): clong {.
@@ -131,6 +149,9 @@ proc iouSyscall(num, a1, a2, a3, a4, a5, a6: clong): clong {.
 proc ioUringEnter(fd: cint, toSubmit, minComplete, flags: cuint): cint =
   iouSyscall(IoUringEnterNum, fd.clong, toSubmit.clong, minComplete.clong,
              flags.clong, 0, 0).cint
+
+proc ioUringRegister(fd: cint, opcode, arg: clong, nrArgs: cuint): cint =
+  iouSyscall(IoUringRegisterNum, fd.clong, opcode, arg, nrArgs.clong, 0, 0).cint
 
 # ── Ring ─────────────────────────────────────────────────────────────────────
 
@@ -152,6 +173,8 @@ type
     sqes*:          ptr UncheckedArray[IoUringSqe]
     lastSubmit:     uint32
     maps:           seq[(pointer, int)]
+    fixedFilesEnabled: bool   # IORING_REGISTER_FILES succeeded
+    fixedFilesSize:    int    # size of the registered table (0 when disabled)
     enterCount*:    int
     submitCount*:   int
     reapCount*:     int
@@ -223,8 +246,53 @@ proc close*(ring: Ring) {.gcsafe.} =
     discard munmap(p, len)
   ring.maps.setLen(0)
   if ring.ringFd >= 0:
+    if ring.fixedFilesEnabled:
+      discard ioUringRegister(ring.ringFd, IORING_UNREGISTER_FILES, 0, 0)
+      ring.fixedFilesEnabled = false
     discard posix.close(ring.ringFd)
     ring.ringFd = -1
+
+# ── Fixed files (IORING_REGISTER_FILES) ───────────────────────────────────────
+
+proc isFixedFd*(ring: Ring, fd: int): bool {.inline.} =
+  ## True when `fd` is eligible to be referenced through the fixed-file table
+  ## (registration succeeded and the fd number fits the table).
+  ring.fixedFilesEnabled and fd >= 0 and fd < ring.fixedFilesSize
+
+proc registerFixedFiles*(ring: Ring, wakeFd: int): bool {.gcsafe.} =
+  ## Install a fixed-file table indexed by fd number (`slot[fd] = fd`), sized
+  ## `FixedFilesTableSize`. The wake eventfd slot is pre-filled. Returns false
+  ## when the kernel rejects registration (older kernel / seccomp) — callers
+  ## then keep using direct fds; this is not an error.
+  ring.fixedFilesSize = FixedFilesTableSize
+  var table = newSeq[int32](FixedFilesTableSize)
+  for i in 0 ..< FixedFilesTableSize:
+    table[i] = -1
+  if wakeFd >= 0 and wakeFd < FixedFilesTableSize:
+    table[wakeFd] = wakeFd.cint
+  let ret = ioUringRegister(ring.ringFd, IORING_REGISTER_FILES,
+                            cast[clong](addr table[0]), FixedFilesTableSize.cuint)
+  if ret < 0:
+    ring.fixedFilesEnabled = false
+    ring.fixedFilesSize = 0
+    return false
+  ring.fixedFilesEnabled = true
+  true
+
+proc updateFixedFile*(ring: Ring, fd: int, value: int32): bool {.gcsafe.} =
+  ## Install `value` at slot[fd] (e.g. `fd` when a connection opens, `-1` when
+  ## it closes) via IORING_REGISTER_FILES_UPDATE. Synchronous, so the slot is
+  ## current before any subsequent op on `fd` is submitted.
+  if not ring.isFixedFd(fd):
+    return false
+  var upd = IoUringFilesUpdate(
+    offset: fd.uint32,
+    resv:   0,
+    fds:    cast[uint64](addr value),
+  )
+  # IORING_REGISTER_FILES_UPDATE returns the number of fds updated (1), not 0.
+  result = ioUringRegister(ring.ringFd, IORING_REGISTER_FILES_UPDATE,
+                           cast[clong](addr upd), 1) >= 0
 
 # ── Submission ───────────────────────────────────────────────────────────────
 

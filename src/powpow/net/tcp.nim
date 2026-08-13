@@ -140,6 +140,7 @@ type
       closePending:   bool
       takeoverCbSet:  bool
       sendEagainRetries: int
+      fixedFd:        bool   # fd is registered in the loop's fixed-file table
       tlsOutBuf:      seq[byte]   # encrypted output drained from the SSL write BIO
       tlsOutPos:      int
       tlsWriteToken:  uint64
@@ -163,6 +164,7 @@ type
       acceptToken: uint64
       acceptAddr: Sockaddr_storage
       acceptAddrLen: SockLen
+      fixedFd:     bool   # listener fd is registered in the loop's fixed-file table
     else:
       sharedCb:  FdCallback
 
@@ -225,6 +227,9 @@ when iouEnabled:
     if conn.fd.int >= 0:
       setLinger0(conn.fd)
       conn.loop.unregisterFd(conn.fd.int)
+      if conn.fixedFd:
+        conn.loop.unregisterFixedFd(conn.fd.int)
+        conn.fixedFd = false
       if conn.ssl != nil:
         conn.tlsFree()
       sockClose(conn.fd)
@@ -370,6 +375,8 @@ when iouEnabled:
       return
     sqe.opcode = IORING_OP_RECV.uint8
     sqe.fd = conn.fd.int32
+    if conn.fixedFd:
+      sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.paddr = cast[uint64](conn.readBuf)
     sqe.len = conn.readBufLen.uint32
     conn.readToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
@@ -452,6 +459,8 @@ when iouEnabled:
       return
     sqe.opcode = IORING_OP_SEND.uint8
     sqe.fd = conn.fd.int32
+    if conn.fixedFd:
+      sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.paddr = cast[uint64](addr conn.writeBuf[start])
     sqe.len = (conn.writeBuf.len - start).uint32
     conn.writeToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
@@ -464,6 +473,8 @@ when iouEnabled:
     conn.writeToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
         sqe.opcode = IORING_OP_SEND.uint8
         sqe.fd = conn.fd.int32
+        if conn.fixedFd:
+          sqe.flags = IOSQE_FIXED_FILE.uint8
         sqe.paddr = cast[uint64](addr conn.sendChunk[0])
         sqe.len = n.uint32
       , proc(token: uint64, res2: int32, flags2: uint32) =
@@ -725,6 +736,8 @@ when iouEnabled:
       return
     sqe.opcode = IORING_OP_SEND.uint8
     sqe.fd = conn.fd.int32
+    if conn.fixedFd:
+      sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.paddr = cast[uint64](addr conn.tlsOutBuf[start])
     sqe.len = (conn.tlsOutBuf.len - start).uint32
     conn.tlsWriteToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
@@ -852,6 +865,7 @@ when iouEnabled:
       result.closePending = false
       result.takeoverCbSet = false
       result.sendEagainRetries = 0
+      result.fixedFd = false
       result.tlsOutBuf.setLen(0)
       result.tlsOutPos = 0
       result.tlsWriteToken = 0
@@ -888,6 +902,7 @@ when iouEnabled:
     conn.clientIp = ""
     conn.ssl = nil
     conn.tlsState = TlsOff
+    conn.fixedFd = false
     if server.connPool.len < MaxConnPoolSize:
       server.connPool.add(conn)
     else:
@@ -904,6 +919,8 @@ when iouEnabled:
     server.acceptToken = server.loop.submitOp(proc(sqe: ptr IoUringSqe) =
         sqe.opcode = IORING_OP_ACCEPT.uint8
         sqe.fd = server.fd.int32
+        if server.fixedFd:
+          sqe.flags = IOSQE_FIXED_FILE.uint8
         sqe.paddr = cast[uint64](addr server.acceptAddr)
         sqe.off = cast[uint64](addr server.acceptAddrLen)  # kernel 5.15: socklen_t* in addr2
       , proc(token: uint64, res: int32, flags: uint32) =
@@ -927,6 +944,7 @@ when iouEnabled:
           server.armAccept()
           return
         let conn = server.acquireConnection(clientFd)
+        conn.fixedFd = server.loop.registerFixedFd(clientFd.int)
         conn.clientAddr = server.acceptAddr
         if server.onAccept != nil:
           server.onAccept(conn)
@@ -959,6 +977,7 @@ when iouEnabled:
       raise newException(NetError, "listen() failed")
 
     server.fd = fd
+    server.fixedFd = server.loop.registerFixedFd(fd.int)
     server.armAccept()
 
   when not defined(windows):
@@ -995,6 +1014,7 @@ when iouEnabled:
 
       server.fd = fd
       server.unixPath = path
+      server.fixedFd = server.loop.registerFixedFd(fd.int)
       server.armAccept()
 
   proc close*(server: TcpServer) {.gcsafe.} =
@@ -1008,6 +1028,9 @@ when iouEnabled:
       server.acceptToken = 0
     if server.fd.int >= 0:
       server.loop.unregister(server.fd.int)
+      if server.fixedFd:
+        server.loop.unregisterFixedFd(server.fd.int)
+        server.fixedFd = false
       sockClose(server.fd)
       server.fd = SocketHandle(-1)
     if server.unixPath.len > 0:
@@ -1018,6 +1041,7 @@ when iouEnabled:
 
   proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
     let conn = server.acquireConnection(clientFd)
+    conn.fixedFd = server.loop.registerFixedFd(clientFd.int)
     if server.onAccept != nil:
       server.onAccept(conn)
     if conn.state == Closed:
@@ -1102,9 +1126,12 @@ when iouEnabled:
           )
           let sLen = getSockLen(addr addrBuf)
           conn.connectAddr = addrBuf
+          conn.fixedFd = loop.registerFixedFd(fd.int)
           conn.connectToken = loop.submitOp(proc(sqe: ptr IoUringSqe) =
               sqe.opcode = IORING_OP_CONNECT.uint8
               sqe.fd = fd.int32
+              if conn.fixedFd:
+                sqe.flags = IOSQE_FIXED_FILE.uint8
               sqe.paddr = cast[uint64](addr conn.connectAddr)
               sqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
             , proc(token: uint64, res: int32, flags: uint32) =
@@ -1169,9 +1196,12 @@ when iouEnabled:
       let sLen = (sizeof(sockAddr.sun_family) + pathLen + 1).SockLen
       copyMem(addr conn.connectAddr, addr sockAddr, sLen)
 
+      conn.fixedFd = loop.registerFixedFd(fd.int)
       conn.connectToken = loop.submitOp(proc(sqe: ptr IoUringSqe) =
           sqe.opcode = IORING_OP_CONNECT.uint8
           sqe.fd = fd.int32
+          if conn.fixedFd:
+            sqe.flags = IOSQE_FIXED_FILE.uint8
           sqe.paddr = cast[uint64](addr conn.connectAddr)
           sqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
         , proc(token: uint64, res: int32, flags: uint32) =
