@@ -20,6 +20,7 @@ when not defined(windows):
 type
   SslCtx* = pointer  ## `SSL_CTX*`
   SslPtr* = pointer  ## `SSL*`
+  BioPtr* = pointer  ## `BIO*`
 
 const
   SSL_FILETYPE_PEM* = 1
@@ -52,6 +53,14 @@ proc SSL_CTX_set_default_verify_paths*(c: SslCtx): cint {.
 proc SSL_new*(c: SslCtx): SslPtr {.importc: "SSL_new".}
 proc SSL_free*(s: SslPtr) {.importc: "SSL_free".}
 proc SSL_set_fd*(s: SslPtr; fd: cint): cint {.importc: "SSL_set_fd".}
+proc SSL_set_bio*(s: SslPtr; rbio, wbio: BioPtr) {.importc: "SSL_set_bio".}
+proc SSL_get_rbio*(s: SslPtr): BioPtr {.importc: "SSL_get_rbio".}
+proc SSL_get_wbio*(s: SslPtr): BioPtr {.importc: "SSL_get_wbio".}
+proc SSL_get_pending_write*(s: SslPtr): cint {.importc: "SSL_get_pending_write".}
+proc BIO_new*(b: BioPtr): BioPtr {.importc: "BIO_new".}
+proc BIO_s_mem*(): BioPtr {.importc: "BIO_s_mem".}
+proc BIO_write*(b: BioPtr; buf: pointer; len: cint): cint {.importc: "BIO_write".}
+proc BIO_read*(b: BioPtr; buf: pointer; len: cint): cint {.importc: "BIO_read".}
 proc SSL_set_accept_state*(s: SslPtr) {.importc: "SSL_set_accept_state".}
 proc SSL_set_connect_state*(s: SslPtr) {.importc: "SSL_set_connect_state".}
 proc SSL_do_handshake*(s: SslPtr): cint {.importc: "SSL_do_handshake".}

@@ -110,9 +110,20 @@ when not defined(windows):
     let ssl = SSL_new(ctx.ctx)
     if ssl == nil:
       raise newException(SslError, "SSL_new() failed")
-    if SSL_set_fd(ssl, cint(conn.fd)) != 1:
-      SSL_free(ssl)
-      raise newException(SslError, "SSL_set_fd() failed")
+    when iouEnabled:
+      # io_uring backend: TLS runs over memory BIOs. Ciphertext from the ring's
+      # RECV completions is fed into the read BIO (see io/tcp), and SSL output is
+      # drained from the write BIO and sent via SEND ops. No fd binding.
+      let rbio = BIO_new(BIO_s_mem())
+      let wbio = BIO_new(BIO_s_mem())
+      if rbio == nil or wbio == nil:
+        SSL_free(ssl)
+        raise newException(SslError, "BIO_new() failed")
+      SSL_set_bio(ssl, rbio, wbio)
+    else:
+      if SSL_set_fd(ssl, cint(conn.fd)) != 1:
+        SSL_free(ssl)
+        raise newException(SslError, "SSL_set_fd() failed")
     case ctx.role
     of TlsServer:
       SSL_set_accept_state(ssl)

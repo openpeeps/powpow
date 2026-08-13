@@ -6,27 +6,45 @@
 
 ## This module implements the core event loop and timer wheel. It can be used to build custom event-driven
 ## applications or as the foundation for higher-level abstractions like HTTP servers, WebSocket servers, etc.
-## 
+##
 ## The loop uses a hierarchical timer wheel for efficient timer management, and supports edge-triggered I/O events.
 ## The API is designed to be minimal and efficient, with a focus on low-latency event handling and minimal overhead.
+##
+## Two backends share this single module, selected at compile time:
+##   - readiness (default): `epoll` (Linux), `kqueue` (macOS/BSD), `iocp` (Windows), `poll` (fallback)
+##   - submission (opt-in, Linux): io_uring (`when iouEnabled`), driven by operation completions.
+## The timer wheel, deferred calls, posts, observers and idle handlers are identical in both.
 
 import std/[tables, deques, sets, monotimes, bitops, sequtils, locks]
 when defined(threads):
   import std/threads
+import ./types
+import ./net/common
+export types
 
-import ./platform, ./types
-export types, platform
-
-when defined(windows):
-  proc closesocket(s: int): cint {.importc: "closesocket", stdcall, dynlib: "ws2_32.dll".}
-else:
+when iouEnabled:
   import std/posix
+  import ./io/uring
+  export uring
+else:
+  import ./platform
+  export platform
+  when defined(windows):
+    proc closesocket(s: int): cint {.importc: "closesocket", stdcall, dynlib: "ws2_32.dll".}
+  else:
+    import std/posix
 
 const
   WheelSlots = 256
   WheelLevels = 4
   MaxTimerBatch = 256
   MaxIdleBatch = 64
+  MaxBufPoolSize = 1024
+
+when iouEnabled:
+  proc eventfd(initval: cuint, flags: cint): cint {.
+    importc: "eventfd", header: "<sys/eventfd.h>".}
+  const EFD_NONBLOCK = 0x800
 
 # ── Timer wheel types ────────────────────────────────────────────────────────
 
@@ -42,11 +60,6 @@ type
     paused:   bool
     next:     TimerNode
 
-# ── Timer wheel helpers ──────────────────────────────────────────────────────
-
-proc monoMs*(): int64 {.inline.} =
-  getMonoTime().ticks div 1_000_000
-
 # ── Watcher ──────────────────────────────────────────────────────────────────
 
 type
@@ -55,6 +68,9 @@ type
     events*:        set[EventType]
     callback*:      FdCallback
     edgeTriggered*: bool
+    when iouEnabled:
+      token:          uint64   # io_uring POLL_ADD user_data
+      queued:         bool     # waiting in rearmQueue for an SQE slot
     gen:            int
     alive:          bool
 
@@ -64,11 +80,32 @@ type
     cb*:      ObserverCallback
     alive:    bool
 
+when iouEnabled:
+  type OpCallback* = proc(res: int32, flags: uint32) {.closure.}
+
 # ── Loop ─────────────────────────────────────────────────────────────────────
 
 type
   Loop* = ref object
-    platform*:     Platform
+    when iouEnabled:
+      ring:        Ring
+      wakeFd:      cint
+      wakeToken:   uint64
+      wakeArmed:   bool
+      timeoutToken: uint64
+      timeoutPending: bool
+      timeoutDeadline: int64
+      timeoutTs:   KernelTimespec
+      nextToken:   uint64
+      opCbs:       Table[uint64, OpCallback]
+      watcherTokens: Table[uint64, int]
+      writabilityHooks: seq[proc(fd: int) {.closure.}]
+      writabilityTokens: Table[uint64, int]
+      takeoverCbs: Table[int, proc() {.closure.}]
+      rearmQueue:  seq[FdWatcher]
+      reaped:      int
+    else:
+      platform*:   Platform
     fdWatchers:    Table[int, FdWatcher]
     nextGen:       int
     wheel:         array[4, array[256, TimerNode]]
@@ -104,11 +141,141 @@ type
       ## can detect calls from other threads and defer them to the loop via
       ## `postToLoop` instead of racing the loop thread's connection state.
 
+# ── Timer wheel helpers ──────────────────────────────────────────────────────
+
+proc monoMs*(): int64 {.inline.} =
+  getMonoTime().ticks div 1_000_000
+
+# ── io_uring helpers ─────────────────────────────────────────────────────────
+
+when iouEnabled:
+  proc maskOf(events: set[EventType]): int =
+    if Read in events:  result = result or uring.POLLIN
+    if Write in events: result = result or uring.POLLOUT
+    result = result or uring.POLLRDHUP
+
+  proc eventsOf(mask: int): set[EventType] =
+    if (mask and uring.POLLIN) != 0:  result.incl Read
+    if (mask and uring.POLLOUT) != 0: result.incl Write
+    if (mask and uring.POLLERR) != 0: result.incl Error
+    if (mask and (uring.POLLHUP or uring.POLLRDHUP)) != 0: result.incl Hup
+
+  proc drainWake(loop: Loop) =
+    var val: uint64
+    discard posix.read(loop.wakeFd, addr val, 8)
+
+  proc wake*(loop: Loop) {.inline.} =
+    var val: uint64 = 1
+    discard posix.write(loop.wakeFd, addr val, 8)
+
+# ── io_uring submission helpers ──────────────────────────────────────────────
+
+when iouEnabled:
+  proc getOpSqe*(loop: Loop): ptr IoUringSqe {.gcsafe.} =
+    ## Claim an SQE slot for a submitted operation (no completion callback yet).
+    ## Returns nil when the SQ ring is full.
+    loop.ring.getSqe()
+
+  proc commitOp*(loop: Loop, sqe: ptr IoUringSqe, onDone: OpCallback): uint64 {.gcsafe.} =
+    ## Assign `user_data` to a claimed SQE and register its completion callback.
+    ## `onDone` is stored, never invoked here, so this is GC-safe.
+    inc loop.nextToken
+    let token = loop.nextToken
+    sqe.userData = token
+    loop.opCbs[token] = onDone
+    result = token
+
+  proc submitOp*(loop: Loop, prep: proc(sqe: ptr IoUringSqe) {.closure.},
+                 onDone: OpCallback): uint64 =
+    ## Submit an arbitrary operation. `prep` fills the SQE (opcode/fd/addr/len/
+    ## opFlags); `user_data` and the completion callback are managed here.
+    ## Returns 0 when the SQ ring is full (caller must defer and retry).
+    let sqe = loop.ring.getSqe()
+    if sqe == nil:
+      return 0
+    inc loop.nextToken
+    let token = loop.nextToken
+    prep(sqe)
+    sqe.userData = token
+    loop.opCbs[token] = onDone
+    result = token
+
+  proc cancelOp*(loop: Loop, token: uint64) {.gcsafe.} =
+    ## Best-effort cancellation of an in-flight op identified by its token.
+    if token == 0: return
+    let sqe = loop.ring.getSqe()
+    if sqe == nil: return
+    inc loop.nextToken
+    sqe.opcode = IORING_OP_ASYNC_CANCEL.uint8
+    sqe.paddr = token
+    sqe.userData = loop.nextToken
+
+  proc armWake(loop: Loop) {.gcsafe.} =
+    if loop.wakeArmed: return
+    let sqe = loop.ring.getSqe()
+    if sqe == nil: return
+    sqe.opcode = IORING_OP_POLL_ADD.uint8
+    sqe.fd = loop.wakeFd
+    sqe.opFlags = uring.POLLIN.uint32
+    sqe.userData = loop.wakeToken
+    loop.wakeArmed = true
+
+  proc armTimeout(loop: Loop, ms: int) {.gcsafe.} =
+    let deadline = monoMs() + ms.int64
+    if loop.timeoutPending and loop.timeoutDeadline <= deadline:
+      # The armed timeout fires no later than the requested deadline; reusing it
+      # avoids a cancel-rearm per poll (each cancel completion wakes enter early
+      # and would make the loop spin instead of sleeping).
+      return
+    if loop.timeoutPending:
+      loop.cancelOp(loop.timeoutToken)
+      loop.timeoutPending = false
+    loop.timeoutTs.tvSec = (ms div 1000).int64
+    loop.timeoutTs.tvNsec = ((ms mod 1000) * 1_000_000).int64
+    let sqe = loop.ring.getSqe()
+    if sqe == nil:
+      return
+    inc loop.nextToken
+    loop.timeoutToken = loop.nextToken
+    loop.timeoutDeadline = deadline
+    sqe.opcode = IORING_OP_TIMEOUT.uint8
+    sqe.paddr = cast[uint64](addr loop.timeoutTs)
+    sqe.len = 1
+    sqe.opFlags = 0
+    sqe.userData = loop.timeoutToken
+    loop.timeoutPending = true
+
+  proc flushPending(loop: Loop) =
+    ## Claim SQE slots for watcher/wake re-arms whose one-shot polls completed.
+    ## Does NOT submit: the single `io_uring_enter` in `poll()` submits every
+    ## queued SQE (re-arms + ops + timeout) in one call, so the loop performs
+    ## exactly one enter per iteration.
+    var i = 0
+    while i < loop.rearmQueue.len:
+      let sqe = loop.ring.getSqe()
+      if sqe == nil: break
+      let w = loop.rearmQueue[i]
+      loop.rearmQueue.del(i)
+      if w.alive:
+        sqe.opcode = IORING_OP_POLL_ADD.uint8
+        sqe.fd = w.fd.cint
+        sqe.opFlags = maskOf(w.events).uint32
+        sqe.userData = w.token
+        w.queued = false
+      else:
+        loop.watcherTokens.del(w.token)
+    loop.armWake()
+
+  proc submitNow*(loop: Loop) {.gcsafe.} =
+    ## Submit all queued SQEs to the kernel without waiting. Used by higher
+    ## layers (e.g. UDP send) that must guarantee an operation is in flight
+    ## before the caller can tear the resource down.
+    discard loop.ring.submit(0, 0)
+
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
-proc newLoop*(): Loop =
+proc newLoop*(entries = 4096): Loop =
   result = Loop(
-    platform:    Platform.init(),
     fdWatchers:  initTable[int, FdWatcher](256),
     nextGen:     1,
     wheelBase:   monoMs(),
@@ -121,7 +288,6 @@ proc newLoop*(): Loop =
     deadCount:   0,
     deadFds:     newSeqOfCap[int](16),
     fdWatcherPool: newSeqOfCap[FdWatcher](16),
-
     running:     false,
     stopFlag:    false,
     bufPool:     newSeqOfCap[ptr UncheckedArray[byte]](16),
@@ -140,12 +306,37 @@ proc newLoop*(): Loop =
     ownerThread: (when defined(threads): cast[int](getThreadId()) else: -1),
   )
   initLock(result.postedLock)
+  when iouEnabled:
+    result.ring = initRing(entries)
+    result.wakeFd = eventfd(0, EFD_NONBLOCK)
+    if result.wakeFd < 0:
+      raise newException(OSError, "powpow io_uring: eventfd() failed for wake")
+    inc result.nextToken
+    result.wakeToken = result.nextToken
+    result.armWake()
+    discard result.ring.submit(0, 0)
+  else:
+    result.platform = Platform.init()
 
 proc addCleanup*(loop: Loop; cb: Callback) =
   ## Register a callback that runs on `loop.close()` (on the same thread that
   ## created the loop). Sub-systems that own loop-thread state — e.g. the DNS
   ## resolver's socket and query table — use this to free themselves.
   loop.cleanupCbs.add(cb)
+
+proc acquireBuf*(loop: Loop): ptr UncheckedArray[byte] {.inline.} =
+  if loop.bufPool.len > 0:
+    loop.bufPool.pop()
+  else:
+    cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
+
+proc releaseBuf*(loop: Loop, buf: ptr UncheckedArray[byte]) {.inline.} =
+  ## Return a read buffer to the loop's pool, or deallocate it if the loop is
+  ## closed (the pool has already been freed) or the pool is full.
+  if loop.closed or loop.bufPool.len >= MaxBufPoolSize:
+    deallocShared(buf)
+  else:
+    loop.bufPool.add(buf)
 
 proc close*(loop: Loop) =
   ## Shut the loop down and free its resources. Close servers/connections and
@@ -170,7 +361,13 @@ proc close*(loop: Loop) =
   for buf in loop.bufPool:
     deallocShared(buf)
   loop.bufPool.setLen(0)
-  loop.platform.close()
+  when iouEnabled:
+    if loop.wakeFd >= 0:
+      discard posix.close(loop.wakeFd)
+      loop.wakeFd = -1
+    loop.ring.close()
+  else:
+    loop.platform.close()
 
 # ── Timer wheel ──────────────────────────────────────────────────────────────
 
@@ -227,6 +424,8 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
       old.alive = false
       inc loop.deadCount
       loop.fdWatcherPool.add(old)
+      when iouEnabled:
+        loop.cancelOp(old.token)
   let watcher = if loop.fdWatcherPool.len > 0:
     let w = loop.fdWatcherPool.pop()
     w.fd = fd; w.events = events; w.callback = callback
@@ -237,15 +436,36 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
       fd: fd, events: events, callback: callback,
       edgeTriggered: edgeTriggered, gen: gen, alive: true)
   loop.fdWatchers[fd] = watcher
-  when not defined(windows):
-    # A stale path can register an fd that was already closed and reused (a
-    # closed fd is EBADF to kevent/epoll). Tolerate it: leave the watcher
-    # dormant instead of raising and killing the whole loop.
-    if fcntl(fd.cint, F_GETFD, 0) < 0:
-      watcher.alive = false
-      return
-  loop.platform.add(fd, events, edgeTriggered, cast[pointer](watcher))
-  loop.platform.ensureCapacity(loop.fdWatchers.len)
+  when iouEnabled:
+    inc loop.nextToken
+    watcher.token = loop.nextToken
+    loop.watcherTokens[watcher.token] = fd
+    # A higher layer may be taking an op-driven connection over with its own
+    # readiness watcher; let it cancel its in-flight ops first.
+    let takeover = loop.takeoverCbs.getOrDefault(fd)
+    if takeover != nil:
+      loop.takeoverCbs.del(fd)
+      takeover()
+    let sqe = loop.ring.getSqe()
+    if sqe == nil:
+      watcher.queued = true
+      loop.rearmQueue.add(watcher)
+    else:
+      sqe.opcode = IORING_OP_POLL_ADD.uint8
+      sqe.fd = fd.cint
+      sqe.opFlags = maskOf(events).uint32
+      sqe.userData = watcher.token
+      watcher.queued = false
+  else:
+    when not defined(windows):
+      # A stale path can register an fd that was already closed and reused (a
+      # closed fd is EBADF to kevent/epoll). Tolerate it: leave the watcher
+      # dormant instead of raising and killing the whole loop.
+      if fcntl(fd.cint, F_GETFD, 0) < 0:
+        watcher.alive = false
+        return
+    loop.platform.add(fd, events, edgeTriggered, cast[pointer](watcher))
+    loop.platform.ensureCapacity(loop.fdWatchers.len)
 
 proc unregister*(loop: Loop, fd: int) =
   if fd in loop.fdWatchers:
@@ -254,7 +474,10 @@ proc unregister*(loop: Loop, fd: int) =
     w.alive = false
     inc loop.deadCount
     loop.fdWatcherPool.add(w)
-    loop.platform.remove(fd)
+    when iouEnabled:
+      loop.cancelOp(w.token)
+    else:
+      loop.platform.remove(fd)
 
 proc unregisterFd*(loop: Loop, fd: int) =
   ## Remove fd watcher. On POSIX the fd is already closed by the caller and
@@ -267,15 +490,59 @@ proc unregisterFd*(loop: Loop, fd: int) =
     inc loop.deadCount
     loop.fdWatcherPool.add(w)
     loop.fdWatchers.del(fd)
-    when defined(windows):
-      loop.platform.remove(fd)
+    when iouEnabled:
+      loop.watcherTokens.del(w.token)
+      loop.cancelOp(w.token)
+    else:
+      when defined(windows):
+        loop.platform.remove(fd)
 
 proc modify*(loop: Loop, fd: int, events: set[EventType]) {.inline.} =
-  if fd in loop.fdWatchers:
-    let w = loop.fdWatchers[fd]
-    if w.alive:
-      w.events = events
-      loop.platform.modify(fd, events, w.edgeTriggered, cast[pointer](w))
+  when iouEnabled:
+    if fd in loop.fdWatchers:
+      let w = loop.fdWatchers[fd]
+      if w.alive:
+        w.events = events
+        loop.cancelOp(w.token)
+        if not w.queued:
+          w.queued = true
+          loop.rearmQueue.add(w)
+    elif Write in events and loop.writabilityHooks.len > 0:
+      # Op-driven connections (io/tcp) don't use fd watchers, but higher layers
+      # (e.g. the HTTP server's zero-copy sendfile) still signal "watch for
+      # writability" via `modify(fd, {Read, Write})`. Arm a one-shot POLL_ADD
+      # Write poll and notify the registered hooks when the socket drains.
+      let sqe = loop.ring.getSqe()
+      if sqe != nil:
+        inc loop.nextToken
+        let token = loop.nextToken
+        loop.writabilityTokens[token] = fd
+        sqe.opcode = IORING_OP_POLL_ADD.uint8
+        sqe.fd = fd.cint
+        sqe.opFlags = uring.POLLOUT.uint32
+        sqe.userData = token
+  else:
+    if fd in loop.fdWatchers:
+      let w = loop.fdWatchers[fd]
+      if w.alive:
+        w.events = events
+        loop.platform.modify(fd, events, w.edgeTriggered, cast[pointer](w))
+
+when iouEnabled:
+  proc addWritabilityHook*(loop: Loop, cb: proc(fd: int) {.closure.}) {.gcsafe.} =
+    loop.writabilityHooks.add(cb)
+
+  proc setTakeoverCb*(loop: Loop, fd: int, cb: proc() {.closure.}) {.gcsafe.} =
+    ## Register a callback for an op-driven connection's fd: when a watcher is
+    ## later registered for that fd (a higher layer taking the connection over),
+    ## the callback runs so the TCP layer can cancel its in-flight RECV.
+    loop.takeoverCbs[fd] = cb
+
+  proc clearTakeoverCb*(loop: Loop, fd: int) {.gcsafe.} =
+    loop.takeoverCbs.del(fd)
+
+  proc isWatched*(loop: Loop, fd: int): bool {.inline, gcsafe.} =
+    loop.fdWatchers.hasKey(fd)
 
 # ── deferred calls ──────────────────────────────────────────────────────────
 
@@ -288,7 +555,10 @@ proc postToLoop*(loop: Loop, cb: Callback) =
   ## the loop thread. Requires `--threads:on` for real cross-thread safety.
   withLock(loop.postedLock):
     loop.postedCbs.add(cb)
-  loop.platform.wake()
+  when iouEnabled:
+    loop.wake()
+  else:
+    loop.platform.wake()
 
 # ── timers ───────────────────────────────────────────────────────────────────
 
@@ -395,7 +665,10 @@ proc cancelObserver*(obs: Observer) =
 
 proc stop*(loop: Loop) =
   loop.stopFlag = true
-  loop.platform.wake()
+  when iouEnabled:
+    loop.wake()
+  else:
+    loop.platform.wake()
 
 proc isRunning*(loop: Loop): bool =
   loop.running
@@ -545,6 +818,51 @@ proc sweepDead(loop: Loop) {.inline.} =
       loop.fdWatchers.del(fd)
     loop.deadCount = 0
 
+when iouEnabled:
+  proc dispatchWatcher(loop: Loop, fd: int, token: uint64, res: int32) =
+    let w = loop.fdWatchers.getOrDefault(fd)
+    if w == nil or not w.alive or w.token != token:
+      return
+    if res >= 0:
+      let events = eventsOf(res)
+      if events != {}:
+        w.callback(fd, events)
+    if w.alive and not w.queued:
+      w.queued = true
+      loop.rearmQueue.add(w)
+
+  proc reap(loop: Loop) =
+    loop.reaped = 0
+    while true:
+      let cqe = loop.ring.peekCqe()
+      if cqe == nil: break
+      let ud = cqe.userData
+      let res = cqe.res
+      let fl = cqe.flags
+      loop.ring.advanceCq()
+      if ud == loop.wakeToken:
+        loop.wakeArmed = false
+        loop.drainWake()
+      elif ud == loop.timeoutToken:
+        loop.timeoutPending = false
+      else:
+        let fd = loop.watcherTokens.getOrDefault(ud, -1)
+        if fd != -1:
+          loop.dispatchWatcher(fd, ud, res)
+          inc loop.reaped
+        else:
+          let wfd = loop.writabilityTokens.getOrDefault(ud, -1)
+          if wfd != -1:
+            loop.writabilityTokens.del(ud)
+            if res >= 0:
+              for cb in loop.writabilityHooks:
+                cb(wfd)
+          else:
+            let cb = loop.opCbs.getOrDefault(ud)
+            if cb != nil:
+              loop.opCbs.del(ud)
+              cb(res, fl)
+              inc loop.reaped
 
 # ── main loop ────────────────────────────────────────────────────────────────
 
@@ -562,17 +880,36 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   if timeout < 0:
     timeout = timerTimeout(loop, now)
 
-  let nEvents = loop.platform.poll(timeout)
-
-  for i in 0 ..< nEvents:
-    let pev = loop.platform.events[i]
-    let w = cast[FdWatcher](pev.udata)
-    # Stale-event guard: the watcher pointer in this event must still be the
-    # CURRENT registration for its fd. A watcher that was unregistered and
-    # pooled (then possibly reused for another fd/registration) must not be
-    # dispatched — this is the generation-counter check.
-    if w != nil and w.alive and loop.fdWatchers.getOrDefault(w.fd) == w:
-      w.callback(w.fd, pev.events)
+  var nEvents = 0
+  when iouEnabled:
+    flushPending(loop)
+    var minComplete: cuint = 0
+    if timeout >= 0:
+      if timeout > 0:
+        armTimeout(loop, timeout)
+        minComplete = 1
+    else:
+      minComplete = 1
+    # Single enter per poll: submits every queued SQE (re-arms, ops queued by
+    # callbacks last iteration, the timeout) and blocks for a completion.
+    var ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
+    while ret == -EINTR:
+      ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
+    if ret < 0:
+      loop.reaped = 0
+    loop.reap()
+    nEvents = loop.reaped
+  else:
+    nEvents = loop.platform.poll(timeout)
+    for i in 0 ..< nEvents:
+      let pev = loop.platform.events[i]
+      let w = cast[FdWatcher](pev.udata)
+      # Stale-event guard: the watcher pointer in this event must still be the
+      # CURRENT registration for its fd. A watcher that was unregistered and
+      # pooled (then possibly reused for another fd/registration) must not be
+      # dispatched — this is the generation-counter check.
+      if w != nil and w.alive and loop.fdWatchers.getOrDefault(w.fd) == w:
+        w.callback(w.fd, pev.events)
   if loop.stopFlag: return
 
   if loop.totalTimers > 0:

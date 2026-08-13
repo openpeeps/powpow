@@ -15,11 +15,21 @@
 ## `tcp.connect` uses this resolver, so outbound TCP connections no longer
 ## block the loop on DNS. The resolver runs with no worker threads and no
 ## `--threads:on` requirement.
+##
+## The wire codec, query state machine, cache and public API are shared by both
+## backends; only the UDP I/O differs:
+##   - readiness (default): a raw socket registered for {Read}, `sendto`/
+##     `recvfrom` in the event callback.
+##   - io_uring (`when iouEnabled`): an op-driven `UdpSocket` (`RECVMSG`/
+##     `SENDMSG` — with `IORING_FEAT_FAST_POLL` the kernel arms an internal
+##     poll when the socket is not ready, so no readiness watcher is needed).
 
 import std/[tables, os, strutils]
-import ../loop
 import ../types
+import ../loop
 import common
+when iouEnabled:
+  import udp
 
 const
   DefaultDnsTimeoutMs = 5_000
@@ -67,7 +77,10 @@ type
 
   DnsResolver* = ref object of RootObj
     loop: Loop
-    fd: SocketHandle
+    when iouEnabled:
+      sock: UdpSocket
+    else:
+      fd: SocketHandle
     nextId: uint16
     queries: Table[uint16, DnsQuery]
     cache: Table[string, DnsCacheEntry]
@@ -317,9 +330,12 @@ proc sendQuery(q: DnsQuery) =
   let server = resolver.nameservers[q.serverIdx mod resolver.nameservers.len]
   q.server = server
   let msg = buildQuery(q.id, q.hostname, q.qtype)
-  let sLen = getSockLen(addr server)
-  discard sendto(resolver.fd, unsafeAddr msg[0], msg.len.cint, 0,
-                 cast[ptr Sockaddr](addr server), sLen)
+  when iouEnabled:
+    discard resolver.sock.sendTo(msg, server)
+  else:
+    let sLen = getSockLen(addr server)
+    discard sendto(resolver.fd, unsafeAddr msg[0], msg.len.cint, 0,
+                   cast[ptr Sockaddr](addr server), sLen)
 
 proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; err: string) =
   if q.done: return
@@ -409,31 +425,45 @@ proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: ci
   q.timer = resolver.loop.addTimer(resolver.timeoutMs) do (tid: int):
     onTimeout(q)
 
-proc onDnsReadable(resolver: DnsResolver) =
-  var buf: array[DnsRecvBufSize, byte]
-  while true:
-    var src {.noInit.}: Sockaddr_storage
-    var srcLen: SockLen = sizeof(src).SockLen
-    let n = recvfrom(resolver.fd, addr buf[0], buf.len.cint, 0,
-                     cast[ptr Sockaddr](addr src), addr srcLen)
-    if n <= 0:
-      break
-    if n < 12:
-      continue
-    let id = (uint16(buf[0]) shl 8) or buf[1]
+# ── Receive dispatch ──────────────────────────────────────────────────────────
+
+when iouEnabled:
+  proc onDnsDatagram(resolver: DnsResolver; sender: Sockaddr_storage;
+                     data: openArray[byte]) =
+    if data.len < 12:
+      return
+    let id = (uint16(data[0]) shl 8) or data[1]
     let q = resolver.queries.getOrDefault(id)
     if q == nil or q.done:
-      continue
-    if not sameEndpoint(src, q.server):
-      continue   # not from the nameserver we queried — ignore
-    onDnsResponse(q, buf.toOpenArray(0, n - 1))
+      return
+    if not sameEndpoint(sender, q.server):
+      return   # not from the nameserver we queried — ignore
+    onDnsResponse(q, data)
+else:
+  proc onDnsReadable(resolver: DnsResolver) =
+    var buf: array[DnsRecvBufSize, byte]
+    while true:
+      var src {.noInit.}: Sockaddr_storage
+      var srcLen: SockLen = sizeof(src).SockLen
+      let n = recvfrom(resolver.fd, addr buf[0], buf.len.cint, 0,
+                       cast[ptr Sockaddr](addr src), addr srcLen)
+      if n <= 0:
+        break
+      if n < 12:
+        continue
+      let id = (uint16(buf[0]) shl 8) or buf[1]
+      let q = resolver.queries.getOrDefault(id)
+      if q == nil or q.done:
+        continue
+      if not sameEndpoint(src, q.server):
+        continue   # not from the nameserver we queried — ignore
+      onDnsResponse(q, buf.toOpenArray(0, n - 1))
 
 # ── Resolver lifecycle ────────────────────────────────────────────────────────
 
 proc createResolver(loop: Loop): DnsResolver =
   let resolver = DnsResolver(
     loop: loop,
-    fd: SocketHandle(-1),
     nextId: 0,
     queries: initTable[uint16, DnsQuery](),
     cache: initTable[string, DnsCacheEntry](),
@@ -453,34 +483,45 @@ proc createResolver(loop: Loop): DnsResolver =
     for ip in defaultNameservers():
       resolver.nameservers.add(makeSockaddr(ip, DnsPort))
 
-  let fd = socket(AF_INET, SOCK_DGRAM, 0)
-  if fd.cint < 0:
-    raise newException(NetError, "DNS: socket() failed")
-  setNonBlocking(fd)
-  var local: Sockaddr_in
-  when defined(windows):
-    local.sin_family = AF_INET.cushort
+  when iouEnabled:
+    resolver.sock = loop.bindUdp("0.0.0.0", 0,
+      onData = proc(sender: Sockaddr_storage; data: openArray[byte]) =
+        resolver.onDnsDatagram(sender, data))
   else:
-    local.sin_family = TSa_Family(AF_INET)
-  local.sin_port = 0
-  if bindSocket(fd, cast[ptr Sockaddr](addr local), sizeof(local).SockLen) < 0:
-    sockClose(fd)
-    raise newException(NetError, "DNS: bind() failed")
-  resolver.fd = fd
-  loop.register(fd.int, {Read},
-    edgeTriggered = true,
-    callback = proc(rfd: int, ev: set[EventType]) =
-      if Error in ev or Hup in ev:
-        return
-      if Read in ev:
-        resolver.onDnsReadable()
-  )
+    let fd = socket(AF_INET, SOCK_DGRAM, 0)
+    if fd.cint < 0:
+      raise newException(NetError, "DNS: socket() failed")
+    setNonBlocking(fd)
+    var local: Sockaddr_in
+    when defined(windows):
+      local.sin_family = AF_INET.cushort
+    else:
+      local.sin_family = TSa_Family(AF_INET)
+    local.sin_port = 0
+    if bindSocket(fd, cast[ptr Sockaddr](addr local), sizeof(local).SockLen) < 0:
+      sockClose(fd)
+      raise newException(NetError, "DNS: bind() failed")
+    resolver.fd = fd
+    loop.register(fd.int, {Read},
+      edgeTriggered = true,
+      callback = proc(rfd: int, ev: set[EventType]) =
+        if Error in ev or Hup in ev:
+          return
+        if Read in ev:
+          resolver.onDnsReadable()
+    )
+
   loop.dns = resolver
   loop.addCleanup(proc() =
-    if resolver.fd.int >= 0:
-      loop.unregister(resolver.fd.int)
-      sockClose(resolver.fd)
-      resolver.fd = SocketHandle(-1)
+    when iouEnabled:
+      if resolver.sock != nil:
+        resolver.sock.close()
+        resolver.sock = nil
+    else:
+      if resolver.fd.int >= 0:
+        loop.unregister(resolver.fd.int)
+        sockClose(resolver.fd)
+        resolver.fd = SocketHandle(-1)
     for q in resolver.queries.values:
       if q.timer != TimerId(0):
         loop.cancelTimer(q.timer)
@@ -575,12 +616,16 @@ proc closeDns*(loop: Loop) =
   ## Normally handled automatically by `loop.close()`.
   let r = cast[DnsResolver](loop.dns)
   if r != nil:
-    if r.fd.int >= 0:
-      r.loop.unregister(r.fd.int)
-      sockClose(r.fd)
-      r.fd = SocketHandle(-1)
+    when iouEnabled:
+      if r.sock != nil:
+        r.sock.close()
+        r.sock = nil
+    else:
+      if r.fd.int >= 0:
+        r.loop.unregister(r.fd.int)
+        sockClose(r.fd)
+        r.fd = SocketHandle(-1)
     for q in r.queries.values:
       if q.timer != TimerId(0):
         r.loop.cancelTimer(q.timer)
     r.queries.clear()
-    loop.dns = nil

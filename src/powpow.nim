@@ -14,7 +14,8 @@
 ##
 ## ### Core Event Loop (`loop.nim`)
 ## - Single-threaded non-blocking reactor
-## - I/O multiplexing via kqueue (macOS/BSD), epoll (Linux), IOCP (Windows), or poll (fallback)
+## - I/O multiplexing via kqueue (macOS/BSD), epoll (Linux), IOCP (Windows),
+##   poll (fallback), or the opt-in Linux io_uring backend (`io/`)
 ## - 4-level hierarchical timer wheel — O(1) insert/fire/cancel
 ## - One-shot and repeating interval timers
 ## - Deferred callbacks (executed before each I/O poll iteration)
@@ -115,8 +116,14 @@
 ## ### Platform Abstraction (`platform/`)
 ## - `kqueue` — macOS/BSD (high-performance, edge-triggered)
 ## - `epoll` — Linux (with eventfd wake)
-## - `poll` — POSIX fallback
 ## - `iocp` — Windows (I/O Completion Ports)
+## - `poll` — POSIX fallback
+## - `io/` — Linux io_uring backend (submission-based, opt-in). Enabled with
+##   `nimble --features:io_uring <cmd>`, `requires "powpow[io_uring]"`, or
+##   `nim c -d:powpowIoUring`. The same public API, driven by
+##   `IORING_OP_ACCEPT/RECV/SEND/CONNECT/RECVMSG/SENDMSG/...` completions
+##   instead of readiness events; the generic fd-watcher API is emulated with
+##   one-shot `IORING_OP_POLL_ADD`. Requires Linux >= 5.6.
 ##
 ## ### Networking Common (`net/common.nim`)
 ## - Platform-agnostic socket API and address resolution (IPv4 + IPv6)
@@ -126,11 +133,21 @@
 ## - Auto-initialization (WSAStartup on Windows, SIGPIPE ignore on POSIX)
 
 
-import powpow/[types, platform, loop, net, proto, signal, fswatch]
+import powpow/types
 export types
-export platform except close  # close is on Loop
-export loop
-export net
-export proto
-export signal
-export fswatch
+
+when iouEnabled:
+  import powpow/[loop, net, proto, signal, fswatch]
+  export loop  # close is on Loop
+  export net
+  export proto
+  export signal
+  export fswatch
+else:
+  import powpow/[platform, loop, net, proto, signal, fswatch]
+  export platform except close  # close is on Loop
+  export loop
+  export net
+  export proto
+  export signal
+  export fswatch

@@ -26,6 +26,7 @@
 - Memory-efficient Multipart Form Data parsing and Raw Body handling for file uploads
 - SIMD-accelerated parsing and formatting of HTTP messages
 - Built on top of `epoll` (Linux), and `kqueue` (BSD, macOS), `IOCP` (Windows)
+- Opt-in Linux **io_uring** backend (submission-based, `--features:io_uring`)
 - Support for edge-triggered and level-triggered event notification
 - Support for multiple event loops and multi-threaded applications
 - Support for MIME type detection based on file extensions

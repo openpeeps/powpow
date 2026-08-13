@@ -15,6 +15,13 @@ requires "openparser >= 0.1.8"
 requires "multipart >= 0.1.4"
 requires "checksums >= 0.2.2"
 
+# Features
+
+feature "io_uring":
+  ## Linux io_uring backend (submission-based I/O). Opt-in: build with
+  ## `nimble --features:io_uring <cmd>` or depend via `requires "powpow[io_uring]"`.
+  ## Guarded in code with `when defined(features.powpow.io_uring)`.
+
 # Tasks
 
 task test, "Run the unit test suite":

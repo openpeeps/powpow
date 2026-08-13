@@ -6,6 +6,13 @@
 
 ## powpow/types.nim — Core types shared across all modules.
 
+const
+  iouEnabled* = defined(features.powpow.io_uring) or defined(powpowIoUring)
+    ## Compile-time switch for the Linux io_uring backend. Activated via the
+    ## nimble/clue `--features:io_uring` mechanism (which defines
+    ## `features.powpow.io_uring`) or directly with `-d:powpowIoUring`.
+    ## Guard backend-specific code with `when iouEnabled:`.
+
 type
   EventType* = enum
     Read
