@@ -82,6 +82,13 @@ type
       ## Operator-configurable hard cap for streamed/chunked/multipart bodies
       ## when maxBodySize == 0 (0 = use MaxStreamBodySize). Lets an operator
       ## lower the 512 MB per-connection backstop without changing code.
+    minStreamBodySize*: int64
+      ## Bodies at or above this size are auto-streamed to a temp file when
+      ## they arrive split across reads; smaller bodies are buffered so
+      ## `req.getBodyString()`/`getBody()` work (0 = use MinStreamBodySize,
+      ## the 64 KB default). Streaming exists to keep memory bounded for large
+      ## uploads; buffering small bodies avoids breaking getBodyString when the
+      ## headers and body arrive in separate TCP segments (common on Windows).
     maxFileSize*: int64
       ## Per-file upload cap for multipart bodies (0 = fall back to
       ## maxBodySize's effective cap). Bounds disk usage of a single part
@@ -815,6 +822,7 @@ proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
     keepAliveMs: DefaultKeepAliveMs,
     maxBodySize: 0,
     maxStreamBodySize: 0,
+    minStreamBodySize: 0,
     maxFileSize: 0,
     maxFieldSize: 0,
     maxConnections: 0,
@@ -1020,7 +1028,10 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
         p.setError(Http413)
       except MultipartInvalidHeader:
         p.setError(Http400)
-    elif p.contentLength > 0:
+    elif p.contentLength >= (if server.minStreamBodySize > 0:
+                               server.minStreamBodySize
+                             else:
+                               int64(MinStreamBodySize)):
       let dir = getTempDir()
       discard existsOrCreateDir(dir)
       ctx.sessionStreamPath = dir / $genOid()
