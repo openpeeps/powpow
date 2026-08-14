@@ -861,6 +861,20 @@ proc listen*(wss: WsServer, address: string, port: int) =
                 if ws.conn.state == Connected:
                   ws.conn.loop.modify(efd, {Read})
             if Read in ev or Hup in ev:
+              when iouEnabled:
+                # A still-armed multishot RECV may have swallowed the peer's
+                # first frame between this watcher taking the connection over
+                # and its cancel settling (see tcp.nim's buffer-select path).
+                # Drain it before reading the socket so no frame is lost.
+                if ws.conn.pendingRead.len > 0:
+                  let pending = ws.conn.pendingRead
+                  ws.conn.pendingRead.setLen(0)
+                  ws.parseWsFrames(pending)
+                  if ws.conn.state != Connected:
+                    if efd in wss.conns:
+                      wss.conns.del(efd)
+                      wss.releaseWsConnection(ws)
+                    return
               var buf: array[65536, byte]
               while true:
                 when defined(windows):
@@ -1216,6 +1230,19 @@ proc registerClientFd(ws: WsConnection) =
           if ws.conn.state == Connected:
             ws.conn.loop.modify(fd, {Read})
       if Read in ev or Hup in ev:
+        when iouEnabled:
+          # Drain bytes a still-armed multishot RECV swallowed during the
+          # takeover before the socket is read (see tcp.nim's buffer-select path).
+          if ws.conn.pendingRead.len > 0:
+            let pending = ws.conn.pendingRead
+            ws.conn.pendingRead.setLen(0)
+            if ws.handshakeDone:
+              ws.parseWsFrames(pending)
+            else:
+              ws.handshakeBuf.add(pending)
+              discard ws.finishHandshake()
+            if ws.conn.state != Connected:
+              return
         var buf: array[65536, byte]
         while true:
           let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)

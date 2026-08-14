@@ -58,8 +58,15 @@ Key properties:
   WSL2 6.18 kernel; a failed probe leaves support "permissive" and the runtime
   `-EINVAL` fallbacks handle it.)
 - **Fixed files** (`IORING_REGISTER_FILES` + `IOSQE_FIXED_FILE`) are on by
-  default, indexed by fd number, with a synchronous update per accept/close.
-  `-d:powpowNoFixedFiles` disables them (the WSL2 A/B shows them at parity).
+  default, indexed by fd number, with slot updates **batched**: registrations
+  during an iteration are flushed with a single `IORING_REGISTER_FILES_UPDATE`
+  covering the dirty range right before the submit, instead of one syscall per
+  accept/close. `-d:powpowNoFixedFiles` disables them.
+- **Kernel setup flags**: the ring is created with
+  `IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN` (retrying with fewer
+  flags on `-EINVAL`) to cut per-`io_uring_enter` locking overhead.
+  `IORING_SETUP_DEFER_TASKRUN` is deliberately avoided — it defers completion
+  visibility to task_work and stalls loops that poll with a zero timeout.
 
 ## Operations used
 
@@ -139,18 +146,37 @@ pump, never a nonexistent opcode.
 | `powpowSendZcFixed` | use a registered buffer + `SEND_ZC_FIXED` |
 | `powpowNoSplice` | disable `SPLICE` file sends |
 | `powpowSpliceChunk=N` | splice chunk / pipe size (default 1 MiB) |
-| `powpowShutdownOp` | use `IORING_OP_SHUTDOWN` instead of `sockShutdown` (costs ~40% in `Connection: close` mode) |
-| `powpowNoFixedFiles` | disable `IORING_REGISTER_FILES` |
+| `powpowNoFixedFiles` | disable `IORING_REGISTER_FILES` (fixed-file slot updates are batched: one `IORING_REGISTER_FILES_UPDATE` per loop iteration instead of one per accept/close) |
 | `powpowFixedFiles=N` | fixed-file table size (default 8192) |
-| `powpowBufferSelect` | multishot `RECV` + provided-buffer group |
+| `powpowBufferSelect` | multishot `RECV` + provided-buffer group (see notes below) |
 | `powpowNoMultishotAccept` | force the one-shot accept batch |
+
+Graceful close needs no define: `IORING_OP_SHUTDOWN` is used by default, with
+`IOSQE_CQE_SKIP_SUCCESS` (no CQE, no callback) once the first op verifies the
+kernel supports it (the probe is not authoritative on some kernels, e.g.
+WSL2, so support is verified lazily). A kernel that rejects the opcode locks
+the ring to the `sockShutdown(2)` syscall — never re-trying the SQE per close.
+
+### `powpowBufferSelect` notes
+
+Multishot `RECV` over a shared provided-buffer group keeps one SQE armed per
+connection, removing the per-request re-arm. Validated on WSL2 for HTTP/TCP,
+WebSocket server, and WebSocket client (a takeover of a buffer-select
+connection now buffers any bytes a still-armed RECV swallows before its cancel
+settles, so the first post-upgrade frame is never lost). It measures **slower**
+than the one-shot RECV for small keep-alive HTTP on WSL2 (shared-buffer
+recycling outweighs the re-arm savings), so it stays opt-in pending validation
+on real Linux hardware.
 
 ## Performance
 
-On the WSL2 6.18 box the io_uring backend is at parity with epoll across the
-wrk benchmarks (keep-alive, `Connection: close`, static files), and the
-zero-copy paths (`send_zc`, splice) remove the user-space copies that the
-readiness backend's `sendfile(2)` path performs. A single 10 MB transfer runs
-at ~600 MB/s via splice vs ~650 MB/s via `sendfile(2)` — the gap is the
-per-op completion round-trip, which the connection-bound benchmarks hide
-completely.
+On the WSL2 6.18 box the io_uring backend is at parity with epoll on the wrk
+benchmarks (keep-alive ≈190–220k, `Connection: close` ≈34k, run-to-run
+variance is ~±15%), while cutting per-connection syscalls in close-mode from
+three to zero (fixed-file updates are batched into one
+`IORING_REGISTER_FILES_UPDATE` per iteration, and graceful close uses an
+`IOSQE_CQE_SKIP_SUCCESS` shutdown op). The zero-copy paths (`send_zc`, splice)
+remove the user-space copies that the readiness backend's `sendfile(2)` path
+performs. A single 10 MB transfer runs at ~600 MB/s via splice vs ~650 MB/s
+via `sendfile(2)` — the gap is the per-op completion round-trip, which the
+connection-bound benchmarks hide completely.

@@ -624,10 +624,13 @@ proc kernelVersion*(): tuple[major, minor: int] {.gcsafe.} =
   result.major = parts[0].parseInt()
   result.minor = parts[1].parseInt()
 
-proc kernelAtLeast*(major, minor: int): bool {.inline, gcsafe.} =
+proc kernelAtLeast*(major, minor: int): bool {.gcsafe.} =
   ## True when the running kernel is >= `major.minor`. The kernel version is
   ## read once and cached; an unreadable version is treated as "old" (fast
-  ## paths stay off).
+  ## paths stay off). Not `{.inline.}`: the cached globals must live in a
+  ## single compilation unit, otherwise inlining into several importers (e.g.
+  ## `-d:powpowBufferSelect` pulls this from both `loop.nim` and `tcp.nim`)
+  ## produces duplicate symbols at link time.
   var v {.global, noinit.}: tuple[major, minor: int]
   var ok {.global, noinit.}: bool
   if not ok:
@@ -638,6 +641,11 @@ proc kernelAtLeast*(major, minor: int): bool {.inline, gcsafe.} =
 # ── Ring ─────────────────────────────────────────────────────────────────────
 
 type
+  ShutdownOpState* = enum
+    shutdownUnknown    # opcode not yet verified (probe not authoritative)
+    shutdownVerified   # SHUTDOWN op works: submit with IOSQE_CQE_SKIP_SUCCESS
+    shutdownFailed     # SHUTDOWN op rejected: always use the syscall
+
   Ring* = ref object
     ringFd*:        cint
     entries*:       int
@@ -657,9 +665,16 @@ type
     maps:           seq[(pointer, int)]
     fixedFilesEnabled: bool   # IORING_REGISTER_FILES succeeded
     fixedFilesSize:    int    # size of the registered table (0 when disabled)
+    fixedTable:        seq[int]    # slot -> fd (-1 free), mirrors the kernel table
+    fixedDirtyBits:    seq[uint64] # bitmap of slots whose update is pending
+    fixedDirtyList:    seq[int]    # dirty slots this iteration (deduped via the bitmap)
+    fixedFlushScratch: seq[int32]  # reused contiguous fd array for the flush syscall
+    fixedFileFlushCount*: int      # # of batched flush syscalls performed
+    fixedFileUpdateCount*: int     # # of slot updates flushed
+    shutdownState*: ShutdownOpState = shutdownUnknown  # verified SHUTDOWN op support
     buffersRegistered*: bool   # IORING_REGISTER_BUFFERS succeeded
     features*:      uint32  # IORING_FEAT_* bits reported by io_uring_setup
-    probed:         bool    # IORING_REGISTER_PROBE ran
+    probed*:        bool    # IORING_REGISTER_PROBE ran
     supportedOps:   array[56, bool]  # per-opcode support (index = opcode)
     enterCount*:    int
     submitCount*:   int
@@ -676,9 +691,26 @@ proc raiseFd(fd: var cint) {.inline.} =
 proc initRing*(entries: int = 4096): Ring {.gcsafe.} =
   result = Ring(entries: entries)
   var params: IoUringParams
-  zeroMem(addr params, sizeof(params))
-  let fd = iouSyscall(IoUringSetupNum, entries.clong, cast[clong](addr params),
-                      0, 0, 0, 0)
+  # io_uring_setup flags ladder. Modern kernels accept
+  # IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN, which cut per-enter
+  # locking and wakeup overhead for a single-threaded loop. IORING_SETUP_DEFER_TASKRUN
+  # is deliberately NOT used: it defers completion visibility to task_work, which
+  # stalls loops that poll with a zero timeout and reap the CQ ring immediately.
+  # Unknown flags are rejected with -EINVAL, so retry with fewer until
+  # io_uring_setup succeeds.
+  const FlagLadder = [
+    (IORING_SETUP_SINGLE_ISSUER or IORING_SETUP_COOP_TASKRUN),
+    IORING_SETUP_COOP_TASKRUN,
+    0'u32,
+  ]
+  var fd: clong = -1
+  for flags in FlagLadder:
+    zeroMem(addr params, sizeof(params))
+    params.flags = flags
+    fd = iouSyscall(IoUringSetupNum, entries.clong, cast[clong](addr params),
+                    0, 0, 0, 0)
+    if fd >= 0 or errno != EINVAL:
+      break
   if fd < 0:
     let e = errno
     if e == ENOSYS:
@@ -805,10 +837,7 @@ proc registerFixedFiles*(ring: Ring, wakeFd: int): bool {.gcsafe.} =
   ## then keep using direct fds; this is not an error.
   ##
   ## `-d:powpowNoFixedFiles` disables fixed files entirely (direct fds for
-  ## every op). Registering/updating the table costs a synchronous
-  ## `io_uring_register` syscall per connection (accept + close); the A/B
-  ## escape hatch lets the CI benchmark decide whether that cost is worth the
-  ## per-op fixed-fd savings.
+  ## every op).
   when defined(powpowNoFixedFiles):
     ring.fixedFilesEnabled = false
     ring.fixedFilesSize = 0
@@ -826,22 +855,68 @@ proc registerFixedFiles*(ring: Ring, wakeFd: int): bool {.gcsafe.} =
     ring.fixedFilesSize = 0
     return false
   ring.fixedFilesEnabled = true
+  ring.fixedTable = newSeq[int](FixedFilesTableSize)
+  for i in 0 ..< FixedFilesTableSize:
+    ring.fixedTable[i] = -1
+  if wakeFd >= 0 and wakeFd < FixedFilesTableSize:
+    ring.fixedTable[wakeFd] = wakeFd
+  ring.fixedDirtyBits = newSeq[uint64]((FixedFilesTableSize + 63) div 64)
+  ring.fixedDirtyList = newSeqOfCap[int](64)
+  ring.fixedFlushScratch = newSeq[int32](FixedFilesTableSize)
   true
 
-proc updateFixedFile*(ring: Ring, fd: int, value: int32): bool {.gcsafe.} =
-  ## Install `value` at slot[fd] (e.g. `fd` when a connection opens, `-1` when
-  ## it closes) via IORING_REGISTER_FILES_UPDATE. Synchronous, so the slot is
-  ## current before any subsequent op on `fd` is submitted.
+proc markFixedFileDirty*(ring: Ring, fd: int, value: int32): bool {.gcsafe.} =
+  ## Record a pending fixed-file slot update for `fd` (`value` = the fd to
+  ## install, or -1 to clear the slot). The slot is not pushed to the kernel
+  ## until `flushFixedFiles`; every dirty slot from one loop iteration is then
+  ## installed with a single IORING_REGISTER_FILES_UPDATE covering the dirty
+  ## range, instead of one syscall per accept/close.
   if not ring.isFixedFd(fd):
     return false
+  ring.fixedTable[fd] = value.int
+  let bitIdx = fd shr 6
+  let bitOff = fd and 63
+  let mask = 1'u64 shl bitOff
+  if (ring.fixedDirtyBits[bitIdx] and mask) == 0:
+    ring.fixedDirtyBits[bitIdx] = ring.fixedDirtyBits[bitIdx] or mask
+    ring.fixedDirtyList.add(fd)
+  true
+
+proc flushFixedFiles*(ring: Ring): bool {.gcsafe, discardable.} =
+  ## Install every pending fixed-file slot update with ONE
+  ## IORING_REGISTER_FILES_UPDATE over the dirty `[min .. max]` slot range
+  ## (unchanged slots are harmlessly re-installed). Callers run this right
+  ## before an `io_uring_enter`, so any op referencing a freshly-registered fd
+  ## is submitted after the slot is live. Returns true when a flush syscall ran.
+  if not ring.fixedFilesEnabled or ring.fixedDirtyList.len == 0:
+    return false
+  var minSlot = high(int)
+  var maxSlot = low(int)
+  for fd in ring.fixedDirtyList:
+    if fd < minSlot: minSlot = fd
+    if fd > maxSlot: maxSlot = fd
+  let nr = maxSlot - minSlot + 1
+  for i in 0 ..< nr:
+    ring.fixedFlushScratch[i] = ring.fixedTable[minSlot + i].int32
   var upd = IoUringFilesUpdate(
-    offset: fd.uint32,
+    offset: minSlot.uint32,
     resv:   0,
-    fds:    cast[uint64](addr value),
+    fds:    cast[uint64](addr ring.fixedFlushScratch[0]),
   )
   # IORING_REGISTER_FILES_UPDATE returns the number of fds updated (1), not 0.
-  result = ioUringRegister(ring.ringFd, IORING_REGISTER_FILES_UPDATE,
-                           cast[clong](addr upd), 1) >= 0
+  let ret = ioUringRegister(ring.ringFd, IORING_REGISTER_FILES_UPDATE,
+                            cast[clong](addr upd), nr.cuint)
+  inc ring.fixedFileFlushCount
+  inc ring.fixedFileUpdateCount, nr
+  # Clear the dirty state regardless of the syscall result: resubmitting the
+  # same range on every iteration would spin. A stale slot then surfaces per-op
+  # as -EBADF, which the backends handle by tearing the connection down.
+  for fd in ring.fixedDirtyList:
+    let bitIdx = fd shr 6
+    let bitOff = fd and 63
+    ring.fixedDirtyBits[bitIdx] = ring.fixedDirtyBits[bitIdx] and not (1'u64 shl bitOff)
+  ring.fixedDirtyList.setLen(0)
+  ret >= 0
 
 # ── Registered buffers (IORING_REGISTER_BUFFERS) ──────────────────────────────
 
@@ -882,6 +957,18 @@ proc registerBuffersUpdate*(ring: Ring, offset: int, iov: ptr IOVec): bool {.gcs
   )
   ioUringRegister(ring.ringFd, IORING_REGISTER_BUFFERS_UPDATE,
                   cast[clong](addr upd), sizeof(IoUringRsrcUpdate2).cuint) >= 0
+
+proc syncCancel*(ring: Ring, token: uint64): bool {.gcsafe.} =
+  ## Synchronously cancel the in-flight op whose `user_data == token` via
+  ## IORING_REGISTER_SYNC_CANCEL (kernel >= 5.19). Returns true when the op
+  ## was cancelled. Used when a watcher takes over a multishot buffer-select
+  ## connection: the async cancel would race the still-armed RECV, which could
+  ## swallow bytes the watcher is meant to read.
+  if token == 0 or ring.ringFd < 0:
+    return false
+  var reg = IoUringSyncCancelReg(bufAddr: token)
+  ioUringRegister(ring.ringFd, IORING_REGISTER_SYNC_CANCEL,
+                  cast[clong](addr reg), sizeof(IoUringSyncCancelReg).cuint) == 0
 
 # ── Submission ───────────────────────────────────────────────────────────────
 

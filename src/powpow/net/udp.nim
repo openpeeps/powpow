@@ -82,29 +82,34 @@ when iouEnabled:
   proc armRecv(sock: UdpSocket) =
     if sock.recvToken != 0 or sock.fd.int < 0:
       return
-    sock.recvToken = sock.loop.submitOp(proc(sqe: ptr IoUringSqe) =
-        sqe.opcode = IORING_OP_RECVMSG.uint8
-        sqe.fd = sock.fd.int32
-        if sock.fixedFd:
-          sqe.flags = IOSQE_FIXED_FILE.uint8
-        sqe.paddr = cast[uint64](addr sock.msgHdr)
-        sqe.len = 1
-      , proc(token: uint64, res: int32, flags: uint32) =
-        if sock.recvToken != token:
-          # Stale completion from a previous lifecycle (closed/reused socket).
-          return
-        sock.recvToken = 0
-        if res > 0:
-          if sock.onData != nil:
-            sock.onData(sock.senderAddr, sock.readBuf.toOpenArray(0, res - 1))
-          if sock.recvToken == 0:
-            sock.armRecv()
-        elif res == 0:
-          sock.armRecv()
-        else:
-          if res != -EAGAIN and res != -EINTR and res != -ECONNREFUSED:
-            discard
+    let sqe = sock.loop.getOpSqe()
+    if sqe == nil:
+      sock.loop.deferCall(proc() =
+        if sock.fd.int >= 0 and sock.recvToken == 0:
           sock.armRecv())
+      return
+    sqe.opcode = IORING_OP_RECVMSG.uint8
+    sqe.fd = sock.fd.int32
+    if sock.fixedFd:
+      sqe.flags = IOSQE_FIXED_FILE.uint8
+    sqe.paddr = cast[uint64](addr sock.msgHdr)
+    sqe.len = 1
+    sock.recvToken = sock.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
+      if sock.recvToken != token:
+        # Stale completion from a previous lifecycle (closed/reused socket).
+        return
+      sock.recvToken = 0
+      if res > 0:
+        if sock.onData != nil:
+          sock.onData(sock.senderAddr, sock.readBuf.toOpenArray(0, res - 1))
+        if sock.recvToken == 0:
+          sock.armRecv()
+      elif res == 0:
+        sock.armRecv()
+      else:
+        if res != -EAGAIN and res != -EINTR and res != -ECONNREFUSED:
+          discard
+        sock.armRecv())
 
   proc armSend(sock: UdpSocket) =
     if sock.sendToken != 0 or sock.sendQueue.len == 0 or sock.fd.int < 0:
@@ -128,20 +133,25 @@ when iouEnabled:
         msg_iov:     addr sock.sendIov,
         msg_iovlen:  1,
       )
-    sock.sendToken = sock.loop.submitOp(proc(sqe: ptr IoUringSqe) =
-        sqe.opcode = IORING_OP_SENDMSG.uint8
-        sqe.fd = sock.fd.int32
-        if sock.fixedFd:
-          sqe.flags = IOSQE_FIXED_FILE.uint8
-        sqe.paddr = cast[uint64](addr sock.sendMsgHdr)
-        sqe.len = 1
-      , proc(token: uint64, res: int32, flags: uint32) =
-        if sock.sendToken != token:
-          return
-        sock.sendToken = 0
-        if sock.sendQueue.len > 0:
-          sock.sendQueue.delete(0)
-        sock.armSend())
+    let sqe = sock.loop.getOpSqe()
+    if sqe == nil:
+      sock.loop.deferCall(proc() =
+        if sock.fd.int >= 0 and sock.sendToken == 0:
+          sock.armSend())
+      return
+    sqe.opcode = IORING_OP_SENDMSG.uint8
+    sqe.fd = sock.fd.int32
+    if sock.fixedFd:
+      sqe.flags = IOSQE_FIXED_FILE.uint8
+    sqe.paddr = cast[uint64](addr sock.sendMsgHdr)
+    sqe.len = 1
+    sock.sendToken = sock.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
+      if sock.sendToken != token:
+        return
+      sock.sendToken = 0
+      if sock.sendQueue.len > 0:
+        sock.sendQueue.delete(0)
+      sock.armSend())
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 

@@ -187,6 +187,10 @@ type
       # touched/reused before it does. Until then, new writes coalesce into
       # pendingBuf exactly like they do while a plain SEND op is in flight.
       zcPending:      bool
+      # Bytes a taken-over multishot RECV swallowed between the takeover and the
+      # cancel settling (e.g. a WebSocket upgrade's first frame). The takeover
+      # watcher drains it before reading the socket.
+      pendingRead*:   seq[byte]
       # This connection's in-flight SEND_ZC references the loop's shared
       # registered buffer (send_zc_fixed); its NOTIF releases that buffer.
       zcFixedActive:  bool
@@ -500,6 +504,19 @@ when iouEnabled:
           let bufId =
             if (flags and 0xFFFF0000'u32) != 0: (flags shr 16).int
             else: (res shr 16).int
+          if conn.loop.isWatched(conn.fd.int):
+            # A watcher took this connection over (e.g. a WebSocket upgrade), but
+            # the still-armed multishot RECV grabbed these bytes before the
+            # cancel settled. Buffer them for the takeover watcher and poke it
+            # once so the upgrade never misses the peer's first frame.
+            let bytes = res and 0xFFFF
+            let buf = conn.loop.readBufAt(bufId)
+            let old = conn.pendingRead.len
+            conn.pendingRead.setLen(old + bytes)
+            copyMem(addr conn.pendingRead[old], buf, bytes)
+            conn.loop.recycleReadBuf(bufId)
+            conn.loop.pokeFdWatcher(conn.fd.int)
+            return
           conn.loop.recycleReadBuf(bufId)
         return
       if (flags and uring.IORING_CQE_F_MORE) == 0:
@@ -584,7 +601,11 @@ when iouEnabled:
       conn.takeoverCbSet = true
       conn.loop.setTakeoverCb(conn.fd.int, proc() =
         if conn.readToken != 0:
-          conn.loop.cancelOp(conn.readToken)
+          # Synchronous cancel first: a multishot buffer-select RECV stays armed
+          # and would race the async cancel, swallowing bytes the takeover
+          # watcher (e.g. a WebSocket upgrade) is meant to read. Falls back to
+          # the async cancel when the kernel blocks the register op (WSL2).
+          conn.loop.syncCancelOp(conn.readToken)
           conn.readToken = 0)
     when defined(powpowBufferSelect):
       if conn.tlsState == TlsOff and conn.loop.bufferSelectEnabled():
@@ -622,31 +643,57 @@ when iouEnabled:
   # ── Write path ───────────────────────────────────────────────────────────────
 
   proc onShutdownComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
-    ## Fire-and-forget IORING_OP_SHUTDOWN completion. On failure (e.g. an old
-    ## kernel without the opcode) fall back to the syscall so graceful close
-    ## still delivers the FIN.
-    if res < 0 and conn.state != Closed and conn.fd.int >= 0:
-      sockShutdown(conn.fd, shutWrVal())
+    ## Verification IORING_OP_SHUTDOWN completion. On success the ring is marked
+    ## safe to skip completions for later SHUTDOWN ops
+    ## (IOSQE_CQE_SKIP_SUCCESS); on failure (e.g. an old kernel / WSL2 rejecting
+    ## the opcode) it is marked failed so every subsequent close uses the
+    ## syscall, and the syscall is used for this connection too so the FIN still
+    ## delivers.
+    if res >= 0:
+      conn.loop.markShutdownVerified()
+    else:
+      conn.loop.markShutdownFailed()
+      if conn.state != Closed and conn.fd.int >= 0:
+        sockShutdown(conn.fd, shutWrVal())
 
   proc ringShutdown(conn: Connection) =
     ## Gracefully shut down the write side with IORING_OP_SHUTDOWN (the FIN is
-    ## sent when the op completes; the state machine does not wait on it). Falls
-    ## back to the syscall when the ring has no slot or the op is unsupported.
-    ## Opt-in via `-d:powpowShutdownOp`: the extra op + completion per graceful
-    ## close costs ~40% in connection:close throughput on the WSL2 6.18 box
-    ## (33k → 20k req/s), so the synchronous syscall stays the default.
+    ## sent when the op completes; the state machine does not wait on it).
+    ##
+    ## The kernel's support is verified lazily: the first op runs with a
+    ## completion; on success later ops are submitted with
+    ## IOSQE_CQE_SKIP_SUCCESS (no CQE, no callback, no extra enter wakeup) so
+    ## graceful close costs no syscall and no completion. On rejection the state
+    ## is locked to "failed" and every close goes straight to sockShutdown(2) —
+    ## a WSL2 6.18 kernel returns -EINVAL for the opcode despite the probe being
+    ## unavailable, and retrying the SQE per close is slower than the syscall.
+    ## When the probe is authoritative (real kernels) a supported opcode starts
+    ## in the verified state without a test op.
     if conn.fd.int < 0:
       return
-    when defined(powpowShutdownOp):
-      if conn.loop.supportsOp(uring.IORING_OP_SHUTDOWN):
-        let sqe = conn.loop.getOpSqe()
-        if sqe != nil:
-          sqe.opcode = IORING_OP_SHUTDOWN.uint8
-          sqe.fd = conn.fd.int32
-          sqe.opFlags = shutWrVal().uint32
-          discard conn.loop.commitOp(sqe, conn.shutdownCb)
-          return
-    sockShutdown(conn.fd, shutWrVal())
+    if conn.loop.shutdownFailed() or
+       not conn.loop.supportsOp(uring.IORING_OP_SHUTDOWN):
+      sockShutdown(conn.fd, shutWrVal())
+      return
+    if conn.loop.probeAuthoritative():
+      conn.loop.markShutdownVerified()
+    let sqe = conn.loop.getOpSqe()
+    if sqe == nil:
+      sockShutdown(conn.fd, shutWrVal())
+      return
+    if conn.loop.shutdownVerified():
+      if not conn.loop.hasFeature(uring.IORING_FEAT_CQE_SKIP):
+        sockShutdown(conn.fd, shutWrVal())
+        return
+      sqe.opcode = IORING_OP_SHUTDOWN.uint8
+      sqe.fd = conn.fd.int32
+      sqe.opFlags = shutWrVal().uint32
+      sqe.flags = uring.IOSQE_CQE_SKIP_SUCCESS.uint8
+      return
+    sqe.opcode = IORING_OP_SHUTDOWN.uint8
+    sqe.fd = conn.fd.int32
+    sqe.opFlags = shutWrVal().uint32
+    discard conn.loop.commitOp(sqe, conn.shutdownCb)
 
   proc writeDrained(conn: Connection) =
     ## writeBuf has been fully handed to the kernel and the kernel no longer
@@ -838,14 +885,17 @@ when iouEnabled:
 
   proc sendFileSendChunk(conn: Connection, n: int) =
     conn.sendState = sfSending
-    conn.writeToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
-        sqe.opcode = IORING_OP_SEND.uint8
-        sqe.fd = conn.fd.int32
-        if conn.fixedFd:
-          sqe.flags = IOSQE_FIXED_FILE.uint8
-        sqe.paddr = cast[uint64](addr conn.sendChunk[0])
-        sqe.len = n.uint32
-      , conn.writeCb)
+    let sqe = conn.loop.getOpSqe()
+    if sqe == nil:
+      conn.writeToken = 0   # ring full: same contract as submitOp returning 0
+      return
+    sqe.opcode = IORING_OP_SEND.uint8
+    sqe.fd = conn.fd.int32
+    if conn.fixedFd:
+      sqe.flags = IOSQE_FIXED_FILE.uint8
+    sqe.paddr = cast[uint64](addr conn.sendChunk[0])
+    sqe.len = n.uint32
+    conn.writeToken = conn.loop.commitOp(sqe, conn.writeCb)
 
   proc onSendFileReadComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
     if conn.sendFileToken != token:
@@ -903,19 +953,25 @@ when iouEnabled:
     ## SPLICE(file → pipeW): move a chunk of the file into the splice pipe.
     let toMove = min(conn.sendFileRemain, SpliceChunkSize.int64).int
     conn.sendState = sfSpliceRead
-    conn.sendFileToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
-        sqe.prepSplice(conn.sendFileFd, conn.sendFileOff,
-                       conn.splicePipe[1].int, -1, toMove, 0)
-      , conn.spliceCb)
+    let sqe = conn.loop.getOpSqe()
+    if sqe == nil:
+      conn.sendFileToken = 0   # ring full: same contract as submitOp returning 0
+      return
+    sqe.prepSplice(conn.sendFileFd, conn.sendFileOff,
+                   conn.splicePipe[1].int, -1, toMove, 0)
+    conn.sendFileToken = conn.loop.commitOp(sqe, conn.spliceCb)
 
   proc submitSplicePipeToSocket(conn: Connection) =
     ## SPLICE(pipeR → socket): push the bytes currently in the pipe to the peer.
     let toMove = conn.spliceChunk - conn.spliceSent
     conn.sendState = sfSpliceSend
-    conn.sendFileToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
-        sqe.prepSplice(conn.splicePipe[0].int, -1,
-                       conn.fd.int, -1, toMove, 0)
-      , conn.spliceCb)
+    let sqe = conn.loop.getOpSqe()
+    if sqe == nil:
+      conn.sendFileToken = 0   # ring full: same contract as submitOp returning 0
+      return
+    sqe.prepSplice(conn.splicePipe[0].int, -1,
+                   conn.fd.int, -1, toMove, 0)
+    conn.sendFileToken = conn.loop.commitOp(sqe, conn.spliceCb)
 
   proc onSpliceComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
     if conn.sendFileToken != token:
@@ -1015,13 +1071,16 @@ when iouEnabled:
         conn.sendChunk = newSeq[byte](SendFileChunkSize)
       let toRead = min(conn.sendFileRemain, SendFileChunkSize.int64).int
       conn.sendState = sfReading
-      conn.sendFileToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
-          sqe.opcode = IORING_OP_READ.uint8
-          sqe.fd = conn.sendFileFd.int32
-          sqe.paddr = cast[uint64](addr conn.sendChunk[0])
-          sqe.len = toRead.uint32
-          sqe.off = conn.sendFileOff.uint64
-        , conn.sendFileReadCb)
+      let sqe = conn.loop.getOpSqe()
+      if sqe == nil:
+        conn.sendFileToken = 0   # ring full: same contract as submitOp returning 0
+        return
+      sqe.opcode = IORING_OP_READ.uint8
+      sqe.fd = conn.sendFileFd.int32
+      sqe.paddr = cast[uint64](addr conn.sendChunk[0])
+      sqe.len = toRead.uint32
+      sqe.off = conn.sendFileOff.uint64
+      conn.sendFileToken = conn.loop.commitOp(sqe, conn.sendFileReadCb)
     of sfSpliceSend:
       # Pipe→socket leg parked on -EAGAIN/0: retry once the socket drains.
       if conn.spliceSent < conn.spliceChunk:
@@ -1507,6 +1566,7 @@ when iouEnabled:
       result.spliceSent = 0
       result.pendingBuf.setLen(0)
       result.tlsPending.setLen(0)
+      result.pendingRead.setLen(0)
     else:
       result = Connection(
         fd:        fd,
@@ -1555,6 +1615,7 @@ when iouEnabled:
     conn.spliceSent = 0
     conn.pendingBuf.setLen(0)
     conn.tlsPending.setLen(0)
+    conn.pendingRead.setLen(0)
     if server.connPool.len < MaxConnPoolSize:
       server.connPool.add(conn)
     else:
@@ -1876,14 +1937,18 @@ when iouEnabled:
           let sLen = getSockLen(addr addrBuf)
           conn.connectAddr = addrBuf
           conn.fixedFd = loop.registerFixedFd(fd.int)
-          conn.connectToken = loop.submitOp(proc(sqe: ptr IoUringSqe) =
-              sqe.opcode = IORING_OP_CONNECT.uint8
-              sqe.fd = fd.int32
-              if conn.fixedFd:
-                sqe.flags = IOSQE_FIXED_FILE.uint8
-              sqe.paddr = cast[uint64](addr conn.connectAddr)
-              sqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
-            , proc(token: uint64, res: int32, flags: uint32) =
+          let cSqe = loop.getOpSqe()
+          if cSqe == nil:
+            conn.closeAndRelease()
+            attemptNext()
+            return
+          cSqe.opcode = IORING_OP_CONNECT.uint8
+          cSqe.fd = fd.int32
+          if conn.fixedFd:
+            cSqe.flags = IOSQE_FIXED_FILE.uint8
+          cSqe.paddr = cast[uint64](addr conn.connectAddr)
+          cSqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
+          conn.connectToken = loop.commitOp(cSqe, proc(token: uint64, res: int32, flags: uint32) =
               if conn.connectToken != token:
                 return
               conn.connectToken = 0
@@ -1948,14 +2013,17 @@ when iouEnabled:
       copyMem(addr conn.connectAddr, addr sockAddr, sLen)
 
       conn.fixedFd = loop.registerFixedFd(fd.int)
-      conn.connectToken = loop.submitOp(proc(sqe: ptr IoUringSqe) =
-          sqe.opcode = IORING_OP_CONNECT.uint8
-          sqe.fd = fd.int32
-          if conn.fixedFd:
-            sqe.flags = IOSQE_FIXED_FILE.uint8
-          sqe.paddr = cast[uint64](addr conn.connectAddr)
-          sqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
-        , proc(token: uint64, res: int32, flags: uint32) =
+      let cSqe = loop.getOpSqe()
+      if cSqe == nil:
+        conn.closeAndRelease()
+        return
+      cSqe.opcode = IORING_OP_CONNECT.uint8
+      cSqe.fd = fd.int32
+      if conn.fixedFd:
+        cSqe.flags = IOSQE_FIXED_FILE.uint8
+      cSqe.paddr = cast[uint64](addr conn.connectAddr)
+      cSqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
+      conn.connectToken = loop.commitOp(cSqe, proc(token: uint64, res: int32, flags: uint32) =
           if conn.connectToken != token:
             return
           conn.connectToken = 0

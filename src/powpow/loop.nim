@@ -227,6 +227,17 @@ when iouEnabled:
     sqe.paddr = token
     sqe.userData = loop.nextToken
 
+  proc syncCancelOp*(loop: Loop, token: uint64) {.gcsafe.} =
+    ## Cancel an in-flight op synchronously (IORING_REGISTER_SYNC_CANCEL,
+    ## kernel >= 5.19), falling back to the async cancel when the register op
+    ## is unsupported. The synchronous form is required when a watcher takes
+    ## over a multishot buffer-select connection: the async cancel races the
+    ## still-armed RECV, which could swallow bytes the watcher is meant to
+    ## read (see the WebSocket upgrade path).
+    if token == 0: return
+    if not loop.ring.syncCancel(token):
+      loop.cancelOp(token)
+
   proc armWake(loop: Loop) {.gcsafe.} =
     if loop.wakeArmed: return
     let sqe = loop.ring.getSqe()
@@ -293,7 +304,10 @@ when iouEnabled:
   proc submitNow*(loop: Loop) {.gcsafe.} =
     ## Submit all queued SQEs to the kernel without waiting. Used by higher
     ## layers (e.g. UDP send) that must guarantee an operation is in flight
-    ## before the caller can tear the resource down.
+    ## before the caller can tear the resource down. Pending fixed-file slot
+    ## updates are flushed first so any op referencing a freshly-registered fd
+    ## is ordered after its slot is live.
+    loop.ring.flushFixedFiles()
     discard loop.ring.submit(0, 0)
 
   when defined(powpowBufferSelect):
@@ -332,16 +346,18 @@ when iouEnabled:
                           loop.bufGroupSize, ReadBufBgid)
 
   proc registerFixedFd*(loop: Loop, fd: int): bool {.gcsafe.} =
-    ## Install `fd` into the ring's fixed-file table (slot[fd] = fd). Returns
-    ## true when the fd is now eligible for IOSQE_FIXED_FILE ops.
-    loop.ring.updateFixedFile(fd, fd.cint)
+    ## Install `fd` into the ring's fixed-file table (slot[fd] = fd). The
+    ## update is deferred and flushed with the rest of the iteration's slot
+    ## updates right before the next submit. Returns true when the fd is now
+    ## eligible for IOSQE_FIXED_FILE ops.
+    loop.ring.markFixedFileDirty(fd, fd.cint)
 
   proc unregisterFixedFd*(loop: Loop, fd: int) {.gcsafe.} =
     ## Clear slot[fd] in the fixed-file table. Must run before `close(fd)` so
     ## the fd number is still owned while the slot is cleared (avoids a reuse
     ## race where a fresh connection grabs the same number before we release
     ## the slot).
-    discard loop.ring.updateFixedFile(fd, -1)
+    discard loop.ring.markFixedFileDirty(fd, -1)
 
   proc supportsOp*(loop: Loop, opcode: int): bool {.inline, gcsafe.} =
     ## True when the kernel probe reports `opcode` as supported (or the probe
@@ -351,6 +367,30 @@ when iouEnabled:
   proc hasFeature*(loop: Loop, feat: uint32): bool {.inline, gcsafe.} =
     ## True when the ring advertises the IORING_FEAT_* bit `feat`.
     loop.ring.hasFeature(feat)
+
+  proc probeAuthoritative*(loop: Loop): bool {.inline, gcsafe.} =
+    ## True when IORING_REGISTER_PROBE succeeded, so the per-opcode support
+    ## bitmap (rather than the permissive fallback) is authoritative.
+    loop.ring.probed
+
+  proc markShutdownVerified*(loop: Loop) {.inline, gcsafe.} =
+    ## Record that an IORING_OP_SHUTDOWN op completed successfully; later
+    ## SHUTDOWN ops may submit with IOSQE_CQE_SKIP_SUCCESS (no CQE).
+    loop.ring.shutdownState = uring.shutdownVerified
+
+  proc markShutdownFailed*(loop: Loop) {.inline, gcsafe.} =
+    ## Record that the kernel rejects IORING_OP_SHUTDOWN; graceful close must
+    ## always fall back to the sockShutdown(2) syscall.
+    loop.ring.shutdownState = uring.shutdownFailed
+
+  proc shutdownVerified*(loop: Loop): bool {.inline, gcsafe.} =
+    ## True when IORING_OP_SHUTDOWN is known to work on this ring and may be
+    ## submitted with IOSQE_CQE_SKIP_SUCCESS.
+    loop.ring.shutdownState == uring.shutdownVerified
+
+  proc shutdownFailed*(loop: Loop): bool {.inline, gcsafe.} =
+    ## True when the kernel rejected IORING_OP_SHUTDOWN.
+    loop.ring.shutdownState == uring.shutdownFailed
 
   proc pendingSubmit*(loop: Loop): uint32 {.inline, gcsafe.} =
     ## Number of SQEs claimed but not yet submitted (for callers that must not
@@ -431,6 +471,12 @@ proc newLoop*(entries = 4096): Loop =
   initLock(result.postedLock)
   when iouEnabled:
     result.ring = initRing(entries)
+    # Preallocate the per-op completion table so the hot path never rehashes
+    # (the flat array insert/delete itself allocates nothing).
+    result.opCbs = initTable[uint64, OpCallback](16384)
+    result.watcherTokens = initTable[uint64, int](1024)
+    result.writabilityTokens = initTable[uint64, int](64)
+    result.takeoverCbs = initTable[int, proc() {.closure.}](64)
     discard result.ring.registerProbe()
     result.wakeFd = eventfd(0, EFD_NONBLOCK)
     if result.wakeFd < 0:
@@ -722,6 +768,16 @@ when iouEnabled:
 
   proc isWatched*(loop: Loop, fd: int): bool {.inline, gcsafe.} =
     loop.fdWatchers.hasKey(fd)
+
+  proc pokeFdWatcher*(loop: Loop, fd: int) =
+    ## Synchronously invoke the fd's watcher callback (with a synthetic Read
+    ## event) when it is registered and alive. Used to hand a connection's
+    ## takeover watcher bytes that a still-armed multishot buffer-select RECV
+    ## swallowed before its cancel settled — the socket itself is drained, so
+    ## the watcher must be poked rather than waiting for a Read event.
+    let w = loop.fdWatchers.getOrDefault(fd)
+    if w != nil and w.alive:
+      w.callback(fd, {Read})
 
 # ── deferred calls ──────────────────────────────────────────────────────────
 
@@ -1102,6 +1158,7 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
             minComplete = 1
       else:
         minComplete = 1
+    loop.ring.flushFixedFiles()
     var ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
     while ret == -EINTR:
       ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
