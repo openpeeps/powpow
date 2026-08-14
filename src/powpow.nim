@@ -121,9 +121,12 @@
 ## - `io/` — Linux io_uring backend (submission-based, opt-in). Enabled with
 ##   `nimble --features:io_uring <cmd>`, `requires "powpow[io_uring]"`, or
 ##   `nim c -d:powpowIoUring`. The same public API, driven by
-##   `IORING_OP_ACCEPT/RECV/SEND/CONNECT/RECVMSG/SENDMSG/...` completions
+##   `IORING_OP_ACCEPT/RECV/SEND/CONNECT/SEND_ZC/SPLICE/...` completions
 ##   instead of readiness events; the generic fd-watcher API is emulated with
-##   one-shot `IORING_OP_POLL_ADD`. Requires Linux >= 5.6.
+##   one-shot `IORING_OP_POLL_ADD`. Ships the full `io_uring` API binding
+##   (`io/uring.nim`), `IORING_REGISTER_PROBE` feature detection, zero-copy
+##   `SEND_ZC` and `SPLICE` file sends, and registered buffers
+##   (`IORING_REGISTER_BUFFERS`). Requires Linux >= 5.6.
 ##
 ## ### Networking Common (`net/common.nim`)
 ## - Platform-agnostic socket API and address resolution (IPv4 + IPv6)

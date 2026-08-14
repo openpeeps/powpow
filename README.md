@@ -26,7 +26,9 @@
 - Memory-efficient Multipart Form Data parsing and Raw Body handling for file uploads
 - SIMD-accelerated parsing and formatting of HTTP messages
 - Built on top of `epoll` (Linux), and `kqueue` (BSD, macOS), `IOCP` (Windows)
-- Opt-in Linux **io_uring** backend (submission-based, `--features:io_uring`)
+- Opt-in Linux **io_uring** backend (submission-based, `--features:io_uring`) with
+  zero-copy `send_zc` sends, `SPLICE` file transfers, registered buffers and a
+  full `io_uring` API binding — [documentation](docs/contents/io_uring.md)
 - Support for edge-triggered and level-triggered event notification
 - Support for multiple event loops and multi-threaded applications
 - Support for MIME type detection based on file extensions
@@ -46,6 +48,7 @@ The full documentation lives in [`docs/`](docs/contents/index.md):
 - [Getting started](docs/contents/getting-started.md) — install and your first server
 - [Event loop](docs/contents/core/event-loop.md), [TCP](docs/contents/net/tcp.md),
   [HTTP server](docs/contents/http/server.md), [WebSocket](docs/contents/websocket.md) and more — per-feature guides
+- [io_uring](docs/contents/io_uring.md) — the opt-in Linux submission-based backend
 - [Examples index](docs/contents/examples.md) — every runnable example, its port and commands
 - [API reference](docs/contents/api/README.md) — per-module signatures (plus the [generated reference](https://openpeeps.github.io/powpow))
 - [Performance](docs/contents/performance.md), [Security](docs/contents/security.md), [Testing](docs/contents/testing.md)

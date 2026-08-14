@@ -47,6 +47,11 @@ so `import powpow` brings in everything below.
 
 - [platform](platform.md) — the I/O multiplexer backends (epoll / kqueue / poll / iocp)
 
+## io_uring (Linux)
+
+- [io_uring](../io_uring.md) — the opt-in submission-based backend: ops, zero-copy
+  `send_zc`/`splice`, registered buffers, and the full `io_uring` API binding
+
 ## Notes
 
 - `SignalRelay`, `WsFrameParser` and `Platform` internals are not exported as

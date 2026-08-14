@@ -9,7 +9,8 @@ keywords: ["powpow", "nim", "networking", "event loop", "http", "websocket"]
 A **high-performance event notification library for Nim**. powpow provides a
 low-level event loop and timer wheel, plus higher-level abstractions for
 building TCP, UDP, HTTP/1.1, WebSocket and multi-threaded servers — built on top
-of `epoll` (Linux), `kqueue` (BSD, macOS) and `IOCP` (Windows).
+of `epoll` (Linux), `kqueue` (BSD, macOS) and `IOCP` (Windows), with an opt-in
+Linux **io_uring** backend.
 
 ```bash
 nimble install powpow
@@ -34,6 +35,8 @@ nimble install powpow
 - **Streams** — raw-fd I/O (`IoStream`): pipes, subprocess stdout, socketpair IPC, with read backpressure
 - **Multi-threaded** — `SO_REUSEPORT` workers, one event loop per core
 - **SIMD** — SSE2-accelerated HTTP message scanning
+- **io_uring** — opt-in Linux submission-based backend with zero-copy
+  `send_zc`, `SPLICE` file sends and registered buffers ([guide](io_uring.md))
 
 ## Getting started
 
@@ -52,6 +55,8 @@ nimble install powpow
 @http/server.md
 
 @websocket.md
+
+@io_uring.md
 
 ## Reference
 

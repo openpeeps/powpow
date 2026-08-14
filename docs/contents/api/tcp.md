@@ -94,6 +94,22 @@ proc connectUnix*(loop: Loop; path: string;
                   onData: OnData; onClose: OnClose = nil)             # POSIX
 ```
 
+## io_uring (`when iouEnabled`)
+
+Under the io_uring backend (`-d:powpowIoUring`), the same `Connection` API is
+driven by submission ops instead of readiness events:
+
+- `send`/`sendv` use `IORING_OP_SEND`, upgrading to **`IORING_OP_SEND_ZC`** for
+  payloads at or above `SendZcThreshold` (64 KiB, `-d:powpowSendZcThreshold`);
+  `-d:powpowSendZcFixed` routes them through `SEND_ZC_FIXED` against a
+  registered per-loop buffer.
+- file sends (`sendFileFd` / `continueSendFile`) use **`IORING_OP_SPLICE`**
+  (file → pipe → socket) by default, falling back to a `READ` + `SEND` pump.
+- graceful close uses `sockShutdown(2)` by default; `-d:powpowShutdownOp`
+  switches to `IORING_OP_SHUTDOWN`.
+
+See the [io_uring guide](../io_uring.md).
+
 ## Related
 
 - [common](common.md) — socket primitives

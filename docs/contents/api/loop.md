@@ -73,7 +73,34 @@ proc observe*(loop: Loop; varPtr: ptr uint64; cb: ObserverCallback): Observer
 proc cancelObserver*(obs: Observer)
 ```
 
+## io_uring (`when iouEnabled`)
+
+Available under the io_uring backend (`-d:powpowIoUring`), see the
+[io_uring guide](../io_uring.md):
+
+```nim
+# feature detection (IORING_REGISTER_PROBE)
+proc supportsOp*(loop: Loop, opcode: int): bool        # per-opcode support bitmap
+proc hasFeature*(loop: Loop, feat: uint32): bool       # IORING_FEAT_* bits
+proc ringFdRaw*(loop: Loop): cint                      # raw io_uring fd (diagnostics)
+
+# submission-ring introspection
+proc pendingSubmit*(loop: Loop): uint32                # SQEs claimed, not yet submitted
+proc ringEntries*(loop: Loop): uint32                  # SQE slots in the ring
+
+# zero-copy send (IORING_OP_SEND_ZC)
+proc zcEnabled*(loop: Loop): bool                      # SEND_ZC may be used
+proc zcFixedEnabled*(loop: Loop): bool                 # SEND_ZC_FIXED buffer free
+
+# registered buffers (IORING_REGISTER_BUFFERS)
+proc registerBuffers*(loop: Loop, iovecs: ptr IOVec, count: int): bool
+proc unregisterBuffers*(loop: Loop): bool
+proc registerBuffersUpdate*(loop: Loop, offset: int, iov: ptr IOVec): bool
+proc buffersRegistered*(loop: Loop): bool
+```
+
 ## Related
 
 - [types](types.md) — `EventType`, callbacks, `TimerId`
 - [platform](platform.md) — the underlying multiplexer
+- [io_uring](../io_uring.md) — the opt-in Linux submission-based backend

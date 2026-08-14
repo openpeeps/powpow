@@ -78,6 +78,10 @@ while conn.continueSendFile():         # returns false when done
   discard
 ```
 
+Under the **io_uring** backend the transfer is driven by `IORING_OP_SPLICE`
+(file → pipe → socket) with no user-space copy; see the
+[io_uring guide](../io_uring.md).
+
 ## Closing
 
 ```nim

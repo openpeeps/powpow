@@ -15,8 +15,13 @@ them visible in the source and the benchmark numbers below.
   byte offsets — nothing is copied until you ask for it.
   ([parser](http/parser.md))
 - **Zero-copy file transmission.** Files are sent with `sendfile`
-  (`TransmitFile` on Windows) — no userspace round-trip.
-  ([static files](http/static-files.md))
+  (`TransmitFile` on Windows) — no userspace round-trip. Under the io_uring
+  backend they go through `IORING_OP_SPLICE` (file → pipe → socket), which is
+  equally copy-free. ([static files](http/static-files.md))
+- **Zero-copy sends (io_uring).** `IORING_OP_SEND_ZC` pins the buffer once and
+  reports a `IORING_CQE_F_NOTIF` before the pages may be reused; registered
+  buffers (`-d:powpowSendZcFixed`) remove the per-op pinning entirely.
+  ([io_uring](io_uring.md))
 - **SIMD scanning.** SSE2-accelerated CRLF / CRLFCRLF detection with a scalar
   fallback (`proto/simdscan.nim`). `findDoubleCRLF` locates the header terminator
   in a few instructions per 16 bytes.
