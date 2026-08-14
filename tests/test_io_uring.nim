@@ -11,6 +11,13 @@ import std/unittest
 
 when iouEnabled:
 
+  proc bytesToString(data: openArray[byte]): string =
+    ## Copy an openArray of bytes into a Nim string (a raw `cast` on an
+    ## openArray is invalid — it is not a len-prefixed string/seq).
+    result = newString(data.len)
+    if data.len > 0:
+      copyMem(addr result[0], unsafeAddr data[0], data.len)
+
   # ── 1. Echo over keep-alive (accept + recv + sync write + re-arm) ───────────
 
   test "io_uring keep-alive echo (two requests, one connection)":
@@ -29,9 +36,9 @@ when iouEnabled:
           discard conn.send("ping-1")
         ,
         onData = proc(conn: Connection, data: openArray[byte]) =
-          if cast[string](data) == "ping-1":
+          if bytesToString(data) == "ping-1":
             discard conn.send("ping-2")
-          elif cast[string](data) == "ping-2":
+          elif bytesToString(data) == "ping-2":
             echoes = 2
             conn.close()
             loop.stop()
@@ -63,7 +70,7 @@ when iouEnabled:
           discard conn.send("sq-full")
         ,
         onData = proc(conn: Connection, data: openArray[byte]) =
-          echoed = cast[string](data)
+          echoed = bytesToString(data)
           conn.close()
           loop.stop()
         ,
@@ -108,35 +115,39 @@ when iouEnabled:
         ,
       )
 
-    discard loop.addTimer(30) do (id: int): parkClient()
-    discard loop.addTimer(120) do (id: int):
+    proc closeRound() =
       # Close every parked connection while its RECV is in flight → retire.
       for c in parked:
         c.close()
       parked.setLen(0)
       inc parkRound
       if parkRound < 3:
-        discard loop.addTimer(10) do (id2: int): parkClient()
+        # Re-park a fresh client, then close again after it idles.
+        discard loop.addTimer(15) do (id: int): parkClient()
+        discard loop.addTimer(60) do (id: int): closeRound()
       else:
         # After the retire churn, verify a normal echo still works.
-        discard loop.addTimer(10) do (id2: int):
+        discard loop.addTimer(10) do (id: int):
           loop.connect("127.0.0.1", 19982,
             onConnect = proc(conn: Connection) =
               discard conn.send("post-retire")
             ,
             onData = proc(conn: Connection, data: openArray[byte]) =
-              if cast[string](data) == "post-retire":
+              if bytesToString(data) == "post-retire":
                 okEcho = 1
                 conn.close()
                 loop.stop()
             ,
           )
+
+    discard loop.addTimer(20) do (id: int): parkClient()
+    discard loop.addTimer(100) do (id: int): closeRound()
     discard loop.addTimer(3000) do (id: int):
       server.close()
       loop.stop()
 
     loop.run()
-    doAssert connected >= 4, "expected >= 4 park connects, got " & $connected
+    doAssert connected >= 3, "expected >= 3 park connects, got " & $connected
     doAssert okEcho == 1, "post-retire echo failed"
     loop.close()
 
