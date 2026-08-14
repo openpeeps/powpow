@@ -222,10 +222,12 @@ type
 
 proc newConnection*(fd: SocketHandle, loop: Loop, server: TcpServer,
                     readBuf: ptr UncheckedArray[byte], readBufLen: int): Connection {.inline.} =
-  Connection(
+  result = Connection(
     fd: fd, loop: loop, server: server, state: Closed,
     readBuf: readBuf, readBufLen: readBufLen,
     sendFileFd: -1)
+  when iouEnabled:
+    result.splicePipe = [-1.cint, -1.cint]
 
 proc shutWrVal(): cint {.inline.} =
   when defined(windows): 1 else: SHUT_WR
@@ -627,9 +629,12 @@ when iouEnabled:
     ## Gracefully shut down the write side with IORING_OP_SHUTDOWN (the FIN is
     ## sent when the op completes; the state machine does not wait on it). Falls
     ## back to the syscall when the ring has no slot or the op is unsupported.
+    ## Opt-in via `-d:powpowShutdownOp`: the extra op + completion per graceful
+    ## close costs ~40% in connection:close throughput on the WSL2 6.18 box
+    ## (33k → 20k req/s), so the synchronous syscall stays the default.
     if conn.fd.int < 0:
       return
-    when not defined(powpowNoShutdownOp):
+    when defined(powpowShutdownOp):
       if conn.loop.supportsOp(uring.IORING_OP_SHUTDOWN):
         let sqe = conn.loop.getOpSqe()
         if sqe != nil:
@@ -839,6 +844,13 @@ when iouEnabled:
   # retries on -EAGAIN (socket send buffer full) via the writability watcher.
 
   proc closeSplicePipe(conn: Connection) {.gcsafe.} =
+    ## Tear down the per-connection splice pipe. Guarded by `splicePipeOk`: a
+    ## fresh Connection's `splicePipe` defaults to [0, 0] (zeroed memory), so
+    ## without the guard this would close fd 0/1 (the wake eventfd, stdin) and
+    ## corrupt the loop under connection churn.
+    if not conn.splicePipeOk:
+      conn.splicePipe = [-1.cint, -1.cint]
+      return
     if conn.splicePipe[0] >= 0:
       discard posix.close(conn.splicePipe[0])
       discard posix.close(conn.splicePipe[1])
@@ -1478,6 +1490,7 @@ when iouEnabled:
         sendFileFd: -1,
         readBuf:   acquireBuf(server.loop),
         readBufLen: DefaultBufSize,
+        splicePipe: [-1.cint, -1.cint],
       )
     result.initOpCallbacks()
 
@@ -1830,6 +1843,7 @@ when iouEnabled:
             readBufLen: DefaultBufSize,
             onDataCb:  onData,
             onCloseCb: onClose,
+            splicePipe: [-1.cint, -1.cint],
           )
           conn.initOpCallbacks()
           let sLen = getSockLen(addr addrBuf)
@@ -1891,6 +1905,7 @@ when iouEnabled:
         readBufLen: DefaultBufSize,
         onDataCb:  onData,
         onCloseCb: onClose,
+        splicePipe: [-1.cint, -1.cint],
       )
       conn.initOpCallbacks()
 
