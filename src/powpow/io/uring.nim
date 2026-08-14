@@ -390,24 +390,24 @@ proc setPersonality*(sqe: ptr IoUringSqe, personality: uint16) {.inline.} =
 # These mirror the liburing `io_uring_prep_*` helpers so callers never poke raw
 # SQE fields. All take an already-claimed SQE slot.
 
-proc prepNop(sqe: ptr IoUringSqe) {.inline.} =
+proc prepNop*(sqe: ptr IoUringSqe) {.inline.} =
   sqe.opcode = IORING_OP_NOP.uint8
 
-proc prepRead(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64) {.inline.} =
+proc prepRead*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64) {.inline.} =
   sqe.opcode = IORING_OP_READ.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](buf)
   sqe.len = len.uint32
   sqe.off = off.uint64
 
-proc prepWrite(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64) {.inline.} =
+proc prepWrite*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64) {.inline.} =
   sqe.opcode = IORING_OP_WRITE.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](buf)
   sqe.len = len.uint32
   sqe.off = off.uint64
 
-proc prepReadFixed(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64, bufIndex: uint16) {.inline.} =
+proc prepReadFixed*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64, bufIndex: uint16) {.inline.} =
   sqe.opcode = IORING_OP_READ_FIXED.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](buf)
@@ -415,7 +415,7 @@ proc prepReadFixed(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: in
   sqe.off = off.uint64
   sqe.setBufIndex(bufIndex)
 
-proc prepWriteFixed(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64, bufIndex: uint16) {.inline.} =
+proc prepWriteFixed*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: int64, bufIndex: uint16) {.inline.} =
   sqe.opcode = IORING_OP_WRITE_FIXED.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](buf)
@@ -423,14 +423,14 @@ proc prepWriteFixed(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, off: i
   sqe.off = off.uint64
   sqe.setBufIndex(bufIndex)
 
-proc prepSend(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32) {.inline.} =
+proc prepSend*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_SEND.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](buf)
   sqe.len = len.uint32
   sqe.opFlags = flags
 
-proc prepSendZc(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32, zcFlags: uint32) {.inline.} =
+proc prepSendZc*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32, zcFlags: uint32) {.inline.} =
   ## Prepare IORING_OP_SEND_ZC. `addr2` (the off field) carries zc_flags.
   sqe.opcode = IORING_OP_SEND_ZC.uint8
   sqe.fd = fd.int32
@@ -439,96 +439,96 @@ proc prepSendZc(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uin
   sqe.opFlags = flags
   sqe.off = zcFlags.uint64
 
-proc prepSendZcFixed(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32, zcFlags: uint32, bufIndex: uint16) {.inline.} =
+proc prepSendZcFixed*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32, zcFlags: uint32, bufIndex: uint16) {.inline.} =
   sqe.prepSendZc(fd, buf, len, flags, zcFlags)
   sqe.setBufIndex(bufIndex)
 
-proc prepSendmsg(sqe: ptr IoUringSqe, fd: int, msg: pointer, flags: uint32) {.inline.} =
+proc prepSendmsg*(sqe: ptr IoUringSqe, fd: int, msg: pointer, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_SENDMSG.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](msg)
   sqe.opFlags = flags
 
-proc prepSendmsgZc(sqe: ptr IoUringSqe, fd: int, msg: pointer, flags: uint32, zcFlags: uint32) {.inline.} =
+proc prepSendmsgZc*(sqe: ptr IoUringSqe, fd: int, msg: pointer, flags: uint32, zcFlags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_SENDMSG_ZC.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](msg)
   sqe.opFlags = flags
   sqe.off = zcFlags.uint64
 
-proc prepRecv(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32) {.inline.} =
+proc prepRecv*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_RECV.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](buf)
   sqe.len = len.uint32
   sqe.opFlags = flags
 
-proc prepRecvMultishot(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32) {.inline.} =
+proc prepRecvMultishot*(sqe: ptr IoUringSqe, fd: int, buf: pointer, len: int, flags: uint32) {.inline.} =
   ## One SQE stays armed and delivers every read as a completion with
   ## IORING_CQE_F_MORE (kernel >= 5.19; use with IOSQE_BUFFER_SELECT).
   sqe.prepRecv(fd, buf, len, flags)
   sqe.ioprio = IORING_RECV_MULTISHOT.uint16
 
-proc prepRecvmsg(sqe: ptr IoUringSqe, fd: int, msg: pointer, flags: uint32) {.inline.} =
+proc prepRecvmsg*(sqe: ptr IoUringSqe, fd: int, msg: pointer, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_RECVMSG.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](msg)
   sqe.opFlags = flags
 
-proc prepAccept(sqe: ptr IoUringSqe, fd: int, sa: pointer, addrLen: ptr SockLen, flags: uint32) {.inline.} =
+proc prepAccept*(sqe: ptr IoUringSqe, fd: int, sa: pointer, addrLen: ptr SockLen, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_ACCEPT.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](sa)
   sqe.off = cast[uint64](addrLen)
   sqe.opFlags = flags
 
-proc prepAcceptMultishot(sqe: ptr IoUringSqe, fd: int, flags: uint32) {.inline.} =
+proc prepAcceptMultishot*(sqe: ptr IoUringSqe, fd: int, flags: uint32) {.inline.} =
   ## addr/addrlen must be NULL for multishot accept; the client address is read
   ## via getpeername in the completion handler.
   sqe.opcode = IORING_OP_ACCEPT.uint8
   sqe.fd = fd.int32
   sqe.opFlags = flags or IORING_ACCEPT_MULTISHOT
 
-proc prepConnect(sqe: ptr IoUringSqe, fd: int, sa: pointer, addrLen: int) {.inline.} =
+proc prepConnect*(sqe: ptr IoUringSqe, fd: int, sa: pointer, addrLen: int) {.inline.} =
   sqe.opcode = IORING_OP_CONNECT.uint8
   sqe.fd = fd.int32
   sqe.paddr = cast[uint64](sa)
   sqe.off = addrLen.uint64
 
-proc prepTimeout(sqe: ptr IoUringSqe, ts: ptr KernelTimespec, count: uint32, flags: uint32) {.inline.} =
+proc prepTimeout*(sqe: ptr IoUringSqe, ts: ptr KernelTimespec, count: uint32, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_TIMEOUT.uint8
   sqe.paddr = cast[uint64](ts)
   sqe.len = count
   sqe.opFlags = flags
 
-proc prepTimeoutRemove(sqe: ptr IoUringSqe, userData: uint64, flags: uint32) {.inline.} =
+proc prepTimeoutRemove*(sqe: ptr IoUringSqe, userData: uint64, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_TIMEOUT_REMOVE.uint8
   sqe.paddr = userData
   sqe.opFlags = flags
 
-proc prepLinkTimeout(sqe: ptr IoUringSqe, ts: ptr KernelTimespec, count: uint32, flags: uint32) {.inline.} =
+proc prepLinkTimeout*(sqe: ptr IoUringSqe, ts: ptr KernelTimespec, count: uint32, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_LINK_TIMEOUT.uint8
   sqe.paddr = cast[uint64](ts)
   sqe.len = count
   sqe.opFlags = flags
 
-proc prepCancel(sqe: ptr IoUringSqe, userData: uint64, flags: uint32) {.inline.} =
+proc prepCancel*(sqe: ptr IoUringSqe, userData: uint64, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_ASYNC_CANCEL.uint8
   sqe.paddr = userData
   sqe.opFlags = flags
 
-proc prepCancelFd(sqe: ptr IoUringSqe, fd: int, flags: uint32) {.inline.} =
+proc prepCancelFd*(sqe: ptr IoUringSqe, fd: int, flags: uint32) {.inline.} =
   ## Cancel by fd instead of by user_data (needs IORING_ASYNC_CANCEL_FD).
   sqe.opcode = IORING_OP_ASYNC_CANCEL.uint8
   sqe.fd = fd.int32
   sqe.opFlags = flags or IORING_ASYNC_CANCEL_FD
 
-proc prepShutdown(sqe: ptr IoUringSqe, fd: int, how: uint32) {.inline.} =
+proc prepShutdown*(sqe: ptr IoUringSqe, fd: int, how: uint32) {.inline.} =
   sqe.opcode = IORING_OP_SHUTDOWN.uint8
   sqe.fd = fd.int32
   sqe.opFlags = how
 
-proc prepSplice(sqe: ptr IoUringSqe, fdIn: int, offIn: int64, fdOut: int, offOut: int64, nbytes: int, flags: uint32) {.inline.} =
+proc prepSplice*(sqe: ptr IoUringSqe, fdIn: int, offIn: int64, fdOut: int, offOut: int64, nbytes: int, flags: uint32) {.inline.} =
   ## Zero-copy splice. One end must be a pipe. `fd` carries fd_out, `off` the
   ## output offset, `paddr` the input offset, `splice_fd_in` the input fd.
   sqe.opcode = IORING_OP_SPLICE.uint8
@@ -539,26 +539,26 @@ proc prepSplice(sqe: ptr IoUringSqe, fdIn: int, offIn: int64, fdOut: int, offOut
   sqe.setSpliceFdIn(fdIn.int32)
   sqe.opFlags = flags
 
-proc prepTee(sqe: ptr IoUringSqe, fdIn: int, fdOut: int, nbytes: int, flags: uint32) {.inline.} =
+proc prepTee*(sqe: ptr IoUringSqe, fdIn: int, fdOut: int, nbytes: int, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_TEE.uint8
   sqe.fd = fdOut.int32
   sqe.setSpliceFdIn(fdIn.int32)
   sqe.len = nbytes.uint32
   sqe.opFlags = flags
 
-proc prepProvideBuffers(sqe: ptr IoUringSqe, bufAddr: pointer, nbufs: int, bufLen: int, bgid: uint16) {.inline.} =
+proc prepProvideBuffers*(sqe: ptr IoUringSqe, bufAddr: pointer, nbufs: int, bufLen: int, bgid: uint16) {.inline.} =
   sqe.opcode = IORING_OP_PROVIDE_BUFFERS.uint8
   sqe.fd = nbufs.int32
   sqe.paddr = cast[uint64](bufAddr)
   sqe.len = bufLen.uint32
   sqe.setBufGroup(bgid)
 
-proc prepRemoveBuffers(sqe: ptr IoUringSqe, count: int, bgid: uint16) {.inline.} =
+proc prepRemoveBuffers*(sqe: ptr IoUringSqe, count: int, bgid: uint16) {.inline.} =
   sqe.opcode = IORING_OP_REMOVE_BUFFERS.uint8
   sqe.fd = count.int32
   sqe.setBufGroup(bgid)
 
-proc prepFilesUpdate(sqe: ptr IoUringSqe, offset: int, fds: ptr int32, nr: int) {.inline.} =
+proc prepFilesUpdate*(sqe: ptr IoUringSqe, offset: int, fds: ptr int32, nr: int) {.inline.} =
   ## SQE-based fixed-file table update (kernel >= 5.19). Asynchronous: the
   ## completion reports the number of slots updated.
   sqe.opcode = IORING_OP_FILES_UPDATE.uint8
@@ -566,24 +566,24 @@ proc prepFilesUpdate(sqe: ptr IoUringSqe, offset: int, fds: ptr int32, nr: int) 
   sqe.paddr = cast[uint64](fds)
   sqe.len = nr.uint32
 
-proc prepMsgRing(sqe: ptr IoUringSqe, ringFd: int, len: uint32, flags: uint32, userData: uint64) {.inline.} =
+proc prepMsgRing*(sqe: ptr IoUringSqe, ringFd: int, len: uint32, flags: uint32, userData: uint64) {.inline.} =
   sqe.opcode = IORING_OP_MSG_RING.uint8
   sqe.fd = ringFd.int32
   sqe.len = len
   sqe.opFlags = flags
   sqe.paddr = userData
 
-proc prepClose(sqe: ptr IoUringSqe, fd: int) {.inline.} =
+proc prepClose*(sqe: ptr IoUringSqe, fd: int) {.inline.} =
   sqe.opcode = IORING_OP_CLOSE.uint8
   sqe.fd = fd.int32
 
-proc prepSocket(sqe: ptr IoUringSqe, domain: int, typ: int, protocol: int, flags: uint32) {.inline.} =
+proc prepSocket*(sqe: ptr IoUringSqe, domain: int, typ: int, protocol: int, flags: uint32) {.inline.} =
   sqe.opcode = IORING_OP_SOCKET.uint8
   sqe.fd = domain.int32
   sqe.opFlags = flags
   sqe.paddr = (typ.uint32 shl 32) or protocol.uint32
 
-proc prepPollAdd(sqe: ptr IoUringSqe, fd: int, pollMask: uint32, addFlags: uint32) {.inline.} =
+proc prepPollAdd*(sqe: ptr IoUringSqe, fd: int, pollMask: uint32, addFlags: uint32) {.inline.} =
   ## One-shot (or multishot with IORING_POLL_ADD_MULTI) poll. Since kernel 5.16
   ## the poll mask lives in poll32_events and POLL_ADD flags in sqe.len.
   sqe.opcode = IORING_OP_POLL_ADD.uint8
@@ -591,7 +591,7 @@ proc prepPollAdd(sqe: ptr IoUringSqe, fd: int, pollMask: uint32, addFlags: uint3
   sqe.opFlags = pollMask
   sqe.len = addFlags
 
-proc prepPollRemove(sqe: ptr IoUringSqe, userData: uint64) {.inline.} =
+proc prepPollRemove*(sqe: ptr IoUringSqe, userData: uint64) {.inline.} =
   sqe.opcode = IORING_OP_POLL_REMOVE.uint8
   sqe.paddr = userData
 

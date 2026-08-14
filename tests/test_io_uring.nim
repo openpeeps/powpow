@@ -8,6 +8,7 @@
 
 import ../src/powpow
 import std/unittest
+import std/[strutils, os]
 
 when iouEnabled:
 
@@ -232,6 +233,145 @@ when iouEnabled:
     doAssert uring.IORING_CQE_F_MORE == 2
     doAssert uring.IORING_CQE_F_SOCK_NONEMPTY == 4
     doAssert uring.IORING_CQE_F_NOTIF == 8
+
+  # ── 7. SEND_ZC: large payloads go through IORING_OP_SEND_ZC on both peers;
+  #     the IORING_CQE_F_NOTIF completion must gate writeBuf reuse so a follow-up
+  #     write never corrupts bytes the kernel is still referencing.
+
+  test "io_uring large send_zc payload round-trips":
+    const Payload = 256 * 1024   # > SendZcThreshold (64 KiB), forces SEND_ZC
+    var serverAccum = newSeq[byte](0)
+    var received = newSeq[byte](0)
+    let loop = newLoop()
+    let server = newTcpServer(loop,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        serverAccum.add(@data)
+        if serverAccum.len >= Payload:
+          # Echo the whole request back as ONE large send → server SEND_ZC.
+          discard conn.send(serverAccum)
+      ,
+    )
+    server.listen("127.0.0.1", 19984)
+
+    discard loop.addTimer(40) do (id: int):
+      loop.connect("127.0.0.1", 19984,
+        onConnect = proc(conn: Connection) =
+          # One large send → client SEND_ZC.
+          var big = newSeq[byte](Payload)
+          for i in 0 ..< Payload: big[i] = byte(i and 0xFF)
+          discard conn.send(big)
+        ,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          received.add(data)
+          if received.len >= Payload:
+            conn.close()
+            loop.stop()
+        ,
+      )
+    discard loop.addTimer(5000) do (id: int):
+      server.close()
+      loop.stop()
+
+    loop.run()
+    doAssert received.len == Payload,
+      "expected " & $Payload & " bytes, got " & $received.len
+    var ok = true
+    for i in 0 ..< Payload:
+      if received[i] != byte(i and 0xFF):
+        ok = false
+        break
+    doAssert ok, "payload corruption across SEND_ZC + NOTIF"
+    loop.close()
+
+  # ── 8. SPLICE file sends: a static file served over io_uring uses the
+  #     file→pipe→socket IORING_OP_SPLICE pump. Full and Range (206) requests
+  #     must deliver byte-exact content (multi-chunk for > 64 KiB files).
+
+  test "io_uring splice file send (full + range)":
+    const
+      FilePath = getTempDir() / "pp_iou_splice_test.bin"
+      FileSize = 512 * 1024     # > SendFileChunkSize (64 KiB): multi-chunk
+      Port = 19985
+
+    var content = newSeq[byte](FileSize)
+    for i in 0 ..< FileSize:
+      content[i] = byte(i and 0xFF)
+    writeFile(FilePath, content)
+
+    proc serve(path, extraHeaders: string): tuple[status: int; ok: bool; bodyLen: int] =
+      var received = newSeq[byte](0)
+      var contentLen = -1
+      var status = 0
+      let loop = newLoop()
+      let server = newHttpServer(loop)
+      server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+        {.gcsafe.}:
+          res.sendFile(FilePath, req, closeConn = false, contentDisposition = false)
+      server.listen("127.0.0.1", Port)
+
+      discard loop.addTimer(50) do (id: int):
+        loop.connect("127.0.0.1", Port,
+          onConnect = proc(conn: Connection) =
+            discard conn.send("GET " & path & " HTTP/1.1\r\nHost: localhost\r\n" &
+                              extraHeaders & "\r\n")
+          ,
+          onData = proc(conn: Connection, data: openArray[byte]) =
+            received.add(@data)
+            if contentLen < 0:
+              let hdr = bytesToString(data)
+              for line in hdr.split("\r\n"):
+                if line.toLowerAscii().startsWith("content-length:"):
+                  try:
+                    contentLen = parseInt(line.split(':')[^1].strip())
+                  except ValueError:
+                    discard
+            if contentLen >= 0 and received.len >= contentLen:
+              conn.close()
+              loop.stop()
+          ,
+        )
+      discard loop.addTimer(4000) do (id: int):
+        server.close()
+        loop.stop()
+
+      loop.run()
+      server.close()
+      loop.close()
+      if received.len == 0:
+        return (0, false, 0)
+      let resp = bytesToString(received)
+      let line = resp.split("\r\n")[0]
+      status = try: parseInt(line.split(' ')[1]) except: 0
+      result.status = status
+      # Verify the body against the deterministic pattern. hdrEnd is already the
+      # offset one past the final "\r\n\r\n", i.e. where the body begins.
+      var hdrEnd = -1
+      for i in 0 ..< received.len - 3:
+        if received[i] == 13 and received[i + 1] == 10 and
+           received[i + 2] == 13 and received[i + 3] == 10:
+          hdrEnd = i + 4
+          break
+      if hdrEnd >= 0:
+        let bodyStart = hdrEnd
+        var ok = true
+        for i in 0 ..< received.len - bodyStart:
+          if received[bodyStart + i] != byte((i and 0xFF)):
+            ok = false
+            break
+        result.ok = ok
+        result.bodyLen = received.len - bodyStart
+
+    let full = serve("/file", "")
+    doAssert full.status == 200, "full request status " & $full.status
+    doAssert full.ok, "full request body corrupt"
+    doAssert full.bodyLen == FileSize, "full body len " & $full.bodyLen
+
+    const RangeLen = 256 * 1024
+    let rng = serve("/range", "Range: bytes=0-" & $(RangeLen - 1) & "\r\n")
+    doAssert rng.status == 206, "range request status " & $rng.status
+    doAssert rng.ok, "range request body corrupt"
+    doAssert rng.bodyLen == RangeLen, "range body len " & $rng.bodyLen
+    removeFile(FilePath)
 
 else:
   echo "io_uring tests skipped (backend not enabled)"

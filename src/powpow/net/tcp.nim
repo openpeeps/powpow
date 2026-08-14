@@ -94,14 +94,25 @@ when iouEnabled:
       sfIdle
       sfReading
       sfSending
+      sfSpliceRead     # SPLICE(file → pipe) in flight
+      sfSpliceSend     # SPLICE(pipe → socket) in flight
       # NOTE: there is no IORING_OP_SENDFILE. Zero-copy file→socket transfers
-      # will be added via IORING_OP_SPLICE (file→pipe→socket); until then the
-      # READ + SEND chunk pump is the only path.
+      # use IORING_OP_SPLICE (file→pipe→socket); the READ + SEND chunk pump is
+      # the fallback.
 
   const
     MaxEagainRetries = 1
     AcceptBatch = 8   # outstanding one-shot IORING_OP_ACCEPT ops per listener
     AcceptReserveSlots = 2   # SQ slots kept free for the timeout + re-arms
+    F_SETPIPE_SZ = 1031   # fcntl(2): resize a pipe buffer (linux/fcntl.h)
+    SendZcThreshold = when defined(powpowSendZcThreshold): powpowSendZcThreshold else: 64 * 1024
+    SpliceChunkSize = when defined(powpowSpliceChunk): powpowSpliceChunk else: 1_048_576
+      ## Bytes moved per file→pipe SPLICE. Kernel-to-kernel, so unlike the
+      ## READ + SEND fallback there is no user-space buffer — a large chunk
+      ## (and a matching pipe) keeps the number of ops/completions low and
+      ## approaches sendfile(2) throughput.
+      ## Payloads at or above this size are sent with IORING_OP_SEND_ZC (below it
+      ## the page-pinning cost exceeds the copy the zero-copy send avoids).
 
 type
   ConnState* = enum
@@ -156,12 +167,25 @@ type
       writeCb:        OpCallback
       tlsWriteCb:     OpCallback
       sendFileReadCb: OpCallback
+      spliceCb:       OpCallback
       bufferReadCb:   OpCallback
+      # Per-connection pipe for zero-copy SPLICE file transfers. A shared loop
+      # pipe is not safe: concurrent transfers would interleave in the FIFO and
+      # splice the wrong peer's bytes to a socket.
+      splicePipe:     array[2, cint]   # [0] = read end, [1] = write end
+      splicePipeOk:   bool
+      spliceChunk:    int    # bytes currently in the pipe awaiting socket send
+      spliceSent:     int    # bytes of the current chunk already sent to socket
       # Coalesce buffer for writes arriving while a SEND op references
       # writeBuf/tlsOutBuf (appending to the in-flight seq could reallocate the
       # very memory the kernel SEND is reading). Merged once the op drains.
       pendingBuf:     seq[byte]
       tlsPending:     seq[byte]
+      # Zero-copy send in flight: writeBuf's pages are pinned by the kernel until
+      # the IORING_CQE_F_NOTIF completion arrives, so writeBuf must not be
+      # touched/reused before it does. Until then, new writes coalesce into
+      # pendingBuf exactly like they do while a plain SEND op is in flight.
+      zcPending:      bool
       # Retired connection: closed while an op was still in flight. Its read
       # buffer / send chunk stay alive until every outstanding op settles, so
       # the kernel can never write into a re-pooled buffer.
@@ -248,6 +272,7 @@ when iouEnabled:
   proc beginRetire(conn: Connection) {.gcsafe.}
   proc retireSettled(conn: Connection, token: uint64): bool {.gcsafe.}
   proc retireFinalize(conn: Connection) {.gcsafe.}
+  proc closeSplicePipe(conn: Connection) {.gcsafe.}
 
   # ── Connection ───────────────────────────────────────────────────────────────
 
@@ -264,6 +289,7 @@ when iouEnabled:
         conn.tlsFree()
       sockClose(conn.fd)
       conn.fd = SocketHandle(-1)
+    conn.closeSplicePipe()
     conn.writeBuf.setLen(0)
     conn.writePos = 0
 
@@ -355,10 +381,11 @@ when iouEnabled:
     if data.len == 0:
       return true
     # A SEND op references writeBuf[writePos .. ^1]; appending to it could
-    # reallocate the buffer the kernel is reading (use-after-free). Coalesce
-    # into pendingBuf instead and promote it once the in-flight SEND drains
-    # (see onWriteComplete).
-    if conn.writeToken != 0:
+    # reallocate the buffer the kernel is reading (use-after-free). The same
+    # holds while a SEND_ZC op is in flight and writeBuf's pages are pinned.
+    # Coalesce into pendingBuf instead and promote it once the in-flight op
+    # drains (see onWriteComplete).
+    if conn.writeToken != 0 or conn.zcPending:
       if conn.writeBuf.len + conn.pendingBuf.len + data.len > MaxWriteBufferSize:
         conn.close()
         return false
@@ -588,13 +615,66 @@ when iouEnabled:
 
   # ── Write path ───────────────────────────────────────────────────────────────
 
+  proc writeDrained(conn: Connection) =
+    ## writeBuf has been fully handed to the kernel and the kernel no longer
+    ## references it (a plain SEND completion, or the SEND_ZC NOTIF). Reset it,
+    ## promote any coalesced pending writes, and drive the post-write state
+    ## machine (close-after-flush / shutdown-after-send / read re-arm).
+    conn.writeBuf.setLen(0)
+    conn.writePos = 0
+    if conn.pendingBuf.len > 0:
+      # Writes queued while a SEND was in flight: promote them (shared data
+      # pointer, so nothing is copied) and keep the write pump going.
+      conn.writeBuf = conn.pendingBuf
+      conn.pendingBuf.setLen(0)
+      if not conn.corked:
+        setTcpCork(conn.fd, true)
+        conn.corked = true
+      conn.armWrite()
+      return
+    if conn.corked:
+      setTcpCork(conn.fd, false)
+      conn.corked = false
+    if conn.closePending:
+      conn.closePending = false
+      conn.finishClose()
+      if conn.server != nil:
+        conn.server.releaseConnection(conn)
+      elif not conn.retiring:
+        if conn.readBuf != nil:
+          releaseBuf(conn.loop, conn.readBuf)
+          conn.readBuf = nil
+    elif conn.sendFileFd >= 0:
+      conn.pumpSendFile()
+    elif conn.closeAfterFlush:
+      conn.close()
+      conn.fireClose()
+    elif conn.shutdownAfterSend:
+      conn.state = Closing
+      sockShutdown(conn.fd, shutWrVal())
+    else:
+      conn.armRead()
+
   proc onWriteComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
     if conn.writeToken != token:
       return
-    conn.writeToken = 0
+    if (flags and uring.IORING_CQE_F_NOTIF) != 0:
+      # Zero-copy notification: the kernel is done with writeBuf's pages. The
+      # token was kept set since the SEND_ZC data completion, so nothing reused
+      # the buffer in between; settle it now.
+      conn.writeToken = 0
+      conn.zcPending = false
+      if conn.writePos >= conn.writeBuf.len:
+        conn.writeDrained()
+      else:
+        # A partial ZC send left a remainder in writeBuf; continue it now that
+        # the pages are safe to reference again.
+        conn.armWrite()
+      return
     if conn.sendState == sfSending:
       # Completion of a sendfile chunk SEND (the writeToken slot is shared with
       # the regular write pump; the state machine tells the two apart).
+      conn.writeToken = 0
       if conn.state == Closed:
         # Connection closed while a chunk SEND was in flight: finish the
         # deferred teardown now that the op has settled.
@@ -612,10 +692,21 @@ when iouEnabled:
       conn.pumpSendFile()
       return
     if conn.state != Connected and conn.state != Closing and not conn.closePending:
+      conn.writeToken = 0
       return
     if res == -ECANCELED:
+      conn.writeToken = 0
       return
     if res < 0:
+      let wasZc = conn.zcPending
+      conn.writeToken = 0
+      conn.zcPending = false
+      if wasZc and (res == -EINVAL or res == -EOPNOTSUPP):
+        # Kernel does not support SEND_ZC; disable it for the loop and retry the
+        # same buffer as a plain SEND.
+        conn.loop.zcFailed = true
+        conn.armWrite()
+        return
       if res == -EAGAIN:
         conn.handleSendEagain()
         return
@@ -637,46 +728,21 @@ when iouEnabled:
       return
     conn.writePos += res
     conn.sendEagainRetries = 0
+    if (flags and uring.IORING_CQE_F_MORE) != 0:
+      # SEND_ZC data completion: every byte was queued to the kernel, but its
+      # pages stay pinned until the IORING_CQE_F_NOTIF completion. Keep the
+      # write token set so armWrite/send coalesce into pendingBuf and never
+      # reuse writeBuf; the NOTIF settles it.
+      conn.zcPending = true
+      return
+    conn.writeToken = 0
     if conn.writePos >= conn.writeBuf.len:
-      conn.writeBuf.setLen(0)
-      conn.writePos = 0
-      if conn.pendingBuf.len > 0:
-        # Writes queued while this SEND was in flight: promote them (shared
-        # data pointer, so nothing is copied) and keep the write pump going.
-        conn.writeBuf = conn.pendingBuf
-        conn.pendingBuf.setLen(0)
-        if not conn.corked:
-          setTcpCork(conn.fd, true)
-          conn.corked = true
-        conn.armWrite()
-        return
-      if conn.corked:
-        setTcpCork(conn.fd, false)
-        conn.corked = false
-      if conn.closePending:
-        conn.closePending = false
-        conn.finishClose()
-        if conn.server != nil:
-          conn.server.releaseConnection(conn)
-        elif not conn.retiring:
-          if conn.readBuf != nil:
-            releaseBuf(conn.loop, conn.readBuf)
-            conn.readBuf = nil
-      elif conn.sendFileFd >= 0:
-        conn.pumpSendFile()
-      elif conn.closeAfterFlush:
-        conn.close()
-        conn.fireClose()
-      elif conn.shutdownAfterSend:
-        conn.state = Closing
-        sockShutdown(conn.fd, shutWrVal())
-      else:
-        conn.armRead()
+      conn.writeDrained()
     else:
       conn.armWrite()
 
   proc armWrite(conn: Connection) {.gcsafe.} =
-    if conn.writeToken != 0 or conn.writeBuf.len == 0:
+    if conn.writeToken != 0 or conn.writeBuf.len == 0 or conn.zcPending:
       return
     if conn.tlsState != TlsOff:
       # TLS conns never send raw plaintext; ciphertext goes through armTlsWrite.
@@ -684,18 +750,33 @@ when iouEnabled:
     if conn.state != Connected and conn.state != Closing and not conn.closePending:
       return
     let start = conn.writePos
+    let remaining = conn.writeBuf.len - start
     let sqe = conn.loop.getOpSqe()
     if sqe == nil:
       conn.loop.deferCall(proc() =
         if conn.state != Closed:
           conn.armWrite())
       return
+    if conn.loop.zcEnabled() and remaining >= SendZcThreshold:
+      # Zero-copy send: the kernel pins writeBuf's pages and reports completion
+      # in two CQEs — a data completion (IORING_CQE_F_MORE) and, once the pages
+      # may be reused, a notification (IORING_CQE_F_NOTIF). writeToken stays set
+      # until the NOTIF so nothing touches writeBuf in between.
+      sqe.opcode = IORING_OP_SEND_ZC.uint8
+      sqe.fd = conn.fd.int32
+      if conn.fixedFd:
+        sqe.flags = IOSQE_FIXED_FILE.uint8
+      sqe.paddr = cast[uint64](addr conn.writeBuf[start])
+      sqe.len = remaining.uint32
+      conn.writeToken = conn.loop.commitOp(sqe, conn.writeCb)
+      conn.zcPending = true
+      return
     sqe.opcode = IORING_OP_SEND.uint8
     sqe.fd = conn.fd.int32
     if conn.fixedFd:
       sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.paddr = cast[uint64](addr conn.writeBuf[start])
-    sqe.len = (conn.writeBuf.len - start).uint32
+    sqe.len = remaining.uint32
     conn.writeToken = conn.loop.commitOp(sqe, conn.writeCb)
 
   # ── sendfile (READ + SEND pump) ──────────────────────────────────────────────
@@ -727,8 +808,104 @@ when iouEnabled:
       return
     conn.sendFileSendChunk(res)
 
+  # ── sendfile zero-copy via IORING_OP_SPLICE (file → pipe → socket) ──────────
+  # The pipe is per-connection so concurrent transfers never interleave in a
+  # shared FIFO. File offset advances on the file→pipe leg; the pipe→socket leg
+  # retries on -EAGAIN (socket send buffer full) via the writability watcher.
+
+  proc closeSplicePipe(conn: Connection) {.gcsafe.} =
+    if conn.splicePipe[0] >= 0:
+      discard posix.close(conn.splicePipe[0])
+      discard posix.close(conn.splicePipe[1])
+      conn.splicePipe = [-1.cint, -1.cint]
+    conn.splicePipeOk = false
+
+  proc ensureSplicePipe(conn: Connection): bool =
+    if conn.splicePipeOk:
+      return true
+    var fds: array[2, cint]
+    if pipe(fds) != 0:
+      return false
+    discard fcntl(fds[0], F_SETFL, O_NONBLOCK)
+    discard fcntl(fds[1], F_SETFL, O_NONBLOCK)
+    # Size the pipe to hold two chunks so a file→pipe fill never stalls on a
+    # small pipe and the pipe→socket leg can drain a full chunk at a time.
+    # (F_SETPIPE_SZ may be capped by /proc/sys/fs/pipe-max-size; on failure the
+    # pipe keeps its default size and splicing still works, just in more ops.)
+    discard fcntl(fds[1], F_SETPIPE_SZ, (SpliceChunkSize * 2).cint)
+    conn.splicePipe = fds
+    conn.splicePipeOk = true
+    true
+
+  proc submitSpliceFileToPipe(conn: Connection) =
+    ## SPLICE(file → pipeW): move a chunk of the file into the splice pipe.
+    let toMove = min(conn.sendFileRemain, SpliceChunkSize.int64).int
+    conn.sendState = sfSpliceRead
+    conn.sendFileToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
+        sqe.prepSplice(conn.sendFileFd, conn.sendFileOff,
+                       conn.splicePipe[1].int, -1, toMove, 0)
+      , conn.spliceCb)
+
+  proc submitSplicePipeToSocket(conn: Connection) =
+    ## SPLICE(pipeR → socket): push the bytes currently in the pipe to the peer.
+    let toMove = conn.spliceChunk - conn.spliceSent
+    conn.sendState = sfSpliceSend
+    conn.sendFileToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
+        sqe.prepSplice(conn.splicePipe[0].int, -1,
+                       conn.fd.int, -1, toMove, 0)
+      , conn.spliceCb)
+
+  proc onSpliceComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+    if conn.sendFileToken != token:
+      return
+    if conn.retireSettled(token):
+      return
+    conn.sendFileToken = 0
+    if conn.state == Closed:
+      return
+    case conn.sendState
+    of sfSpliceRead:
+      if res <= 0:
+        # EOF (0) or error on the file leg. A file shorter than the declared
+        # Content-Length still sends what it has; pumpSendFile sees remain > 0
+        # and just finishes the transfer.
+        conn.closeSplicePipe()
+        closeFile(conn.sendFileFd)
+        conn.sendFileFd = -1
+        conn.sendState = sfIdle
+        conn.pumpSendFile()
+        return
+      conn.spliceChunk = res
+      conn.spliceSent = 0
+      conn.sendFileOff += res.int64
+      conn.sendFileRemain -= res.int64
+      conn.submitSplicePipeToSocket()
+    of sfSpliceSend:
+      if res < 0:
+        if res == -EAGAIN:
+          conn.socketWritableWait()
+          return
+        conn.closeSplicePipe()
+        conn.close()
+        conn.fireClose()
+        return
+      if res == 0:
+        # Socket can't take more right now; retry when it drains.
+        conn.socketWritableWait()
+        return
+      conn.spliceSent += res
+      if conn.spliceSent >= conn.spliceChunk:
+        conn.sendState = sfIdle
+        conn.pumpSendFile()
+      else:
+        conn.submitSplicePipeToSocket()
+    else:
+      discard
+
   proc pumpSendFile(conn: Connection) =
     if conn.sendFileFd < 0:
+      # Transfer complete (or never started): the splice pipe is not needed.
+      conn.closeSplicePipe()
       if conn.writeBuf.len > 0:
         conn.armWrite()
       elif conn.closePending:
@@ -762,9 +939,16 @@ when iouEnabled:
         conn.sendState = sfIdle
         conn.pumpSendFile()
         return
+      when not defined(powpowNoSplice):
+        if conn.loop.supportsOp(uring.IORING_OP_SPLICE) and
+           conn.ensureSplicePipe():
+          # Zero-copy: SPLICE the file into a per-connection pipe, then SPLICE
+          # the pipe to the socket — page cache → socket without a user-space
+          # copy.
+          conn.submitSpliceFileToPipe()
+          return
       # READ + SEND chunk pump: read a chunk of the file into sendChunk, then
-      # SEND it to the socket. This is the only file→socket path (io_uring has
-      # no IORING_OP_SENDFILE; a zero-copy IORING_OP_SPLICE path is planned).
+      # SEND it to the socket.
       if conn.sendChunk.len == 0:
         conn.sendChunk = newSeq[byte](SendFileChunkSize)
       let toRead = min(conn.sendFileRemain, SendFileChunkSize.int64).int
@@ -776,7 +960,14 @@ when iouEnabled:
           sqe.len = toRead.uint32
           sqe.off = conn.sendFileOff.uint64
         , conn.sendFileReadCb)
-    of sfReading, sfSending:
+    of sfSpliceSend:
+      # Pipe→socket leg parked on -EAGAIN/0: retry once the socket drains.
+      if conn.spliceSent < conn.spliceChunk:
+        conn.submitSplicePipeToSocket()
+      else:
+        conn.sendState = sfIdle
+        conn.pumpSendFile()
+    of sfReading, sfSending, sfSpliceRead:
       discard
 
   proc continueSendFile*(conn: Connection): bool =
@@ -799,7 +990,7 @@ when iouEnabled:
       conn.tlsSend(data)
       if conn.state == Closed: return -1
       return data.len
-    if conn.writeToken == 0 and conn.writeBuf.len == 0 and conn.sendFileFd < 0:
+    if conn.writeToken == 0 and conn.writeBuf.len == 0 and conn.sendFileFd < 0 and not conn.zcPending:
       # Synchronous-write fast path: small responses fit the socket buffer, so
       # send immediately and skip the SEND op + completion round-trip entirely.
       var pos = 0
@@ -850,7 +1041,7 @@ when iouEnabled:
         copyMem(addr conn.tlsCoalesce[pos], part.data, part.len)
         pos += part.len
       return conn.send(conn.tlsCoalesce)
-    if conn.writeToken == 0 and conn.writeBuf.len == 0 and conn.sendFileFd < 0:
+    if conn.writeToken == 0 and conn.writeBuf.len == 0 and conn.sendFileFd < 0 and not conn.zcPending:
       # Synchronous-write fast path (writev): in the common case the whole
       # scatter list fits the socket buffer, so send immediately and skip the
       # SEND op + completion round-trip. Falls back to the SEND-op pump on a
@@ -1215,6 +1406,8 @@ when iouEnabled:
       conn.onTlsWriteComplete(token, res, flags)
     conn.sendFileReadCb = proc(token: uint64, res: int32, flags: uint32) =
       conn.onSendFileReadComplete(token, res, flags)
+    conn.spliceCb = proc(token: uint64, res: int32, flags: uint32) =
+      conn.onSpliceComplete(token, res, flags)
     when defined(powpowBufferSelect):
       conn.bufferReadCb = proc(token: uint64, res: int32, flags: uint32) =
         conn.onBufferReadComplete(token, res, flags)
@@ -1242,6 +1435,11 @@ when iouEnabled:
       result.tlsOutBuf.setLen(0)
       result.tlsOutPos = 0
       result.tlsWriteToken = 0
+      result.zcPending = false
+      result.splicePipe = [-1.cint, -1.cint]
+      result.splicePipeOk = false
+      result.spliceChunk = 0
+      result.spliceSent = 0
       result.pendingBuf.setLen(0)
       result.tlsPending.setLen(0)
     else:
@@ -1283,6 +1481,11 @@ when iouEnabled:
     conn.ssl = nil
     conn.tlsState = TlsOff
     conn.fixedFd = false
+    conn.zcPending = false
+    conn.splicePipe = [-1.cint, -1.cint]
+    conn.splicePipeOk = false
+    conn.spliceChunk = 0
+    conn.spliceSent = 0
     conn.pendingBuf.setLen(0)
     conn.tlsPending.setLen(0)
     if server.connPool.len < MaxConnPoolSize:

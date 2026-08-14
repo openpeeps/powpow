@@ -113,6 +113,7 @@ type
       takeoverCbs: Table[int, proc() {.closure.}]
       rearmQueue:  seq[FdWatcher]
       reaped:      int
+      zcFailed*:   bool   # SEND_ZC op returned -EINVAL/-EOPNOTSUPP: disable it
       when defined(powpowBufferSelect):
         bufGroup:     ptr UncheckedArray[byte]   # shared multishot read buffers
         bufGroupSize: int
@@ -356,6 +357,13 @@ when iouEnabled:
   proc ringEntries*(loop: Loop): uint32 {.inline, gcsafe.} =
     ## Size of the submission ring (number of SQE slots).
     loop.ring.entries.uint32
+
+  proc zcEnabled*(loop: Loop): bool {.inline, gcsafe.} =
+    ## True when IORING_OP_SEND_ZC may be used for large writes: opt-in via
+    ## `-d:powpowSendZc`, the kernel probe says the opcode exists, and no
+    ## previous SEND_ZC op failed with an unsupported error.
+    (when defined(powpowNoSendZc): false else: true) and
+      not loop.zcFailed and loop.supportsOp(uring.IORING_OP_SEND_ZC)
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
