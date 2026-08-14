@@ -101,6 +101,7 @@ when iouEnabled:
   const
     MaxEagainRetries = 1
     AcceptBatch = 8   # outstanding one-shot IORING_OP_ACCEPT ops per listener
+    AcceptReserveSlots = 2   # SQ slots kept free for the timeout + re-arms
 
 type
   ConnState* = enum
@@ -1319,7 +1320,8 @@ when iouEnabled:
     when not defined(powpowNoMultishotAccept):
       if server.acceptMultishot:
         return
-      if not server.acceptMultishotFailed and kernelAtLeast(6, 0):
+      if not server.acceptMultishotFailed and kernelAtLeast(6, 0) and
+         server.loop.supportsOp(uring.IORING_OP_ACCEPT):
         let sqe = server.loop.getOpSqe()
         if sqe == nil:
           server.loop.deferCall(proc() =
@@ -1339,6 +1341,16 @@ when iouEnabled:
     for slot in 0 ..< AcceptBatch:
       if server.acceptTokens[slot] != 0:
         continue
+      # Never monopolize a small SQ ring: leave room for the loop's timeout and
+      # wake/re-arm ops, or the next idle iteration cannot arm a timeout and
+      # the blocking io_uring_enter would sleep forever on completions that
+      # never come.
+      if server.loop.pendingSubmit() + AcceptReserveSlots >=
+         server.loop.ringEntries():
+        server.loop.deferCall(proc() =
+          if server.fd.int >= 0:
+            server.armAccept())
+        return
       if not server.armAcceptSlot(slot):
         server.loop.deferCall(proc() =
           if server.fd.int >= 0:

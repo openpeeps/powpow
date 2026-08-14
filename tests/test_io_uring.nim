@@ -197,6 +197,42 @@ when iouEnabled:
     doAssert ok, "payload corruption in large two-part write"
     loop.close()
 
+  # ── 5. Kernel feature probe: the ring must report per-opcode support and the
+  #     IORING_FEAT_* bits surfaced by io_uring_setup.
+
+  test "io_uring probe reports supported ops + features":
+    let loop = newLoop()
+    # Ops the backend always relies on must be present (or the probe unavailable,
+    # in which case supportsOp() is permissive).
+    doAssert loop.supportsOp(uring.IORING_OP_READ)
+    doAssert loop.supportsOp(uring.IORING_OP_RECV)
+    doAssert loop.supportsOp(uring.IORING_OP_SEND)
+    doAssert loop.supportsOp(uring.IORING_OP_ACCEPT)
+    doAssert loop.supportsOp(uring.IORING_OP_CONNECT)
+    # IORING_FEAT_FAST_POLL is a kernel 5.7+ baseline; a modern kernel must
+    # advertise it (and if it doesn't, hasFeature just returns false — no crash).
+    discard loop.hasFeature(uring.IORING_FEAT_FAST_POLL)
+    discard loop.hasFeature(uring.IORING_FEAT_EXT_ARG)
+    loop.close()
+
+  # ── 6. Shutdown-op ABI sanity: IORING_OP_SHUTDOWN is opcode 34, NOT the
+  #     (nonexistent) SENDFILE 40 == MSG_RING. These constants are the binding
+  #     layer's contract against linux/io_uring.h.
+
+  test "io_uring opcode ABI constants":
+    doAssert uring.IORING_OP_SEND_ZC == 47
+    doAssert uring.IORING_OP_SENDMSG_ZC == 48
+    doAssert uring.IORING_OP_SHUTDOWN == 34
+    doAssert uring.IORING_OP_FILES_UPDATE == 20
+    doAssert uring.IORING_OP_MSG_RING == 40
+    doAssert uring.IORING_OP_CLOSE == 19
+    doAssert uring.IORING_OP_SOCKET == 45
+    # CQE flag bits are 1<<N (1<<0 is BUFFER, 1<<1 is MORE, 1<<3 is NOTIF).
+    doAssert uring.IORING_CQE_F_BUFFER == 1
+    doAssert uring.IORING_CQE_F_MORE == 2
+    doAssert uring.IORING_CQE_F_SOCK_NONEMPTY == 4
+    doAssert uring.IORING_CQE_F_NOTIF == 8
+
 else:
   echo "io_uring tests skipped (backend not enabled)"
 

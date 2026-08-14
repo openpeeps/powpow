@@ -235,19 +235,22 @@ when iouEnabled:
     sqe.userData = loop.wakeToken
     loop.wakeArmed = true
 
-  proc armTimeout(loop: Loop, ms: int) {.gcsafe.} =
+  proc armTimeout(loop: Loop, ms: int): bool {.gcsafe.} =
+    ## Arm (or reuse) a kernel timeout that fires in `ms`. Returns true when the
+    ## loop now has a live timeout in the kernel it can block on, false when no
+    ## SQE slot was available (ring full) and the caller must NOT block.
     let deadline = monoMs() + ms.int64
     if loop.timeoutPending and loop.timeoutDeadline <= deadline:
       # The armed timeout fires no later than the requested deadline; reusing it
       # avoids a cancel-rearm per poll (each cancel completion wakes enter early
       # and would make the loop spin instead of sleeping).
-      return
+      return true
     let sqe = loop.ring.getSqe()
     if sqe == nil:
       # Ring full: keep the existing timeout armed (it still fires no later than
       # its original deadline) so the loop is never left with no timeout in the
       # kernel. State stays consistent — no op is orphaned.
-      return
+      return loop.timeoutPending
     if loop.timeoutPending:
       loop.cancelOp(loop.timeoutToken)
     loop.timeoutTs.tvSec = (ms div 1000).int64
@@ -261,6 +264,7 @@ when iouEnabled:
     sqe.opFlags = 0
     sqe.userData = loop.timeoutToken
     loop.timeoutPending = true
+    true
 
   proc flushQueued(loop: Loop) =
     ## Re-arm watchers/wake whose one-shot polls completed, claiming SQE slots
@@ -335,6 +339,24 @@ when iouEnabled:
     ## the slot).
     discard loop.ring.updateFixedFile(fd, -1)
 
+  proc supportsOp*(loop: Loop, opcode: int): bool {.inline, gcsafe.} =
+    ## True when the kernel probe reports `opcode` as supported (or the probe
+    ## was unavailable and a permissive default is used).
+    loop.ring.supports(opcode)
+
+  proc hasFeature*(loop: Loop, feat: uint32): bool {.inline, gcsafe.} =
+    ## True when the ring advertises the IORING_FEAT_* bit `feat`.
+    loop.ring.hasFeature(feat)
+
+  proc pendingSubmit*(loop: Loop): uint32 {.inline, gcsafe.} =
+    ## Number of SQEs claimed but not yet submitted (for callers that must not
+    ## monopolize the ring, e.g. the accept batch reserving timeout space).
+    loop.ring.pendingSubmit()
+
+  proc ringEntries*(loop: Loop): uint32 {.inline, gcsafe.} =
+    ## Size of the submission ring (number of SQE slots).
+    loop.ring.entries.uint32
+
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 proc newLoop*(entries = 4096): Loop =
@@ -371,6 +393,7 @@ proc newLoop*(entries = 4096): Loop =
   initLock(result.postedLock)
   when iouEnabled:
     result.ring = initRing(entries)
+    discard result.ring.registerProbe()
     result.wakeFd = eventfd(0, EFD_NONBLOCK)
     if result.wakeFd < 0:
       raise newException(OSError, "powpow io_uring: eventfd() failed for wake")
@@ -380,7 +403,7 @@ proc newLoop*(entries = 4096): Loop =
     result.armWake()
     discard result.ring.submit(0, 0)
     when defined(powpowBufferSelect):
-      if kernelAtLeast(5, 19):
+      if kernelAtLeast(5, 19) and result.ring.supports(uring.IORING_OP_RECV):
         result.bufGroupSize = DefaultBufSize
         result.bufGroupCount = ReadBufGroupSize
         result.bufGroup = cast[ptr UncheckedArray[byte]](
@@ -1009,8 +1032,14 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
     if nEvents == 0:
       if timeout >= 0:
         if timeout > 0:
-          armTimeout(loop, timeout)
-          minComplete = 1
+          # Block on io_uring_enter only when a live timeout is actually in the
+          # kernel. If the SQ ring was too full to arm one (e.g. a burst of
+          # accepts claimed every slot on a tiny ring), submit without waiting
+          # and re-try arming next iteration once the ring drains — otherwise
+          # the blocking enter would sleep forever on completions that never
+          # come.
+          if armTimeout(loop, timeout):
+            minComplete = 1
       else:
         minComplete = 1
     var ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
