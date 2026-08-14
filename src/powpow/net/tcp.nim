@@ -94,7 +94,9 @@ when iouEnabled:
       sfIdle
       sfReading
       sfSending
-      sfSendfile    # single-op IORING_OP_SENDFILE (kernel >= 6.0)
+      # NOTE: there is no IORING_OP_SENDFILE. Zero-copy file→socket transfers
+      # will be added via IORING_OP_SPLICE (file→pipe→socket); until then the
+      # READ + SEND chunk pump is the only path.
 
   const
     MaxEagainRetries = 1
@@ -153,7 +155,6 @@ type
       writeCb:        OpCallback
       tlsWriteCb:     OpCallback
       sendFileReadCb: OpCallback
-      sendfileCb:     OpCallback
       bufferReadCb:   OpCallback
       # Coalesce buffer for writes arriving while a SEND op references
       # writeBuf/tlsOutBuf (appending to the in-flight seq could reallocate the
@@ -725,29 +726,6 @@ when iouEnabled:
       return
     conn.sendFileSendChunk(res)
 
-  proc onSendfileComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
-    ## Completion of a single-op IORING_OP_SENDFILE (kernel >= 6.0). Falls back
-    ## to the READ + SEND pump on -EAGAIN (socket full) or other errors.
-    if conn.sendFileToken != token:
-      return
-    if conn.retireSettled(token):
-      return
-    conn.sendFileToken = 0
-    if conn.state == Closed:
-      return
-    if res <= 0:
-      conn.sendState = sfIdle
-      if res == -EAGAIN:
-        conn.socketWritableWait()
-        return
-      if res != -ECANCELED:
-        conn.pumpSendFile()
-      return
-    conn.sendFileOff += res.int64
-    conn.sendFileRemain -= res.int64
-    conn.sendState = sfIdle
-    conn.pumpSendFile()
-
   proc pumpSendFile(conn: Connection) =
     if conn.sendFileFd < 0:
       if conn.writeBuf.len > 0:
@@ -783,21 +761,9 @@ when iouEnabled:
         conn.sendState = sfIdle
         conn.pumpSendFile()
         return
-      when not defined(powpowNoSendfile):
-        if kernelAtLeast(6, 0):
-          # Single-op zero-copy sendfile (no user-space chunk copy). Layout:
-          # fd = in_fd (file), off = out_fd (socket), addr = file offset,
-          # len = byte count (io_uring SENDFILE ABI, kernel 6.0+).
-          conn.sendState = sfSendfile
-          let toSend = min(conn.sendFileRemain, SendFileChunkSize.int64).int
-          conn.sendFileToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
-              sqe.opcode = IORING_OP_SENDFILE.uint8
-              sqe.fd = conn.sendFileFd.int32
-              sqe.off = conn.fd.int.uint64
-              sqe.paddr = conn.sendFileOff.uint64
-              sqe.len = toSend.uint32
-            , conn.sendfileCb)
-          return
+      # READ + SEND chunk pump: read a chunk of the file into sendChunk, then
+      # SEND it to the socket. This is the only file→socket path (io_uring has
+      # no IORING_OP_SENDFILE; a zero-copy IORING_OP_SPLICE path is planned).
       if conn.sendChunk.len == 0:
         conn.sendChunk = newSeq[byte](SendFileChunkSize)
       let toRead = min(conn.sendFileRemain, SendFileChunkSize.int64).int
@@ -809,7 +775,7 @@ when iouEnabled:
           sqe.len = toRead.uint32
           sqe.off = conn.sendFileOff.uint64
         , conn.sendFileReadCb)
-    of sfReading, sfSending, sfSendfile:
+    of sfReading, sfSending:
       discard
 
   proc continueSendFile*(conn: Connection): bool =
@@ -1248,8 +1214,6 @@ when iouEnabled:
       conn.onTlsWriteComplete(token, res, flags)
     conn.sendFileReadCb = proc(token: uint64, res: int32, flags: uint32) =
       conn.onSendFileReadComplete(token, res, flags)
-    conn.sendfileCb = proc(token: uint64, res: int32, flags: uint32) =
-      conn.onSendfileComplete(token, res, flags)
     when defined(powpowBufferSelect):
       conn.bufferReadCb = proc(token: uint64, res: int32, flags: uint32) =
         conn.onBufferReadComplete(token, res, flags)

@@ -35,47 +35,136 @@ const
 
   IORING_SETUP_IOPOLL = 1
 
-  # opcodes (kernel 5.15 io_uring.h)
+  # Opcodes — verified against the kernel's `enum io_uring_op` (linux/io_uring.h).
+  # Note: io_uring has NO IORING_OP_SENDFILE; the value 40 is IORING_OP_MSG_RING.
+  # File→socket transfers use IORING_OP_SPLICE (file→pipe→socket) or a READ +
+  # SEND pump, never a nonexistent opcode.
   IORING_OP_NOP*          = 0
+  IORING_OP_READV*        = 1
+  IORING_OP_WRITEV*       = 2
+  IORING_OP_FSYNC*        = 3
+  IORING_OP_READ_FIXED*   = 4
+  IORING_OP_WRITE_FIXED*  = 5
   IORING_OP_POLL_ADD*     = 6
   IORING_OP_POLL_REMOVE*  = 7
+  IORING_OP_SYNC_FILE_RANGE* = 8
   IORING_OP_SENDMSG*      = 9
   IORING_OP_RECVMSG*      = 10
   IORING_OP_TIMEOUT*      = 11
+  IORING_OP_TIMEOUT_REMOVE* = 12
   IORING_OP_ACCEPT*       = 13
   IORING_OP_ASYNC_CANCEL* = 14
+  IORING_OP_LINK_TIMEOUT* = 15
   IORING_OP_CONNECT*      = 16
+  IORING_OP_FALLOCATE*    = 17
+  IORING_OP_OPENAT*       = 18
+  IORING_OP_CLOSE*        = 19
+  IORING_OP_FILES_UPDATE* = 20
+  IORING_OP_STATX*        = 21
   IORING_OP_READ*         = 22
   IORING_OP_WRITE*        = 23
+  IORING_OP_FADVISE*      = 24
+  IORING_OP_MADVISE*      = 25
   IORING_OP_SEND*         = 26
   IORING_OP_RECV*         = 27
+  IORING_OP_OPENAT2*      = 28
+  IORING_OP_EPOLL_CTL*    = 29
   IORING_OP_SPLICE*       = 30
   IORING_OP_PROVIDE_BUFFERS* = 31
-  IORING_OP_SENDFILE*     = 40
+  IORING_OP_REMOVE_BUFFERS* = 32
+  IORING_OP_TEE*          = 33
+  IORING_OP_SHUTDOWN*     = 34
+  IORING_OP_RENAMEAT*     = 35
+  IORING_OP_UNLINKAT*     = 36
+  IORING_OP_MKDIRAT*      = 37
+  IORING_OP_SYMLINKAT*    = 38
+  IORING_OP_LINKAT*       = 39
+  IORING_OP_MSG_RING*     = 40
+  IORING_OP_FSETXATTR*    = 41
+  IORING_OP_SETXATTR*     = 42
+  IORING_OP_FGETXATTR*    = 43
+  IORING_OP_GETXATTR*     = 44
+  IORING_OP_SOCKET*       = 45
+  IORING_OP_URING_CMD*    = 46
+  IORING_OP_SEND_ZC*      = 47
+  IORING_OP_SENDMSG_ZC*   = 48
+  IORING_OP_READ_MULTISHOT* = 49
+  IORING_OP_WAITID*       = 50
+  IORING_OP_FUTEX_WAIT*   = 51
+  IORING_OP_FUTEX_WAKE*   = 52
+  IORING_OP_FUTEX_WAITV*  = 53
+  IORING_OP_FIXED_FD_INSTALL* = 54
 
-  # sqe.flags bits
-  IOSQE_FIXED_FILE* = 0x1   # (1U << 0): treat sqe.fd as a fixed-file table index
-  IOSQE_BUFFER_SELECT* = 0x20  # (1U << 5): select buffer from sqe.buf_group
+  # sqe.flags bits (IOSQE_*)
+  IOSQE_FIXED_FILE* = 0x1        # (1U << 0): treat sqe.fd as a fixed-file table index
+  IOSQE_IO_DRAIN* = 0x2          # (1U << 1): wait for preceding requests before this one
+  IOSQE_IO_LINK* = 4             # (1U << 2): link with the next request
+  IOSQE_IO_HARDLINK* = 0x8       # (1U << 3): hard link (link survives errors)
+  IOSQE_ASYNC* = 0x10            # (1U << 4): force async context for the request
+  IOSQE_BUFFER_SELECT* = 0x20    # (1U << 5): select buffer from sqe.buf_group
+  IOSQE_CQE_SKIP_SUCCESS* = 0x40 # (1U << 6): skip CQE for successful requests
 
   # sqe.ioprio flags for IORING_OP_RECV (kernel 5.19+)
   IORING_RECV_MULTISHOT* = 2   # (1U << 1): multishot recv, sets IORING_CQE_F_MORE
 
   # io_uring_register(2) opcodes (linux/io_uring.h)
+  IORING_REGISTER_BUFFERS*        = 0
   IORING_REGISTER_FILES*          = 2
+  IORING_UNREGISTER_BUFFERS*      = 1
   IORING_UNREGISTER_FILES*        = 3
+  IORING_REGISTER_EVENTFD*        = 4
   IORING_REGISTER_FILES_UPDATE*   = 6
+  IORING_REGISTER_EVENTFD_ASYNC*  = 7
+  IORING_REGISTER_PROBE*          = 8
+  IORING_REGISTER_PERSONALITY*    = 9
+  IORING_REGISTER_RESTRICTIONS*   = 11
+  IORING_REGISTER_ENABLE_RINGS*   = 12
+  IORING_REGISTER_FILES2*         = 13
+  IORING_REGISTER_FILES_UPDATE2*  = 14
+  IORING_REGISTER_BUFFERS2*       = 15
+  IORING_REGISTER_BUFFERS_UPDATE* = 16
+  IORING_REGISTER_IOWQ_AFF*       = 17
+  IORING_REGISTER_IOWQ_MAX_WORKERS* = 19
+  IORING_REGISTER_RING_FDS*       = 20
+  IORING_REGISTER_PBUF_RING*      = 22
+  IORING_REGISTER_SYNC_CANCEL*    = 24
+  IORING_REGISTER_FILE_ALLOC_RANGE* = 25
+  IORING_REGISTER_PBUF_STATUS*    = 26
 
-  # cqe.flags bits
-  IORING_CQE_F_MORE*   = 0x1   # (1U << 0): this op will generate more completions
+  # cqe.flags bits (verified against linux/io_uring.h)
+  IORING_CQE_F_BUFFER*       = 0x1  # (1U << 0): upper 16 bits of res are the buffer id
+  IORING_CQE_F_MORE*         = 0x2  # (1U << 1): this op will generate more completions
+  IORING_CQE_F_SOCK_NONEMPTY* = 0x4 # (1U << 2): more data to read after a socket recv
+  IORING_CQE_F_NOTIF*        = 0x8  # (1U << 3): zero-copy notification CQE (send_zc)
 
   # accept flags (kernel 6.0+)
   IORING_ACCEPT_MULTISHOT* = 0x1
 
+  # IORING_OP_SEND_ZC zero-copy flags (kernel 6.0+)
+  IORING_SEND_ZC_REPORT_USAGE* = 0x8  # (1U << 3): report copied bytes in the NOTIF cqe
+
+  # IORING_OP_SPLICE flags
+  SPLICE_F_FD_IN_FIXED* = 0x80000000'u32  # in_fd is a fixed-file table index
+
+  # io_uring features (params.features / IORING_FEAT_*)
+  IORING_FEAT_SINGLE_MMAP*      = 1'u32 shl 0
+  IORING_FEAT_NODROP*           = 1'u32 shl 1
+  IORING_FEAT_SUBMIT_STABLE*    = 1'u32 shl 2
+  IORING_FEAT_RW_CUR_POS*       = 1'u32 shl 3
+  IORING_FEAT_CUR_PERSONALITY*  = 1'u32 shl 4
+  IORING_FEAT_FAST_POLL*        = 1'u32 shl 5
+  IORING_FEAT_POLL_32BITS*      = 1'u32 shl 6
+  IORING_FEAT_SQPOLL_NONFIXED*  = 1'u32 shl 7
+  IORING_FEAT_EXT_ARG*          = 1'u32 shl 8
+  IORING_FEAT_NATIVE_WORKERS*   = 1'u32 shl 9
+  IORING_FEAT_RSRC_TAGS*        = 1'u32 shl 10
+  IORING_FEAT_CQE_SKIP*         = 1'u32 shl 11
+  IORING_FEAT_LINKED_FILE*      = 1'u32 shl 12
+  IORING_FEAT_REG_REG_RING*     = 1'u32 shl 13
+
   # fixed-file table size (configurable via -d:powpowFixedFiles=N). Fds at or
   # above this are served by direct (non-fixed) ops.
   FixedFilesTableSize* = when defined(powpowFixedFiles): powpowFixedFiles else: 8192
-
-  IOSQE_IO_LINK* = 4
 
   # poll() masks (linux/poll.h)
   POLLIN*    = 0x1
@@ -84,8 +173,9 @@ const
   POLLHUP*   = 0x10
   POLLRDHUP* = 0x2000
 
-  # poll flags carried in the high bits of sqe.poll_events
-  IORING_POLL_ADD_MULTI = (1 shl 16)
+  # POLL_ADD command flags. Since kernel 5.16 the poll mask lives in
+  # sqe.poll32_events and POLL_ADD command flags are stored in sqe.len.
+  IORING_POLL_ADD_MULTI = 1   # (1U << 0): multishot poll (flag space = sqe.len)
 
 const
   MAP_POPULATE = 0x8000
@@ -379,11 +469,21 @@ proc submit*(ring: Ring, minComplete: cuint = 0,
   ring.submitCount += toSubmit.int
   var ret = ioUringEnter(ring.ringFd, toSubmit, minComplete, flags)
   if ret < 0 and errno == EINTR:
-    # Submitted SQEs are consumed even when interrupted.
-    ring.lastSubmit = ring.sqTail[]
+    # Interrupted: the kernel may have consumed only part of the SQEs. Sync to
+    # its real head (the shared SQ ring head) so any unsubmitted SQE stays
+    # pending instead of being treated as consumed.
+    ring.lastSubmit = ring.sqHead[]
     return -EINTR
   if ret >= 0:
-    ring.lastSubmit = ring.sqTail[]
+    # The kernel consumes exactly `ret` SQEs, which is not always `toSubmit`: an
+    # op may complete instantly and satisfy `minComplete` before every SQE is
+    # taken (observed: multishot ACCEPT rejected with -EINVAL on WSL2 6.18, so a
+    # blocking enter submitted 1 of 2 SQEs and returned). Advance by `ret` only;
+    # advancing to sqTail would leave a still-pending SQE (e.g. the armed
+    # TIMEOUT) counted as consumed, letting a later `getSqe` wrap around and
+    # overwrite its slot — silently dropping the op and hanging the loop forever
+    # in `io_uring_enter(minComplete=1)`.
+    ring.lastSubmit += ret.uint32
   else:
     # A hard io_uring_enter error (EFAULT/EBADF/ENOMEM, i.e. a corrupted SQE or
     # closed ring). Do NOT leave `lastSubmit` behind: resubmitting the identical

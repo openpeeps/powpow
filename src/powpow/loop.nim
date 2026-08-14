@@ -888,9 +888,19 @@ proc timerTimeout(loop: Loop; now: int64): int =
 # ── internal: process deferred ───────────────────────────────────────────────
 
 proc processDeferred(loop: Loop) {.inline.} =
-  while loop.deferred.len > 0:
+  # Run only the callbacks queued before this iteration began. A callback may
+  # re-defer itself (e.g. armRead/armAccept retrying a ring-full submission);
+  # running those re-deferrals in the SAME iteration livelocks: the retry can
+  # never claim an SQE slot because the ring is only drained by `submit` at the
+  # end of this iteration, so it defers itself again and `while len > 0` spins
+  # forever. New deferrals are drained on the next poll iteration, after the
+  # ring has been submitted.
+  let count = loop.deferred.len
+  var i = 0
+  while i < count:
     let cb = loop.deferred.popFirst()
     cb()
+    inc i
 
 proc drainPosted(loop: Loop) {.inline.} =
   ## Run callbacks posted from other threads (postToLoop).

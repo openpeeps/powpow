@@ -16,6 +16,35 @@ const
   root = getTempDir() / "pp_audit_static"
   port = 20098
 
+proc bytesToString(data: openArray[byte]): string =
+  result = newString(data.len)
+  if data.len > 0:
+    copyMem(addr result[0], unsafeAddr data[0], data.len)
+
+proc responseComplete(data: seq[byte]): bool =
+  ## True once `data` holds a full HTTP response (headers + Content-Length body).
+  ## Under io_uring the headers and the sendFile body arrive in separate onData
+  ## callbacks; stop when the declared body has been received, not on the first
+  ## chunk (closeConn=false keeps the connection alive).
+  var hdrEnd = -1
+  for i in 0 ..< data.len - 3:
+    if data[i] == 13 and data[i + 1] == 10 and data[i + 2] == 13 and data[i + 3] == 10:
+      hdrEnd = i + 4
+      break
+  if hdrEnd < 0:
+    return false
+  var contentLen = -1
+  for line in bytesToString(data.toOpenArray(0, hdrEnd - 1)).split("\r\n"):
+    let l = line.toLowerAscii()
+    if l.startsWith("content-length:"):
+      try:
+        contentLen = parseInt(l.split(':')[^1].strip())
+      except ValueError:
+        discard
+  if contentLen >= 0:
+    return data.len >= hdrEnd + contentLen
+  true
+
 proc serveStaticProbe(prefix, path: string): tuple[status: int; body: string] =
   var responseData: seq[byte] = @[]
   let loop = newLoop()
@@ -33,20 +62,22 @@ proc serveStaticProbe(prefix, path: string): tuple[status: int; body: string] =
       ,
       onData = proc(conn: Connection, data: openArray[byte]) =
         responseData.add(@data)
-        conn.close()
       ,
     )
   discard loop.addTimer(1500) do (id: int):
     server.close()
     loop.stop()
 
+  # Poll until the full response (headers + Content-Length body) has arrived.
+  # Under io_uring the headers and the sendFile body arrive in separate onData
+  # callbacks, so stop on `responseComplete`, not on the first chunk.
   var polls = 0
-  while responseData.len == 0 and polls < 20000:
+  while not responseComplete(responseData) and polls < 20000:
     loop.poll(1)
     inc polls
   server.close()
   loop.close()
-  let resp = cast[string](responseData)
+  let resp = bytesToString(responseData)
   let line = resp.split("\r\n")[0]
   result.status = try: parseInt(line.split(' ')[1]) except: 0
   result.body = if "\r\n\r\n" in resp: resp.split("\r\n\r\n")[^1].strip() else: ""
