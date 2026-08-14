@@ -697,12 +697,15 @@ proc initRing*(entries: int = 4096): Ring {.gcsafe.} =
   # is deliberately NOT used: it defers completion visibility to task_work, which
   # stalls loops that poll with a zero timeout and reap the CQ ring immediately.
   # Unknown flags are rejected with -EINVAL, so retry with fewer until
-  # io_uring_setup succeeds.
-  const FlagLadder = [
-    (IORING_SETUP_SINGLE_ISSUER or IORING_SETUP_COOP_TASKRUN),
-    IORING_SETUP_COOP_TASKRUN,
-    0'u32,
-  ]
+  # io_uring_setup succeeds. `-d:powpowNoSetupFlags` forces plain io_uring_setup.
+  when defined(powpowNoSetupFlags):
+    const FlagLadder = [0'u32]
+  else:
+    const FlagLadder = [
+      (IORING_SETUP_SINGLE_ISSUER or IORING_SETUP_COOP_TASKRUN),
+      IORING_SETUP_COOP_TASKRUN,
+      0'u32,
+    ]
   var fd: clong = -1
   for flags in FlagLadder:
     zeroMem(addr params, sizeof(params))

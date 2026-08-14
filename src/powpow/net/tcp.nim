@@ -668,8 +668,12 @@ when iouEnabled:
     ## a WSL2 6.18 kernel returns -EINVAL for the opcode despite the probe being
     ## unavailable, and retrying the SQE per close is slower than the syscall.
     ## When the probe is authoritative (real kernels) a supported opcode starts
-    ## in the verified state without a test op.
+    ## in the verified state without a test op. `-d:powpowNoShutdownOp` forces
+    ## the syscall unconditionally.
     if conn.fd.int < 0:
+      return
+    when defined(powpowNoShutdownOp):
+      sockShutdown(conn.fd, shutWrVal())
       return
     if conn.loop.shutdownFailed() or
        not conn.loop.supportsOp(uring.IORING_OP_SHUTDOWN):

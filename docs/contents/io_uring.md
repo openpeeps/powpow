@@ -144,18 +144,22 @@ pump, never a nonexistent opcode.
 | `powpowNoSendZc` | disable `SEND_ZC` |
 | `powpowSendZcThreshold=N` | minimum payload size for `SEND_ZC` (default 65536) |
 | `powpowSendZcFixed` | use a registered buffer + `SEND_ZC_FIXED` |
+| `powpowSendZcFixedSize=N` | registered send buffer size for `SEND_ZC_FIXED` (default 1 MiB) |
 | `powpowNoSplice` | disable `SPLICE` file sends |
 | `powpowSpliceChunk=N` | splice chunk / pipe size (default 1 MiB) |
 | `powpowNoFixedFiles` | disable `IORING_REGISTER_FILES` (fixed-file slot updates are batched: one `IORING_REGISTER_FILES_UPDATE` per loop iteration instead of one per accept/close) |
 | `powpowFixedFiles=N` | fixed-file table size (default 8192) |
 | `powpowBufferSelect` | multishot `RECV` + provided-buffer group (see notes below) |
 | `powpowNoMultishotAccept` | force the one-shot accept batch |
+| `powpowNoShutdownOp` | always use `sockShutdown(2)` for graceful close (skip the `IORING_OP_SHUTDOWN` op + verify) |
+| `powpowNoSetupFlags` | create the ring with plain `io_uring_setup` (skip `SINGLE_ISSUER | COOP_TASKRUN`; the ladder already falls back on `-EINVAL`) |
 
 Graceful close needs no define: `IORING_OP_SHUTDOWN` is used by default, with
 `IOSQE_CQE_SKIP_SUCCESS` (no CQE, no callback) once the first op verifies the
 kernel supports it (the probe is not authoritative on some kernels, e.g.
 WSL2, so support is verified lazily). A kernel that rejects the opcode locks
 the ring to the `sockShutdown(2)` syscall — never re-trying the SQE per close.
+`powpowNoShutdownOp` forces the syscall unconditionally.
 
 ### `powpowBufferSelect` notes
 
