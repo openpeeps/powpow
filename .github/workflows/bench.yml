@@ -18,31 +18,55 @@ on:
         description: 'URL path'
         default: '/hello'
         required: false
-      compilation-flags:
-        description: 'Extra flags appended to the nim c benchmark server builds (e.g. -d:powpowIoUring)'
-        default: ''
-        required: false
 
 jobs:
-  bench:
+  # ── Correctness gate: run the io_uring test + audit suite under the flag ──
+  iou-tests:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        nim-version:
-          - stable
     steps:
       - uses: actions/checkout@v3
       - uses: jiro4989/setup-nim-action@v1
         with:
-          nim-version: ${{ matrix.nim-version }}
+          nim-version: stable
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: nimble install -Y
+      - name: io_uring regression tests
+        run: |
+          nim c -r --threads:on -d:powpowIoUring tests/test_io_uring.nim
+      - name: io_uring audit harness (security regressions)
+        run: |
+          for f in audit/*.nim; do
+            nim c -r -d:powpowIoUring "$f" || exit 1
+          done
+      - name: full suite under io_uring
+        run: |
+          for t in test_net test_http test_httpclient test_loop test_security test_ws_pool; do
+            nim c -r --threads:on -d:powpowIoUring tests/$t.nim || exit 1
+          done
+
+  # ── Per-backend benchmark ───────────────────────────────────────────────────
+  bench:
+    runs-on: ubuntu-latest
+    needs: iou-tests
+    strategy:
+      matrix:
+        backend:
+          - { name: epoll,     flags: '' }
+          - { name: io_uring,  flags: '-d:powpowIoUring' }
+    steps:
+      - uses: actions/checkout@v3
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: stable
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
       - run: sudo apt-get update && sudo apt-get install -y wrk
-      - run: nim c -d:release ${{ inputs.compilation-flags }} examples/httpserver.nim
-      - run: nim c -d:release --threads:on ${{ inputs.compilation-flags }} examples/httpserver_threads.nim
+      - run: nim c -d:release ${{ matrix.backend.flags }} examples/httpserver.nim
+      - run: nim c -d:release --threads:on ${{ matrix.backend.flags }} examples/httpserver_threads.nim
 
       - name: Record commit
         run: |
+          echo "backend: ${{ matrix.backend.name }}" > backend.txt
           echo "commit: $GITHUB_SHA" | tee -a bench-results.txt
           echo "commit-short: $(echo $GITHUB_SHA | cut -c1-8)" | tee -a bench-results.txt
           echo "ref: $GITHUB_REF" | tee -a bench-results.txt
@@ -87,19 +111,47 @@ jobs:
           kill $PID 2>/dev/null; wait $PID 2>/dev/null || true
           echo "multi-threaded close: $(cat mt-close.txt)" | tee -a bench-results.txt
 
-      - name: Benchmark summary
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.backend.name }}
+          path: |
+            bench-results.txt
+            st-ka.txt
+            st-close.txt
+            mt-ka.txt
+            mt-close.txt
+
+  # ── A/B summary: epoll vs io_uring delta table ──────────────────────────────
+  summary:
+    runs-on: ubuntu-latest
+    needs: bench
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build delta table
         run: |
-          echo "## Benchmark results" > "$GITHUB_STEP_SUMMARY"
+          echo "## io_uring vs epoll A/B" > "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| commit | $GITHUB_SHA |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           echo "| commit-date | $(git show -s --format=%ci $GITHUB_SHA) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| params | duration=${{ inputs.duration }}s connections=${{ inputs.connections }} threads=${{ inputs.threads }} path=${{ inputs.path }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| test | requests/sec |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| single-threaded keep-alive | $(cat st-ka.txt) |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| single-threaded close | $(cat st-close.txt) |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| multi-threaded keep-alive | $(cat mt-ka.txt) |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| multi-threaded close | $(cat mt-close.txt) |" >> "$GITHUB_STEP_SUMMARY"
-          cat bench-results.txt
+          echo "| test | epoll | io_uring | delta |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          for t in st-ka st-close mt-ka mt-close; do
+            e=$(cat "artifacts/bench-epoll/$t.txt" 2>/dev/null || echo "n/a")
+            i=$(cat "artifacts/bench-io_uring/$t.txt" 2>/dev/null || echo "n/a")
+            printf '| %s | %s | %s |' "$t" "$e" "$i" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$e" =~ [0-9] ]] && [[ "$i" =~ [0-9] ]]; then
+              delta=$(python3 -c "print(f'{(float('$i')/float('$e')-1)*100:+.1f}%')")
+              printf ' %s |' "$delta" >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf ' — |' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run both backends on the same commit/runner for a fair A/B." >> "$GITHUB_STEP_SUMMARY"

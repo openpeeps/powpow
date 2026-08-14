@@ -17,6 +17,7 @@ when not defined(linux):
   {.error: "powpow/io/uring: io_uring backend requires Linux".}
 
 import std/posix
+import std/strutils
 import ../types
 
 const
@@ -49,14 +50,26 @@ const
   IORING_OP_SEND*         = 26
   IORING_OP_RECV*         = 27
   IORING_OP_SPLICE*       = 30
+  IORING_OP_PROVIDE_BUFFERS* = 31
+  IORING_OP_SENDFILE*     = 40
 
   # sqe.flags bits
   IOSQE_FIXED_FILE* = 0x1   # (1U << 0): treat sqe.fd as a fixed-file table index
+  IOSQE_BUFFER_SELECT* = 0x20  # (1U << 5): select buffer from sqe.buf_group
+
+  # sqe.ioprio flags for IORING_OP_RECV (kernel 5.19+)
+  IORING_RECV_MULTISHOT* = 2   # (1U << 1): multishot recv, sets IORING_CQE_F_MORE
 
   # io_uring_register(2) opcodes (linux/io_uring.h)
   IORING_REGISTER_FILES*          = 2
   IORING_UNREGISTER_FILES*        = 3
   IORING_REGISTER_FILES_UPDATE*   = 6
+
+  # cqe.flags bits
+  IORING_CQE_F_MORE*   = 0x1   # (1U << 0): this op will generate more completions
+
+  # accept flags (kernel 6.0+)
+  IORING_ACCEPT_MULTISHOT* = 0x1
 
   # fixed-file table size (configurable via -d:powpowFixedFiles=N). Fds at or
   # above this are served by direct (non-fixed) ops.
@@ -146,12 +159,50 @@ type
 proc iouSyscall(num, a1, a2, a3, a4, a5, a6: clong): clong {.
   importc: "syscall", header: "<unistd.h>".}
 
+proc setBufGroup*(sqe: ptr IoUringSqe, bgid: uint16) {.inline.} =
+  ## Store the buffer group id in the SQE's `buf_index` field (first two bytes
+  ## of the pad region) for ops using IOSQE_BUFFER_SELECT.
+  cast[ptr uint16](addr sqe.pad[0])[] = bgid
+
 proc ioUringEnter(fd: cint, toSubmit, minComplete, flags: cuint): cint =
   iouSyscall(IoUringEnterNum, fd.clong, toSubmit.clong, minComplete.clong,
              flags.clong, 0, 0).cint
 
 proc ioUringRegister(fd: cint, opcode, arg: clong, nrArgs: cuint): cint =
   iouSyscall(IoUringRegisterNum, fd.clong, opcode, arg, nrArgs.clong, 0, 0).cint
+
+# ── Runtime kernel version (for gated fast paths) ────────────────────────────
+
+proc kernelVersion*(): tuple[major, minor: int] {.gcsafe.} =
+  ## (major, minor) of the running Linux kernel; (-1, -1) when unknown.
+  result = (-1, -1)
+  var buf: array[64, char]
+  let fd = posix.open("/proc/sys/kernel/osrelease", O_RDONLY)
+  if fd < 0:
+    return
+  let n = posix.read(fd, addr buf[0], buf.len.cint)
+  discard posix.close(fd)
+  if n <= 0:
+    return
+  var s = newString(n)
+  copyMem(addr s[0], addr buf[0], n)
+  # "6.8.0-45-generic" | "5.15.0-91-generic"
+  let parts = s.split('.')
+  if parts.len < 2:
+    return
+  result.major = parts[0].parseInt()
+  result.minor = parts[1].parseInt()
+
+proc kernelAtLeast*(major, minor: int): bool {.inline, gcsafe.} =
+  ## True when the running kernel is >= `major.minor`. The kernel version is
+  ## read once and cached; an unreadable version is treated as "old" (fast
+  ## paths stay off).
+  var v {.global, noinit.}: tuple[major, minor: int]
+  var ok {.global, noinit.}: bool
+  if not ok:
+    v = kernelVersion()
+    ok = true
+  v.major > major or (v.major == major and v.minor >= minor)
 
 # ── Ring ─────────────────────────────────────────────────────────────────────
 
@@ -264,6 +315,16 @@ proc registerFixedFiles*(ring: Ring, wakeFd: int): bool {.gcsafe.} =
   ## `FixedFilesTableSize`. The wake eventfd slot is pre-filled. Returns false
   ## when the kernel rejects registration (older kernel / seccomp) — callers
   ## then keep using direct fds; this is not an error.
+  ##
+  ## `-d:powpowNoFixedFiles` disables fixed files entirely (direct fds for
+  ## every op). Registering/updating the table costs a synchronous
+  ## `io_uring_register` syscall per connection (accept + close); the A/B
+  ## escape hatch lets the CI benchmark decide whether that cost is worth the
+  ## per-op fixed-fd savings.
+  when defined(powpowNoFixedFiles):
+    ring.fixedFilesEnabled = false
+    ring.fixedFilesSize = 0
+    return false
   ring.fixedFilesSize = FixedFilesTableSize
   var table = newSeq[int32](FixedFilesTableSize)
   for i in 0 ..< FixedFilesTableSize:
@@ -322,6 +383,13 @@ proc submit*(ring: Ring, minComplete: cuint = 0,
     ring.lastSubmit = ring.sqTail[]
     return -EINTR
   if ret >= 0:
+    ring.lastSubmit = ring.sqTail[]
+  else:
+    # A hard io_uring_enter error (EFAULT/EBADF/ENOMEM, i.e. a corrupted SQE or
+    # closed ring). Do NOT leave `lastSubmit` behind: resubmitting the identical
+    # SQEs on every iteration would spin the loop forever. Advance past them and
+    # surface the negative errno so the loop can treat the ring as broken rather
+    # than hang.
     ring.lastSubmit = ring.sqTail[]
   ret
 

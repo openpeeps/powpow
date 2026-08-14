@@ -94,9 +94,11 @@ when iouEnabled:
       sfIdle
       sfReading
       sfSending
+      sfSendfile    # single-op IORING_OP_SENDFILE (kernel >= 6.0)
 
   const
     MaxEagainRetries = 1
+    AcceptBatch = 8   # outstanding one-shot IORING_OP_ACCEPT ops per listener
 
 type
   ConnState* = enum
@@ -144,6 +146,26 @@ type
       tlsOutBuf:      seq[byte]   # encrypted output drained from the SSL write BIO
       tlsOutPos:      int
       tlsWriteToken:  uint64
+      # Cached per-op completion callbacks, allocated once per connection
+      # instead of once per submitted op (the old inline-closure style put a
+      # fresh GC allocation on every RECV/SEND/TLS-SEND/README/SEND path).
+      readCb:         OpCallback
+      writeCb:        OpCallback
+      tlsWriteCb:     OpCallback
+      sendFileReadCb: OpCallback
+      sendfileCb:     OpCallback
+      bufferReadCb:   OpCallback
+      # Coalesce buffer for writes arriving while a SEND op references
+      # writeBuf/tlsOutBuf (appending to the in-flight seq could reallocate the
+      # very memory the kernel SEND is reading). Merged once the op drains.
+      pendingBuf:     seq[byte]
+      tlsPending:     seq[byte]
+      # Retired connection: closed while an op was still in flight. Its read
+      # buffer / send chunk stay alive until every outstanding op settles, so
+      # the kernel can never write into a re-pooled buffer.
+      retiring:       bool
+      retireTokens:   array[4, uint64]
+      retireCount:    int
 
   OnAccept*  = proc(conn: Connection) {.closure.}
   OnData*    = proc(conn: Connection, data: openArray[byte]) {.closure.}
@@ -161,10 +183,13 @@ type
     unixPath:  string
     maxConnections*: int
     when iouEnabled:
-      acceptToken: uint64
-      acceptAddr: Sockaddr_storage
-      acceptAddrLen: SockLen
-      fixedFd:     bool   # listener fd is registered in the loop's fixed-file table
+      acceptTokens: array[AcceptBatch, uint64]
+      acceptAddrs:  array[AcceptBatch, Sockaddr_storage]
+      acceptAddrLens: array[AcceptBatch, SockLen]
+      acceptCb:     OpCallback
+      acceptMultishot: bool    # a single IORING_OP_ACCEPT multishot op is armed
+      acceptMultishotFailed: bool  # kernel rejected multishot; use the batch
+      fixedFd:      bool   # listener fd is registered in the loop's fixed-file table
     else:
       sharedCb:  FdCallback
 
@@ -218,6 +243,9 @@ when iouEnabled:
   proc pumpBioWrite(conn: Connection) {.gcsafe.}
   proc armTlsWrite(conn: Connection) {.gcsafe.}
   proc releaseConnection(server: TcpServer, conn: Connection)
+  proc beginRetire(conn: Connection) {.gcsafe.}
+  proc retireSettled(conn: Connection, token: uint64): bool {.gcsafe.}
+  proc retireFinalize(conn: Connection) {.gcsafe.}
 
   # ── Connection ───────────────────────────────────────────────────────────────
 
@@ -245,17 +273,21 @@ when iouEnabled:
     if conn.sendFileFd >= 0:
       closeFile(conn.sendFileFd)
       conn.sendFileFd = -1
+    # Cancel in-flight ops. Any op that can still write into a connection buffer
+    # (RECV → readBuf, sendfile READ → sendChunk, CONNECT → connectAddr, SEND →
+    # writeBuf) begins the retire path: the connection and its buffers stay
+    # alive until every such op settles, so the kernel can never write into a
+    # re-pooled buffer after the fd number has been reused.
     if conn.readToken != 0:
       conn.loop.cancelOp(conn.readToken)
-      conn.readToken = 0
     if conn.connectToken != 0:
       conn.loop.cancelOp(conn.connectToken)
-      conn.connectToken = 0
     conn.loop.clearTakeoverCb(conn.fd.int)
     if conn.sendFileToken != 0:
       conn.loop.cancelOp(conn.sendFileToken)
-      conn.sendFileToken = 0
+    conn.beginRetire()
     if conn.writeToken != 0 or conn.writeBuf.len > 0 or
+       conn.pendingBuf.len > 0 or
        conn.tlsWriteToken != 0 or conn.tlsOutBuf.len > 0:
       # Pending writes: drain them first. A SEND queued by `send` immediately
       # before `close` (e.g. a WebSocket close frame) must still deliver its
@@ -267,15 +299,77 @@ when iouEnabled:
     else:
       conn.finishClose()
 
+  proc beginRetire(conn: Connection) {.gcsafe.} =
+    ## Hold the connection (and the buffers its ops may still write) until every
+    ## in-flight op settles. A retired connection is never returned to the pool;
+    ## retireFinalize releases its read buffer once all ops have settled.
+    ##
+    ## Only ops that write into buffers released at close time are tracked: RECV
+    ## (→ readBuf) and the sendfile READ (→ sendChunk). Read-only ops (SEND,
+    ## CONNECT) keep the connection object — and thus writeBuf/connectAddr —
+    ## alive via their completion callbacks until they settle.
+    if conn.retiring:
+      return
+    if conn.readToken == 0 and conn.sendFileToken == 0:
+      return
+    conn.retiring = true
+    conn.retireCount = 0
+    if conn.readToken != 0:
+      conn.retireTokens[conn.retireCount] = conn.readToken
+      inc conn.retireCount
+    if conn.sendFileToken != 0:
+      conn.retireTokens[conn.retireCount] = conn.sendFileToken
+      inc conn.retireCount
+
+  proc retireSettled(conn: Connection, token: uint64): bool {.gcsafe.} =
+    ## Mark one retired op's completion as received. Returns true when every
+    ## retired op has settled (the connection has been finalized).
+    if not conn.retiring:
+      return false
+    for i in 0 ..< conn.retireCount:
+      if conn.retireTokens[i] == token:
+        conn.retireTokens[i] = conn.retireTokens[conn.retireCount - 1]
+        dec conn.retireCount
+        break
+    if conn.retireCount == 0:
+      conn.retireFinalize()
+      true
+    else:
+      false
+
+  proc retireFinalize(conn: Connection) {.gcsafe.} =
+    ## Every in-flight op has settled, so the kernel can no longer write into
+    ## conn's read buffer: release it. The connection object is left otherwise
+    ## intact — no external references remain (fdConn entry deleted, session
+    ## removed, op callbacks consumed), so it is collected by the GC.
+    conn.retiring = false
+    conn.retireCount = 0
+    if conn.readBuf != nil:
+      releaseBuf(conn.loop, conn.readBuf)
+      conn.readBuf = nil
+    conn.sendChunk.setLen(0)
+
   proc queueWrite(conn: Connection, data: openArray[byte]): bool {.gcsafe.} =
     if data.len == 0:
       return true
-    if conn.writeBuf.len + data.len > MaxWriteBufferSize:
-      conn.close()
-      return false
-    let oldLen = conn.writeBuf.len
-    conn.writeBuf.setLen(oldLen + data.len)
-    copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
+    # A SEND op references writeBuf[writePos .. ^1]; appending to it could
+    # reallocate the buffer the kernel is reading (use-after-free). Coalesce
+    # into pendingBuf instead and promote it once the in-flight SEND drains
+    # (see onWriteComplete).
+    if conn.writeToken != 0:
+      if conn.writeBuf.len + conn.pendingBuf.len + data.len > MaxWriteBufferSize:
+        conn.close()
+        return false
+      let oldLen = conn.pendingBuf.len
+      conn.pendingBuf.setLen(oldLen + data.len)
+      copyMem(addr conn.pendingBuf[oldLen], unsafeAddr data[0], data.len)
+    else:
+      if conn.writeBuf.len + data.len > MaxWriteBufferSize:
+        conn.close()
+        return false
+      let oldLen = conn.writeBuf.len
+      conn.writeBuf.setLen(oldLen + data.len)
+      copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
     true
 
   proc socketWritableWait(conn: Connection) =
@@ -310,6 +404,10 @@ when iouEnabled:
     if conn.readToken != token:
       # Stale completion from a previous lifecycle (a pooled connection reused
       # for a new client); the current read token belongs to a newer op.
+      return
+    if conn.retireSettled(token):
+      # Retired connection: this was the last in-flight op; the read buffer has
+      # been released and the connection must not be touched further.
       return
     conn.readToken = 0
     if conn.state == Closed or conn.state == Connecting:
@@ -352,6 +450,92 @@ when iouEnabled:
       return
     conn.armRead()
 
+  when defined(powpowBufferSelect):
+    proc onBufferReadComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+      ## Completion for a multishot RECV over the shared provided-buffer group.
+      ## The RECV stays armed (IORING_CQE_F_MORE) across reads; each completion
+      ## carries the selected buffer id in the upper 16 bits of cqe.flags (older
+      ## kernels: res' upper 16 bits). The buffer is recycled right after the
+      ## data is delivered so the kernel can select it for the next event
+      ## without a re-arm.
+      if conn.readToken != token:
+        # Stale completion from a previous lifecycle (pooled connection reused):
+        # any selected group buffer must still be recycled or the group leaks.
+        if res > 0:
+          let bufId =
+            if (flags and 0xFFFF0000'u32) != 0: (flags shr 16).int
+            else: (res shr 16).int
+          conn.loop.recycleReadBuf(bufId)
+        return
+      if (flags and uring.IORING_CQE_F_MORE) == 0:
+        conn.readToken = 0
+        if conn.retireSettled(token):
+          return
+      if conn.state == Closed or conn.state == Connecting:
+        # A buffer selected by a stale/closed lifecycle must still be recycled —
+        # it is removed from the group until PROVIDE_BUFFERS returns it.
+        if res > 0:
+          let bufId =
+            if (flags and 0xFFFF0000'u32) != 0: (flags shr 16).int
+            else: (res shr 16).int
+          conn.loop.recycleReadBuf(bufId)
+        return
+      if res == -ECANCELED:
+        return
+      if res == -ENOBUFS:
+        # The group is momentarily empty: every buffer is held by completions
+        # still in this reap batch, which recycle each as they are processed.
+        conn.loop.deferCall(proc() =
+          if conn.state != Closed and conn.readToken == 0:
+            conn.armRead())
+        return
+      if res < 0:
+        if res == -ECONNRESET or res == -ECONNABORTED or res == -ENOTCONN or
+           res == -EPIPE or res == -ECONNREFUSED:
+          conn.close()
+          conn.fireClose()
+          return
+        # EAGAIN / spurious: keep waiting; re-arm only if the op ended.
+        if conn.readToken == 0:
+          conn.armRead()
+        return
+      if res == 0:
+        # EOF (peer closed or shutdown)
+        conn.close()
+        conn.fireClose()
+        return
+      let bytes = res and 0xFFFF
+      let bufId =
+        if (flags and 0xFFFF0000'u32) != 0: (flags shr 16).int
+        else: (res shr 16).int
+      let buf = conn.loop.readBufAt(bufId)
+      if conn.state != Connected:
+        # write side shut down (graceful close): discard stragglers, wait for FIN
+        conn.loop.recycleReadBuf(bufId)
+        if conn.readToken == 0:
+          conn.armRead()
+        return
+      if conn.tlsState != TlsOff:
+        # STARTTLS-style upgrade: the multishot RECV is already armed and keeps
+        # reading; feed the ciphertext to SSL instead of the plaintext path.
+        conn.handleTlsData(buf, bytes)
+        conn.afterData()
+        conn.loop.recycleReadBuf(bufId)
+        if conn.state == Closed: return
+        if conn.readToken == 0:
+          conn.armRead()
+        return
+      if conn.onDataCb != nil:
+        conn.onDataCb(conn, buf.toOpenArray(0, bytes - 1))
+      elif conn.server != nil and conn.server.onData != nil:
+        conn.server.onData(conn, buf.toOpenArray(0, bytes - 1))
+      conn.afterData()
+      conn.loop.recycleReadBuf(bufId)
+      if conn.state == Closed:
+        return
+      if conn.readToken == 0:
+        conn.armRead()
+
   proc armRead(conn: Connection) {.gcsafe.} =
     if conn.state != Connected and conn.state != Closing:
       return
@@ -367,6 +551,25 @@ when iouEnabled:
         if conn.readToken != 0:
           conn.loop.cancelOp(conn.readToken)
           conn.readToken = 0)
+    when defined(powpowBufferSelect):
+      if conn.tlsState == TlsOff and conn.loop.bufferSelectEnabled():
+        # Multishot RECV over the shared provided-buffer group: one submission
+        # stays armed for the connection's lifetime. Each completion delivers a
+        # group buffer that is recycled right after delivery, so reads need no
+        # per-read re-arm and no per-connection read buffer.
+        let sqe = conn.loop.getOpSqe()
+        if sqe == nil:
+          conn.loop.deferCall(proc() =
+            if conn.state != Closed:
+              conn.armRead())
+          return
+        sqe.opcode = IORING_OP_RECV.uint8
+        sqe.fd = conn.fd.int32
+        sqe.flags = IOSQE_BUFFER_SELECT.uint8
+        sqe.ioprio = IORING_RECV_MULTISHOT.uint16
+        sqe.setBufGroup(ReadBufBgid)
+        conn.readToken = conn.loop.commitOp(sqe, conn.bufferReadCb)
+        return
     let sqe = conn.loop.getOpSqe()
     if sqe == nil:
       conn.loop.deferCall(proc() =
@@ -379,8 +582,7 @@ when iouEnabled:
       sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.paddr = cast[uint64](conn.readBuf)
     sqe.len = conn.readBufLen.uint32
-    conn.readToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
-      conn.onReadComplete(token, res, flags))
+    conn.readToken = conn.loop.commitOp(sqe, conn.readCb)
 
   # ── Write path ───────────────────────────────────────────────────────────────
 
@@ -388,6 +590,25 @@ when iouEnabled:
     if conn.writeToken != token:
       return
     conn.writeToken = 0
+    if conn.sendState == sfSending:
+      # Completion of a sendfile chunk SEND (the writeToken slot is shared with
+      # the regular write pump; the state machine tells the two apart).
+      if conn.state == Closed:
+        # Connection closed while a chunk SEND was in flight: finish the
+        # deferred teardown now that the op has settled.
+        if conn.closePending:
+          conn.closePending = false
+          conn.finishClose()
+        return
+      if res <= 0:
+        conn.close()
+        conn.fireClose()
+        return
+      conn.sendFileOff += res.int64
+      conn.sendFileRemain -= res.int64
+      conn.sendState = sfIdle
+      conn.pumpSendFile()
+      return
     if conn.state != Connected and conn.state != Closing and not conn.closePending:
       return
     if res == -ECANCELED:
@@ -417,6 +638,16 @@ when iouEnabled:
     if conn.writePos >= conn.writeBuf.len:
       conn.writeBuf.setLen(0)
       conn.writePos = 0
+      if conn.pendingBuf.len > 0:
+        # Writes queued while this SEND was in flight: promote them (shared
+        # data pointer, so nothing is copied) and keep the write pump going.
+        conn.writeBuf = conn.pendingBuf
+        conn.pendingBuf.setLen(0)
+        if not conn.corked:
+          setTcpCork(conn.fd, true)
+          conn.corked = true
+        conn.armWrite()
+        return
       if conn.corked:
         setTcpCork(conn.fd, false)
         conn.corked = false
@@ -425,7 +656,7 @@ when iouEnabled:
         conn.finishClose()
         if conn.server != nil:
           conn.server.releaseConnection(conn)
-        else:
+        elif not conn.retiring:
           if conn.readBuf != nil:
             releaseBuf(conn.loop, conn.readBuf)
             conn.readBuf = nil
@@ -463,8 +694,7 @@ when iouEnabled:
       sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.paddr = cast[uint64](addr conn.writeBuf[start])
     sqe.len = (conn.writeBuf.len - start).uint32
-    conn.writeToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
-      conn.onWriteComplete(token, res, flags))
+    conn.writeToken = conn.loop.commitOp(sqe, conn.writeCb)
 
   # ── sendfile (READ + SEND pump) ──────────────────────────────────────────────
 
@@ -477,20 +707,46 @@ when iouEnabled:
           sqe.flags = IOSQE_FIXED_FILE.uint8
         sqe.paddr = cast[uint64](addr conn.sendChunk[0])
         sqe.len = n.uint32
-      , proc(token: uint64, res2: int32, flags2: uint32) =
-        if conn.writeToken != token:
-          return
-        conn.writeToken = 0
-        if conn.state == Closed:
-          return
-        if res2 <= 0:
-          conn.close()
-          conn.fireClose()
-          return
-        conn.sendFileOff += res2.int64
-        conn.sendFileRemain -= res2.int64
-        conn.sendState = sfIdle
-        conn.pumpSendFile())
+      , conn.writeCb)
+
+  proc onSendFileReadComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+    if conn.sendFileToken != token:
+      return
+    if conn.retireSettled(token):
+      return
+    conn.sendFileToken = 0
+    if conn.state == Closed:
+      return
+    if res <= 0:
+      closeFile(conn.sendFileFd)
+      conn.sendFileFd = -1
+      conn.sendState = sfIdle
+      conn.pumpSendFile()
+      return
+    conn.sendFileSendChunk(res)
+
+  proc onSendfileComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+    ## Completion of a single-op IORING_OP_SENDFILE (kernel >= 6.0). Falls back
+    ## to the READ + SEND pump on -EAGAIN (socket full) or other errors.
+    if conn.sendFileToken != token:
+      return
+    if conn.retireSettled(token):
+      return
+    conn.sendFileToken = 0
+    if conn.state == Closed:
+      return
+    if res <= 0:
+      conn.sendState = sfIdle
+      if res == -EAGAIN:
+        conn.socketWritableWait()
+        return
+      if res != -ECANCELED:
+        conn.pumpSendFile()
+      return
+    conn.sendFileOff += res.int64
+    conn.sendFileRemain -= res.int64
+    conn.sendState = sfIdle
+    conn.pumpSendFile()
 
   proc pumpSendFile(conn: Connection) =
     if conn.sendFileFd < 0:
@@ -501,7 +757,7 @@ when iouEnabled:
         conn.finishClose()
         if conn.server != nil:
           conn.server.releaseConnection(conn)
-        else:
+        elif not conn.retiring:
           if conn.readBuf != nil:
             releaseBuf(conn.loop, conn.readBuf)
             conn.readBuf = nil
@@ -527,6 +783,21 @@ when iouEnabled:
         conn.sendState = sfIdle
         conn.pumpSendFile()
         return
+      when not defined(powpowNoSendfile):
+        if kernelAtLeast(6, 0):
+          # Single-op zero-copy sendfile (no user-space chunk copy). Layout:
+          # fd = in_fd (file), off = out_fd (socket), addr = file offset,
+          # len = byte count (io_uring SENDFILE ABI, kernel 6.0+).
+          conn.sendState = sfSendfile
+          let toSend = min(conn.sendFileRemain, SendFileChunkSize.int64).int
+          conn.sendFileToken = conn.loop.submitOp(proc(sqe: ptr IoUringSqe) =
+              sqe.opcode = IORING_OP_SENDFILE.uint8
+              sqe.fd = conn.sendFileFd.int32
+              sqe.off = conn.fd.int.uint64
+              sqe.paddr = conn.sendFileOff.uint64
+              sqe.len = toSend.uint32
+            , conn.sendfileCb)
+          return
       if conn.sendChunk.len == 0:
         conn.sendChunk = newSeq[byte](SendFileChunkSize)
       let toRead = min(conn.sendFileRemain, SendFileChunkSize.int64).int
@@ -537,20 +808,8 @@ when iouEnabled:
           sqe.paddr = cast[uint64](addr conn.sendChunk[0])
           sqe.len = toRead.uint32
           sqe.off = conn.sendFileOff.uint64
-        , proc(token: uint64, res: int32, flags: uint32) =
-          if conn.sendFileToken != token:
-            return
-          conn.sendFileToken = 0
-          if conn.state == Closed:
-            return
-          if res <= 0:
-            closeFile(conn.sendFileFd)
-            conn.sendFileFd = -1
-            conn.sendState = sfIdle
-            conn.pumpSendFile()
-            return
-          conn.sendFileSendChunk(res))
-    of sfReading, sfSending:
+        , conn.sendFileReadCb)
+    of sfReading, sfSending, sfSendfile:
       discard
 
   proc continueSendFile*(conn: Connection): bool =
@@ -572,6 +831,31 @@ when iouEnabled:
     if conn.tlsState != TlsOff:
       conn.tlsSend(data)
       if conn.state == Closed: return -1
+      return data.len
+    if conn.writeToken == 0 and conn.writeBuf.len == 0 and conn.sendFileFd < 0:
+      # Synchronous-write fast path: small responses fit the socket buffer, so
+      # send immediately and skip the SEND op + completion round-trip entirely.
+      var pos = 0
+      while pos < data.len:
+        let n = sockSend(conn.fd, unsafeAddr data[pos], data.len - pos)
+        if n < 0:
+          if sockWouldBlock():
+            break
+          conn.close()
+          return -1
+        if n == 0:
+          break
+        pos += n
+      if pos >= data.len:
+        return data.len
+      # Partial write: buffer the remainder and let the SEND-op pump drain it.
+      conn.writeBuf.setLen(data.len - pos)
+      copyMem(addr conn.writeBuf[0], unsafeAddr data[pos], data.len - pos)
+      conn.writePos = 0
+      if not conn.corked:
+        setTcpCork(conn.fd, true)
+        conn.corked = true
+      conn.armWrite()
       return data.len
     if not conn.queueWrite(data):
       return 0
@@ -599,7 +883,80 @@ when iouEnabled:
         copyMem(addr conn.tlsCoalesce[pos], part.data, part.len)
         pos += part.len
       return conn.send(conn.tlsCoalesce)
-    if conn.writeBuf.len > 0:
+    if conn.writeToken == 0 and conn.writeBuf.len == 0 and conn.sendFileFd < 0:
+      # Synchronous-write fast path (writev): in the common case the whole
+      # scatter list fits the socket buffer, so send immediately and skip the
+      # SEND op + completion round-trip. Falls back to the SEND-op pump on a
+      # partial write / EAGAIN.
+      const MaxStackIovs = 128
+      var stackIovs: array[MaxStackIovs, IOVec]
+      var heapIovs: seq[IOVec]
+      var iovBuf: ptr IOVec
+      var iovLen: int
+      template initIovec(base: ptr UncheckedArray[byte], ln: int): IOVec =
+        IOVec(iov_base: base, iov_len: ln.csize_t)
+      if parts.len <= MaxStackIovs:
+        iovBuf = addr stackIovs[0]
+        iovLen = parts.len
+        for i in 0 ..< parts.len:
+          stackIovs[i] = initIovec(parts[i].data, parts[i].len)
+      else:
+        heapIovs = newSeq[IOVec](parts.len)
+        iovBuf = addr heapIovs[0]
+        iovLen = parts.len
+        for i in 0 ..< parts.len:
+          heapIovs[i] = initIovec(parts[i].data, parts[i].len)
+      let n = sockWritev(conn.fd, iovBuf, iovLen)
+      if n >= totalLen:
+        return totalLen
+      if n < 0:
+        if not sockWouldBlock():
+          conn.close()
+          return -1
+        # EAGAIN: nothing written; coalesce everything for the SEND-op pump.
+        conn.writeBuf.setLen(totalLen)
+        var pos = 0
+        for part in parts:
+          copyMem(addr conn.writeBuf[pos], part.data, part.len)
+          pos += part.len
+        conn.writePos = 0
+        if not conn.corked:
+          setTcpCork(conn.fd, true)
+          conn.corked = true
+        conn.armWrite()
+        return totalLen
+      # Partial write: buffer only the unsent remainder.
+      var skipParts = 0
+      var partOff = 0
+      var consumed = n
+      while skipParts < parts.len and consumed > 0:
+        let avail = parts[skipParts].len - partOff
+        if consumed >= avail:
+          consumed -= avail
+          inc skipParts
+          partOff = 0
+        else:
+          partOff += consumed
+          consumed = 0
+      let remaining = totalLen - n
+      conn.writeBuf.setLen(remaining)
+      var pos = 0
+      var sp = skipParts
+      var off = partOff
+      while sp < parts.len:
+        let take = parts[sp].len - off
+        copyMem(addr conn.writeBuf[pos],
+                cast[ptr UncheckedArray[byte]](cast[uint](parts[sp].data) + off.uint), take)
+        pos += take
+        inc sp
+        off = 0
+      conn.writePos = 0
+      if not conn.corked:
+        setTcpCork(conn.fd, true)
+        conn.corked = true
+      conn.armWrite()
+      return totalLen
+    if conn.writeBuf.len > 0 or conn.writeToken != 0:
       for part in parts:
         if part.len > 0:
           if not conn.queueWrite(part.data.toOpenArray(0, part.len - 1)):
@@ -649,6 +1006,10 @@ when iouEnabled:
 
   proc closeAndRelease*(conn: Connection) {.inline, gcsafe.} =
     conn.close()
+    if conn.retiring:
+      # In-flight ops still reference the read buffer; retireFinalize releases
+      # it once they settle.
+      return
     if conn.readBuf != nil:
       releaseBuf(conn.loop, conn.readBuf)
       conn.readBuf = nil
@@ -733,6 +1094,55 @@ when iouEnabled:
       discard conn.queueWrite(data.toOpenArray(pos, data.len - 1))
     conn.pumpBioWrite()
 
+  proc onTlsWriteComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+    if conn.tlsWriteToken != token:
+      return
+    conn.tlsWriteToken = 0
+    if conn.state != Connected and conn.state != Closing and not conn.closePending:
+      return
+    if res == -ECANCELED:
+      return
+    if res < 0:
+      if res == -EAGAIN:
+        conn.handleSendEagain()
+        return
+      if conn.closePending:
+        conn.closePending = false
+        conn.finishClose()
+        return
+      conn.close()
+      conn.fireClose()
+      return
+    conn.tlsOutPos += res
+    conn.sendEagainRetries = 0
+    if conn.tlsOutPos >= conn.tlsOutBuf.len:
+      conn.tlsOutBuf.setLen(0)
+      conn.tlsOutPos = 0
+      if conn.tlsPending.len > 0:
+        conn.tlsOutBuf = conn.tlsPending
+        conn.tlsPending.setLen(0)
+        conn.armTlsWrite()
+        return
+      if conn.closePending:
+        conn.closePending = false
+        conn.finishClose()
+        if conn.server != nil:
+          conn.server.releaseConnection(conn)
+        elif not conn.retiring:
+          if conn.readBuf != nil:
+            releaseBuf(conn.loop, conn.readBuf)
+            conn.readBuf = nil
+      elif conn.tlsState == TlsActive and conn.writeBuf.len > 0:
+        # Re-feed plaintext buffered during WANT_WRITE once the encrypted queue
+        # drains. During the handshake the buffered plaintext is flushed by
+        # driveHandshake when the handshake completes (never re-queued).
+        let data = conn.writeBuf
+        conn.writeBuf.setLen(0)
+        conn.writePos = 0
+        conn.tlsSend(data)
+    else:
+      conn.armTlsWrite()
+
   proc armTlsWrite(conn: Connection) {.gcsafe.} =
     ## Submit a SEND op for the encrypted output queued in `tlsOutBuf`. One
     ## in-flight at a time; on completion, buffered plaintext is re-fed through
@@ -754,49 +1164,7 @@ when iouEnabled:
       sqe.flags = IOSQE_FIXED_FILE.uint8
     sqe.paddr = cast[uint64](addr conn.tlsOutBuf[start])
     sqe.len = (conn.tlsOutBuf.len - start).uint32
-    conn.tlsWriteToken = conn.loop.commitOp(sqe, proc(token: uint64, res: int32, flags: uint32) =
-      if conn.tlsWriteToken != token:
-        return
-      conn.tlsWriteToken = 0
-      if conn.state != Connected and conn.state != Closing and not conn.closePending:
-        return
-      if res == -ECANCELED:
-        return
-      if res < 0:
-        if res == -EAGAIN:
-          conn.handleSendEagain()
-          return
-        if conn.closePending:
-          conn.closePending = false
-          conn.finishClose()
-          return
-        conn.close()
-        conn.fireClose()
-        return
-      conn.tlsOutPos += res
-      conn.sendEagainRetries = 0
-      if conn.tlsOutPos >= conn.tlsOutBuf.len:
-        conn.tlsOutBuf.setLen(0)
-        conn.tlsOutPos = 0
-        if conn.closePending:
-          conn.closePending = false
-          conn.finishClose()
-          if conn.server != nil:
-            conn.server.releaseConnection(conn)
-          else:
-            if conn.readBuf != nil:
-              releaseBuf(conn.loop, conn.readBuf)
-              conn.readBuf = nil
-        elif conn.tlsState == TlsActive and conn.writeBuf.len > 0:
-          # Re-feed plaintext buffered during WANT_WRITE once the encrypted queue
-          # drains. During the handshake the buffered plaintext is flushed by
-          # driveHandshake when the handshake completes (never re-queued).
-          let data = conn.writeBuf
-          conn.writeBuf.setLen(0)
-          conn.writePos = 0
-          conn.tlsSend(data)
-      else:
-        conn.armTlsWrite())
+    conn.tlsWriteToken = conn.loop.commitOp(sqe, conn.tlsWriteCb)
 
   proc pumpBioWrite(conn: Connection) {.gcsafe.} =
     ## Drain ciphertext queued in the SSL write BIO into the TLS output queue
@@ -808,7 +1176,13 @@ when iouEnabled:
       let n = BIO_read(bio, addr buf[0], buf.len.cint)
       if n <= 0:
         break
-      conn.tlsOutBuf.add(buf.toOpenArray(0, n - 1))
+      if conn.tlsWriteToken != 0:
+        # A SEND is in flight referencing tlsOutBuf; coalesce here instead of
+        # growing the in-flight seq (a reallocation would free the very memory
+        # the kernel SEND is reading).
+        conn.tlsPending.add(buf.toOpenArray(0, n - 1))
+      else:
+        conn.tlsOutBuf.add(buf.toOpenArray(0, n - 1))
     if conn.tlsOutBuf.len > 0:
       conn.armTlsWrite()
 
@@ -860,6 +1234,26 @@ when iouEnabled:
 
   # ── Pooling ──────────────────────────────────────────────────────────────────
 
+  proc initOpCallbacks(conn: Connection) =
+    ## Allocate the per-connection op completion callbacks once. They persist
+    ## for the connection's whole lifetime (including across pooling), so the
+    ## hot path (armRead/armWrite/armTlsWrite) allocates nothing per op.
+    if conn.readCb != nil:
+      return
+    conn.readCb = proc(token: uint64, res: int32, flags: uint32) =
+      conn.onReadComplete(token, res, flags)
+    conn.writeCb = proc(token: uint64, res: int32, flags: uint32) =
+      conn.onWriteComplete(token, res, flags)
+    conn.tlsWriteCb = proc(token: uint64, res: int32, flags: uint32) =
+      conn.onTlsWriteComplete(token, res, flags)
+    conn.sendFileReadCb = proc(token: uint64, res: int32, flags: uint32) =
+      conn.onSendFileReadComplete(token, res, flags)
+    conn.sendfileCb = proc(token: uint64, res: int32, flags: uint32) =
+      conn.onSendfileComplete(token, res, flags)
+    when defined(powpowBufferSelect):
+      conn.bufferReadCb = proc(token: uint64, res: int32, flags: uint32) =
+        conn.onBufferReadComplete(token, res, flags)
+
   proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection {.gcsafe.} =
     if server.connPool.len > 0:
       result = server.connPool.pop()
@@ -883,6 +1277,8 @@ when iouEnabled:
       result.tlsOutBuf.setLen(0)
       result.tlsOutPos = 0
       result.tlsWriteToken = 0
+      result.pendingBuf.setLen(0)
+      result.tlsPending.setLen(0)
     else:
       result = Connection(
         fd:        fd,
@@ -893,8 +1289,13 @@ when iouEnabled:
         readBuf:   acquireBuf(server.loop),
         readBufLen: DefaultBufSize,
       )
+    result.initOpCallbacks()
 
   proc releaseConnection(server: TcpServer, conn: Connection) =
+    if conn.retiring:
+      # A retired connection's buffers stay alive until its in-flight ops
+      # settle; retireFinalize releases them. Never re-pool it.
+      return
     conn.state = Closed
     conn.fd = SocketHandle(-1)
     conn.corked = false
@@ -917,6 +1318,8 @@ when iouEnabled:
     conn.ssl = nil
     conn.tlsState = TlsOff
     conn.fixedFd = false
+    conn.pendingBuf.setLen(0)
+    conn.tlsPending.setLen(0)
     if server.connPool.len < MaxConnPoolSize:
       server.connPool.add(conn)
     else:
@@ -926,28 +1329,80 @@ when iouEnabled:
 
   # ── TcpServer ────────────────────────────────────────────────────────────────
 
+  proc armAcceptSlot(server: TcpServer, slot: int): bool =
+    ## Submit one one-shot IORING_OP_ACCEPT into `slot`. Returns false when the
+    ## SQE could not be claimed (ring full) — the caller defers a retry.
+    if server.acceptTokens[slot] != 0:
+      return true
+    let sqe = server.loop.getOpSqe()
+    if sqe == nil:
+      return false
+    server.acceptAddrLens[slot] = sizeof(server.acceptAddrs[slot]).SockLen
+    sqe.opcode = IORING_OP_ACCEPT.uint8
+    sqe.fd = server.fd.int32
+    if server.fixedFd:
+      sqe.flags = IOSQE_FIXED_FILE.uint8
+    sqe.paddr = cast[uint64](addr server.acceptAddrs[slot])
+    sqe.off = cast[uint64](addr server.acceptAddrLens[slot])  # kernel 5.15: socklen_t* in addr2
+    server.acceptTokens[slot] = server.loop.commitOp(sqe, server.acceptCb)
+    true
+
   proc armAccept(server: TcpServer) =
-    if server.acceptToken != 0:
-      return
-    server.acceptAddrLen = sizeof(server.acceptAddr).SockLen
-    server.acceptToken = server.loop.submitOp(proc(sqe: ptr IoUringSqe) =
+    ## Keep accepts armed. On kernel >= 6.0 (unless disabled or rejected) a
+    ## single multishot IORING_OP_ACCEPT delivers every pending connection as a
+    ## completion with no re-arm; otherwise up to `AcceptBatch` one-shot ACCEPT
+    ## ops stay in flight so a connection burst drains in one enter pass.
+    when not defined(powpowNoMultishotAccept):
+      if server.acceptMultishot:
+        return
+      if not server.acceptMultishotFailed and kernelAtLeast(6, 0):
+        let sqe = server.loop.getOpSqe()
+        if sqe == nil:
+          server.loop.deferCall(proc() =
+            if server.fd.int >= 0:
+              server.armAccept())
+          return
         sqe.opcode = IORING_OP_ACCEPT.uint8
         sqe.fd = server.fd.int32
         if server.fixedFd:
           sqe.flags = IOSQE_FIXED_FILE.uint8
-        sqe.paddr = cast[uint64](addr server.acceptAddr)
-        sqe.off = cast[uint64](addr server.acceptAddrLen)  # kernel 5.15: socklen_t* in addr2
-      , proc(token: uint64, res: int32, flags: uint32) =
-        if server.acceptToken != token:
-          return
-        server.acceptToken = 0
-        if server.fd.int < 0:
-          return
+        # addr/addrlen must be NULL for multishot accept (the client address is
+        # read via getpeername in the completion handler).
+        sqe.opFlags = IORING_ACCEPT_MULTISHOT.uint32
+        server.acceptTokens[0] = server.loop.commitOp(sqe, server.acceptCb)
+        server.acceptMultishot = true
+        return
+    for slot in 0 ..< AcceptBatch:
+      if server.acceptTokens[slot] != 0:
+        continue
+      if not server.armAcceptSlot(slot):
+        server.loop.deferCall(proc() =
+          if server.fd.int >= 0:
+            server.armAccept())
+        return
+
+  proc onAcceptComplete(server: TcpServer, token: uint64, res: int32, flags: uint32) =
+    var slot = -1
+    for i in 0 ..< AcceptBatch:
+      if server.acceptTokens[i] == token:
+        slot = i
+        break
+    if slot < 0:
+      # Stale completion from a prior lifecycle; ignore.
+      return
+    if server.fd.int < 0:
+      return
+    when not defined(powpowNoMultishotAccept):
+      if server.acceptMultishot:
+        # One multishot op stays armed as long as IORING_CQE_F_MORE is set; slot
+        # 0 is only released when the op truly ends.
         if res < 0:
-          if res != -EAGAIN and res != -EINTR:
-            server.armAccept()
-          else:
-            server.armAccept()
+          server.acceptTokens[slot] = 0
+          server.acceptMultishot = false
+          if res == -EINVAL:
+            # Kernel does not support multishot accept; use the one-shot batch.
+            server.acceptMultishotFailed = true
+          server.armAccept()
           return
         let clientFd = SocketHandle(res)
         setNonBlocking(clientFd)
@@ -955,20 +1410,48 @@ when iouEnabled:
         if server.maxConnections > 0 and
            server.fdConn.len >= server.maxConnections:
           sockClose(clientFd)
+        else:
+          let conn = server.acquireConnection(clientFd)
+          conn.fixedFd = server.loop.registerFixedFd(clientFd.int)
+          var addrLen: SockLen = sizeof(conn.clientAddr).SockLen
+          discard getpeername(clientFd,
+                              cast[ptr Sockaddr](addr conn.clientAddr), addr addrLen)
+          if server.onAccept != nil:
+            server.onAccept(conn)
+          if conn.state == Closed:
+            server.releaseConnection(conn)
+          else:
+            server.fdConn[clientFd.int] = conn
+            conn.armRead()
+        if (flags and IORING_CQE_F_MORE.uint32) == 0:
+          server.acceptTokens[slot] = 0
           server.armAccept()
-          return
-        let conn = server.acquireConnection(clientFd)
-        conn.fixedFd = server.loop.registerFixedFd(clientFd.int)
-        conn.clientAddr = server.acceptAddr
-        if server.onAccept != nil:
-          server.onAccept(conn)
-        if conn.state == Closed:
-          server.releaseConnection(conn)
-          server.armAccept()
-          return
-        server.fdConn[clientFd.int] = conn
-        conn.armRead()
-        server.armAccept())
+        return
+    server.acceptTokens[slot] = 0
+    if res < 0:
+      # EAGAIN/EINTR/errors: keep the slot armed.
+      discard server.armAcceptSlot(slot)
+      return
+    let clientFd = SocketHandle(res)
+    setNonBlocking(clientFd)
+    setTcpNoDelay(clientFd)
+    if server.maxConnections > 0 and
+       server.fdConn.len >= server.maxConnections:
+      sockClose(clientFd)
+      discard server.armAcceptSlot(slot)
+      return
+    let conn = server.acquireConnection(clientFd)
+    conn.fixedFd = server.loop.registerFixedFd(clientFd.int)
+    conn.clientAddr = server.acceptAddrs[slot]
+    if server.onAccept != nil:
+      server.onAccept(conn)
+    if conn.state == Closed:
+      server.releaseConnection(conn)
+      discard server.armAcceptSlot(slot)
+      return
+    server.fdConn[clientFd.int] = conn
+    conn.armRead()
+    discard server.armAcceptSlot(slot)
 
   proc listen*(server: TcpServer, address: string, port: int) =
     let addrBuf = resolveAddr(address, port, SOCK_STREAM)
@@ -1037,9 +1520,11 @@ when iouEnabled:
         releaseBuf(conn.loop, conn.readBuf)
         conn.readBuf = nil
     server.connPool.setLen(0)
-    if server.acceptToken != 0:
-      server.loop.cancelOp(server.acceptToken)
-      server.acceptToken = 0
+    when iouEnabled:
+      for i in 0 ..< AcceptBatch:
+        if server.acceptTokens[i] != 0:
+          server.loop.cancelOp(server.acceptTokens[i])
+          server.acceptTokens[i] = 0
     if server.fd.int >= 0:
       server.loop.unregister(server.fd.int)
       if server.fixedFd:
@@ -1078,6 +1563,8 @@ when iouEnabled:
       unixPath: "",
       maxConnections: 0,
     )
+    srv.acceptCb = proc(token: uint64, res: int32, flags: uint32) =
+      srv.onAcceptComplete(token, res, flags)
     # Higher layers signal writability for an op-driven connection (e.g. the HTTP
     # server resumes a zero-copy sendfile after `modify(fd, {Read, Write})`); the
     # io_uring backend turns that into a one-shot POLL_ADD Write poll and resumes
@@ -1138,6 +1625,7 @@ when iouEnabled:
             onDataCb:  onData,
             onCloseCb: onClose,
           )
+          conn.initOpCallbacks()
           let sLen = getSockLen(addr addrBuf)
           conn.connectAddr = addrBuf
           conn.fixedFd = loop.registerFixedFd(fd.int)
@@ -1198,6 +1686,7 @@ when iouEnabled:
         onDataCb:  onData,
         onCloseCb: onClose,
       )
+      conn.initOpCallbacks()
 
       var sockAddr: Sockaddr_un
       sockAddr.sun_family = AF_UNIX.uint8

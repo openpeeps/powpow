@@ -50,6 +50,11 @@ when iouEnabled:
     WatcherTokenTag = 1'u64 shl 63        # completion is an fd watcher (POLL_ADD)
     WritabilityTokenTag = 1'u64 shl 62    # completion is a one-shot writability poll
 
+  when defined(powpowBufferSelect):
+    const
+      ReadBufGroupSize = 512   # buffers in the shared multishot read group
+      ReadBufBgid* = 1'u16
+
 # ── Timer wheel types ────────────────────────────────────────────────────────
 
 type
@@ -108,6 +113,10 @@ type
       takeoverCbs: Table[int, proc() {.closure.}]
       rearmQueue:  seq[FdWatcher]
       reaped:      int
+      when defined(powpowBufferSelect):
+        bufGroup:     ptr UncheckedArray[byte]   # shared multishot read buffers
+        bufGroupSize: int
+        bufGroupCount: int
     else:
       platform*:   Platform
     fdWatchers:    Table[int, FdWatcher]
@@ -233,14 +242,16 @@ when iouEnabled:
       # avoids a cancel-rearm per poll (each cancel completion wakes enter early
       # and would make the loop spin instead of sleeping).
       return
-    if loop.timeoutPending:
-      loop.cancelOp(loop.timeoutToken)
-      loop.timeoutPending = false
-    loop.timeoutTs.tvSec = (ms div 1000).int64
-    loop.timeoutTs.tvNsec = ((ms mod 1000) * 1_000_000).int64
     let sqe = loop.ring.getSqe()
     if sqe == nil:
+      # Ring full: keep the existing timeout armed (it still fires no later than
+      # its original deadline) so the loop is never left with no timeout in the
+      # kernel. State stays consistent — no op is orphaned.
       return
+    if loop.timeoutPending:
+      loop.cancelOp(loop.timeoutToken)
+    loop.timeoutTs.tvSec = (ms div 1000).int64
+    loop.timeoutTs.tvNsec = ((ms mod 1000) * 1_000_000).int64
     inc loop.nextToken
     loop.timeoutToken = loop.nextToken
     loop.timeoutDeadline = deadline
@@ -276,6 +287,41 @@ when iouEnabled:
     ## layers (e.g. UDP send) that must guarantee an operation is in flight
     ## before the caller can tear the resource down.
     discard loop.ring.submit(0, 0)
+
+  when defined(powpowBufferSelect):
+    proc deferCall*(loop: Loop, cb: Callback) {.inline, gcsafe.}
+      ## Forward: defined in the deferred-calls section below.
+
+    proc provideBuffers(loop: Loop, nbufs: int, base: pointer,
+                        bufLen: int, bgid: uint16) {.gcsafe.} =
+      ## Queue an IORING_OP_PROVIDE_BUFFERS op (one SQE adds `nbufs` contiguous
+      ## buffers of `bufLen` bytes to group `bgid`). Submission happens with the
+      ## rest of the pending SQEs; if the ring is full the op is deferred.
+      let sqe = loop.ring.getSqe()
+      if sqe == nil:
+        loop.deferCall(proc() =
+          loop.provideBuffers(nbufs, base, bufLen, bgid))
+        return
+      sqe.opcode = IORING_OP_PROVIDE_BUFFERS.uint8
+      sqe.fd = nbufs.int32
+      sqe.paddr = cast[uint64](base)
+      sqe.len = bufLen.uint32
+      sqe.setBufGroup(bgid)
+
+    proc bufferSelectEnabled*(loop: Loop): bool {.inline, gcsafe.} =
+      ## True when the shared provided-buffer group is active (opt-in via
+      ## `-d:powpowBufferSelect` and a kernel that supports multishot recv).
+      loop.bufGroup != nil
+
+    proc readBufAt*(loop: Loop, bufId: int): ptr UncheckedArray[byte] {.inline.} =
+      ## Address of buffer `bufId` in the shared read group (0-based).
+      cast[ptr UncheckedArray[byte]](cast[int](loop.bufGroup) + bufId * loop.bufGroupSize)
+
+    proc recycleReadBuf*(loop: Loop, bufId: int) {.gcsafe.} =
+      ## Return a consumed read buffer to the ring so an armed multishot RECV can
+      ## select it again. Fire-and-forget: no completion callback is needed.
+      loop.provideBuffers(1, cast[pointer](loop.readBufAt(bufId)),
+                          loop.bufGroupSize, ReadBufBgid)
 
   proc registerFixedFd*(loop: Loop, fd: int): bool {.gcsafe.} =
     ## Install `fd` into the ring's fixed-file table (slot[fd] = fd). Returns
@@ -333,6 +379,14 @@ proc newLoop*(entries = 4096): Loop =
     result.wakeToken = result.nextToken
     result.armWake()
     discard result.ring.submit(0, 0)
+    when defined(powpowBufferSelect):
+      if kernelAtLeast(5, 19):
+        result.bufGroupSize = DefaultBufSize
+        result.bufGroupCount = ReadBufGroupSize
+        result.bufGroup = cast[ptr UncheckedArray[byte]](
+          allocShared(ReadBufGroupSize * DefaultBufSize))
+        result.provideBuffers(ReadBufGroupSize, result.bufGroup,
+                              DefaultBufSize, ReadBufBgid)
   else:
     result.platform = Platform.init()
 
@@ -394,6 +448,10 @@ proc close*(loop: Loop) =
     loop.writabilityTokens.clear()
     loop.takeoverCbs.clear()
     loop.rearmQueue.setLen(0)
+    when defined(powpowBufferSelect):
+      if loop.bufGroup != nil:
+        deallocShared(loop.bufGroup)
+        loop.bufGroup = nil
   else:
     loop.platform.close()
 
@@ -900,7 +958,11 @@ when iouEnabled:
       else:
         let cb = loop.opCbs.getOrDefault(ud)
         if cb != nil:
-          loop.opCbs.del(ud)
+          if (fl and uring.IORING_CQE_F_MORE) == 0:
+            # Final completion: drop the callback. A multishot op (e.g. multishot
+            # ACCEPT) keeps its callback registered while IORING_CQE_F_MORE is
+            # set so it can dispatch subsequent completions.
+            loop.opCbs.del(ud)
           cb(ud, res, fl)
           inc loop.reaped
 
