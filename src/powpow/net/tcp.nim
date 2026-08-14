@@ -168,6 +168,7 @@ type
       tlsWriteCb:     OpCallback
       sendFileReadCb: OpCallback
       spliceCb:       OpCallback
+      shutdownCb:     OpCallback
       bufferReadCb:   OpCallback
       # Per-connection pipe for zero-copy SPLICE file transfers. A shared loop
       # pipe is not safe: concurrent transfers would interleave in the FIFO and
@@ -615,6 +616,30 @@ when iouEnabled:
 
   # ── Write path ───────────────────────────────────────────────────────────────
 
+  proc onShutdownComplete(conn: Connection, token: uint64, res: int32, flags: uint32) =
+    ## Fire-and-forget IORING_OP_SHUTDOWN completion. On failure (e.g. an old
+    ## kernel without the opcode) fall back to the syscall so graceful close
+    ## still delivers the FIN.
+    if res < 0 and conn.state != Closed and conn.fd.int >= 0:
+      sockShutdown(conn.fd, shutWrVal())
+
+  proc ringShutdown(conn: Connection) =
+    ## Gracefully shut down the write side with IORING_OP_SHUTDOWN (the FIN is
+    ## sent when the op completes; the state machine does not wait on it). Falls
+    ## back to the syscall when the ring has no slot or the op is unsupported.
+    if conn.fd.int < 0:
+      return
+    when not defined(powpowNoShutdownOp):
+      if conn.loop.supportsOp(uring.IORING_OP_SHUTDOWN):
+        let sqe = conn.loop.getOpSqe()
+        if sqe != nil:
+          sqe.opcode = IORING_OP_SHUTDOWN.uint8
+          sqe.fd = conn.fd.int32
+          sqe.opFlags = shutWrVal().uint32
+          discard conn.loop.commitOp(sqe, conn.shutdownCb)
+          return
+    sockShutdown(conn.fd, shutWrVal())
+
   proc writeDrained(conn: Connection) =
     ## writeBuf has been fully handed to the kernel and the kernel no longer
     ## references it (a plain SEND completion, or the SEND_ZC NOTIF). Reset it,
@@ -651,7 +676,7 @@ when iouEnabled:
       conn.fireClose()
     elif conn.shutdownAfterSend:
       conn.state = Closing
-      sockShutdown(conn.fd, shutWrVal())
+      conn.ringShutdown()
     else:
       conn.armRead()
 
@@ -922,7 +947,7 @@ when iouEnabled:
         conn.fireClose()
       elif conn.shutdownAfterSend:
         conn.state = Closing
-        sockShutdown(conn.fd, shutWrVal())
+        conn.ringShutdown()
       else:
         conn.armRead()
       return
@@ -1144,7 +1169,7 @@ when iouEnabled:
       conn.armWrite()
     else:
       conn.state = Closing
-      sockShutdown(conn.fd, shutWrVal())
+      conn.ringShutdown()
 
   proc closeAfterDrain*(conn: Connection) {.inline, gcsafe.} =
     if conn.state == Closed: return
@@ -1152,7 +1177,7 @@ when iouEnabled:
       when defined(linux):
         if conn.tlsState == TlsOff:
           conn.state = Closing
-          sockShutdown(conn.fd, shutWrVal())
+          conn.ringShutdown()
           conn.armRead()
         else:
           conn.close()
@@ -1408,6 +1433,8 @@ when iouEnabled:
       conn.onSendFileReadComplete(token, res, flags)
     conn.spliceCb = proc(token: uint64, res: int32, flags: uint32) =
       conn.onSpliceComplete(token, res, flags)
+    conn.shutdownCb = proc(token: uint64, res: int32, flags: uint32) =
+      conn.onShutdownComplete(token, res, flags)
     when defined(powpowBufferSelect):
       conn.bufferReadCb = proc(token: uint64, res: int32, flags: uint32) =
         conn.onBufferReadComplete(token, res, flags)
