@@ -18,6 +18,10 @@ on:
         description: 'URL path'
         default: '/hello'
         required: false
+      compilation-flags:
+        description: 'Extra flags appended to the nim c benchmark server builds (e.g. -d:powpowNoFixedFiles). Applied to both backends.'
+        default: ''
+        required: false
 
 jobs:
   # ── Correctness gate: run the io_uring test + audit suite under the flag ──
@@ -61,8 +65,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: nimble install -Y
       - run: sudo apt-get update && sudo apt-get install -y wrk
-      - run: nim c -d:release ${{ matrix.backend.flags }} examples/httpserver.nim
-      - run: nim c -d:release --threads:on ${{ matrix.backend.flags }} examples/httpserver_threads.nim
+      - run: nim c -d:release ${{ matrix.backend.flags }} ${{ inputs.compilation-flags }} examples/httpserver.nim
+      - run: nim c -d:release --threads:on ${{ matrix.backend.flags }} ${{ inputs.compilation-flags }} examples/httpserver_threads.nim
 
       - name: Record commit
         run: |
