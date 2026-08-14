@@ -657,6 +657,7 @@ type
     maps:           seq[(pointer, int)]
     fixedFilesEnabled: bool   # IORING_REGISTER_FILES succeeded
     fixedFilesSize:    int    # size of the registered table (0 when disabled)
+    buffersRegistered*: bool   # IORING_REGISTER_BUFFERS succeeded
     features*:      uint32  # IORING_FEAT_* bits reported by io_uring_setup
     probed:         bool    # IORING_REGISTER_PROBE ran
     supportedOps:   array[56, bool]  # per-opcode support (index = opcode)
@@ -784,6 +785,9 @@ proc close*(ring: Ring) {.gcsafe.} =
     if ring.fixedFilesEnabled:
       discard ioUringRegister(ring.ringFd, IORING_UNREGISTER_FILES, 0, 0)
       ring.fixedFilesEnabled = false
+    if ring.buffersRegistered:
+      discard ioUringRegister(ring.ringFd, IORING_UNREGISTER_BUFFERS, 0, 0)
+      ring.buffersRegistered = false
     discard posix.close(ring.ringFd)
     ring.ringFd = -1
 
@@ -838,6 +842,46 @@ proc updateFixedFile*(ring: Ring, fd: int, value: int32): bool {.gcsafe.} =
   # IORING_REGISTER_FILES_UPDATE returns the number of fds updated (1), not 0.
   result = ioUringRegister(ring.ringFd, IORING_REGISTER_FILES_UPDATE,
                            cast[clong](addr upd), 1) >= 0
+
+# ── Registered buffers (IORING_REGISTER_BUFFERS) ──────────────────────────────
+
+proc registerBuffers*(ring: Ring, iovecs: ptr IOVec, count: int): bool {.gcsafe.} =
+  ## Register `count` buffers (a `struct iovec` array) with the ring so fixed
+  ## ops (READ_FIXED/WRITE_FIXED/SEND_ZC_FIXED) reference them by index without
+  ## pinning pages per op. Returns false when the kernel rejects the request
+  ## (older kernel / seccomp / bad alignment); callers then use non-fixed ops.
+  if count <= 0 or iovecs == nil:
+    return false
+  let ret = ioUringRegister(ring.ringFd, IORING_REGISTER_BUFFERS,
+                            cast[clong](iovecs), count.cuint)
+  if ret < 0:
+    return false
+  ring.buffersRegistered = true
+  true
+
+proc unregisterBuffers*(ring: Ring): bool {.gcsafe.} =
+  ## Release the registered buffer table. Safe to call even when nothing was
+  ## registered (the kernel returns 0 / -EINVAL for a missing table).
+  if not ring.buffersRegistered:
+    return true
+  ring.buffersRegistered = false
+  ioUringRegister(ring.ringFd, IORING_UNREGISTER_BUFFERS, 0, 0) >= 0
+
+proc registerBuffersUpdate*(ring: Ring, offset: int, iov: ptr IOVec): bool {.gcsafe.} =
+  ## Replace the registered buffer at slot `offset` with `iov` via
+  ## IORING_REGISTER_BUFFERS_UPDATE. Matches liburing's
+  ## io_uring_register_buffers_update: one io_uring_rsrc_update2 with the iovec
+  ## count in `nr`, and the syscall nr_args set to sizeof(io_uring_rsrc_update2)
+  ## (the kernel sanity-checks nr_args and reads the count from `nr`).
+  if not ring.buffersRegistered or iov == nil:
+    return false
+  var upd = IoUringRsrcUpdate2(
+    offset: offset.uint32,
+    data:   cast[uint64](iov),
+    nr:     1,
+  )
+  ioUringRegister(ring.ringFd, IORING_REGISTER_BUFFERS_UPDATE,
+                  cast[clong](addr upd), sizeof(IoUringRsrcUpdate2).cuint) >= 0
 
 # ── Submission ───────────────────────────────────────────────────────────────
 

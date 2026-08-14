@@ -373,6 +373,73 @@ when iouEnabled:
     doAssert rng.bodyLen == RangeLen, "range body len " & $rng.bodyLen
     removeFile(FilePath)
 
+  # ── 9. Registered buffers (IORING_REGISTER_BUFFERS / _UPDATE): the register /
+  #     update / unregister lifecycle must work and a fixed-buffer SEND_ZC_FIXED
+  #     round-trip must deliver byte-exact data (opt-in -d:powpowSendZcFixed
+  #     uses the per-loop registered buffer on both peers).
+
+  test "io_uring registered buffers (register/update/unregister)":
+    let loop = newLoop()
+    # Under -d:powpowSendZcFixed the loop already registered its send buffer
+    # (one buffer table per ring); drop it so this test owns the table.
+    if loop.buffersRegistered():
+      discard loop.unregisterBuffers()
+    var buf = newSeq[byte](128 * 1024)
+    var iov = IOVec(iov_base: addr buf[0], iov_len: buf.len.csize_t)
+    doAssert loop.registerBuffers(addr iov, 1), "registerBuffers failed"
+    doAssert loop.buffersRegistered()
+    # Update slot 0 with the same buffer (a no-op-ish replace must succeed).
+    doAssert loop.registerBuffersUpdate(0, addr iov), "registerBuffersUpdate failed"
+    doAssert loop.unregisterBuffers(), "unregisterBuffers failed"
+    doAssert not loop.buffersRegistered()
+    # Unregistering twice must be harmless (idempotent).
+    doAssert loop.unregisterBuffers()
+    loop.close()
+
+  test "io_uring send_zc_fixed round-trips byte-exact":
+    when defined(powpowSendZcFixed):
+      # Same large-payload echo as test 7, but the -d:powpowSendZcFixed build
+      # routes it through SEND_ZC_FIXED against the loop's registered buffer.
+      const Payload = 256 * 1024
+      var serverAccum = newSeq[byte](0)
+      var received = newSeq[byte](0)
+      let loop = newLoop()
+      doAssert loop.sendZcFixedBuf != nil, "registered send buffer missing"
+      let server = newTcpServer(loop,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          serverAccum.add(@data)
+          if serverAccum.len >= Payload:
+            discard conn.send(serverAccum)
+        ,
+      )
+      server.listen("127.0.0.1", 19986)
+      discard loop.addTimer(40) do (id: int):
+        loop.connect("127.0.0.1", 19986,
+          onConnect = proc(conn: Connection) =
+            var big = newSeq[byte](Payload)
+            for i in 0 ..< Payload: big[i] = byte(i and 0xFF)
+            discard conn.send(big)
+          ,
+          onData = proc(conn: Connection, data: openArray[byte]) =
+            received.add(data)
+            if received.len >= Payload:
+              conn.close()
+              loop.stop()
+          ,
+        )
+      discard loop.addTimer(5000) do (id: int):
+        server.close()
+        loop.stop()
+      loop.run()
+      doAssert received.len == Payload, "got " & $received.len & " bytes"
+      var ok = true
+      for i in 0 ..< Payload:
+        if received[i] != byte(i and 0xFF): ok = false; break
+      doAssert ok, "SEND_ZC_FIXED payload corruption"
+      loop.close()
+    else:
+      discard   # only runs under -d:powpowSendZcFixed
+
 else:
   echo "io_uring tests skipped (backend not enabled)"
 

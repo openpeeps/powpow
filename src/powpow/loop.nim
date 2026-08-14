@@ -114,6 +114,9 @@ type
       rearmQueue:  seq[FdWatcher]
       reaped:      int
       zcFailed*:   bool   # SEND_ZC op returned -EINVAL/-EOPNOTSUPP: disable it
+      sendZcFixedBuf*: ptr UncheckedArray[byte]  # registered buffer for SEND_ZC_FIXED
+      sendZcFixedSize*: int
+      sendZcFixedBusy*: bool   # a SEND_ZC_FIXED op references the buffer
       when defined(powpowBufferSelect):
         bufGroup:     ptr UncheckedArray[byte]   # shared multishot read buffers
         bufGroupSize: int
@@ -365,6 +368,33 @@ when iouEnabled:
     (when defined(powpowNoSendZc): false else: true) and
       not loop.zcFailed and loop.supportsOp(uring.IORING_OP_SEND_ZC)
 
+  proc zcFixedEnabled*(loop: Loop): bool {.inline, gcsafe.} =
+    ## True when SEND_ZC_FIXED can be used right now: a per-loop registered
+    ## send buffer exists and is not referenced by an in-flight op. Only one
+    ## SEND_ZC_FIXED can be outstanding per loop (single shared buffer).
+    loop.sendZcFixedBuf != nil and not loop.sendZcFixedBusy
+
+  proc registerBuffers*(loop: Loop, iovecs: ptr IOVec, count: int): bool {.gcsafe.} =
+    ## Register `count` buffers with the ring so fixed ops (READ_FIXED/
+    ## WRITE_FIXED/SEND_ZC_FIXED) reference them by index.
+    loop.ring.registerBuffers(iovecs, count)
+
+  proc unregisterBuffers*(loop: Loop): bool {.gcsafe.} =
+    ## Release the registered buffer table.
+    loop.ring.unregisterBuffers()
+
+  proc registerBuffersUpdate*(loop: Loop, offset: int, iov: ptr IOVec): bool {.gcsafe.} =
+    ## Replace the registered buffer at slot `offset` with `iov`.
+    loop.ring.registerBuffersUpdate(offset, iov)
+
+  proc buffersRegistered*(loop: Loop): bool {.inline, gcsafe.} =
+    ## True when a buffer table is currently registered with the ring.
+    loop.ring.buffersRegistered
+
+  proc ringFdRaw*(loop: Loop): cint {.inline, gcsafe.} =
+    ## The raw io_uring fd (advanced/low-level use, e.g. diagnostics).
+    loop.ring.ringFd
+
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 proc newLoop*(entries = 4096): Loop =
@@ -410,12 +440,31 @@ proc newLoop*(entries = 4096): Loop =
     result.wakeToken = result.nextToken
     result.armWake()
     discard result.ring.submit(0, 0)
+    when defined(powpowSendZcFixed):
+      # A per-loop registered buffer backing SEND_ZC_FIXED: copy the payload
+      # here once, then reference it by buf_index — no per-op page pinning.
+      if result.ring.supports(uring.IORING_OP_SEND_ZC):
+        const SendZcFixedSize = when defined(powpowSendZcFixedSize):
+          powpowSendZcFixedSize else: (1 shl 20)
+        var buf = cast[ptr UncheckedArray[byte]](allocShared(SendZcFixedSize))
+        var iov = IOVec(iov_base: buf, iov_len: SendZcFixedSize.csize_t)
+        if result.ring.registerBuffers(addr iov, 1):
+          result.sendZcFixedBuf = buf
+          result.sendZcFixedSize = SendZcFixedSize
+          result.sendZcFixedBusy = false
+        else:
+          deallocShared(buf)
     when defined(powpowBufferSelect):
       if kernelAtLeast(5, 19) and result.ring.supports(uring.IORING_OP_RECV):
         result.bufGroupSize = DefaultBufSize
         result.bufGroupCount = ReadBufGroupSize
         result.bufGroup = cast[ptr UncheckedArray[byte]](
           allocShared(ReadBufGroupSize * DefaultBufSize))
+        # Register the shared read group so fixed-buffer ops (READ_FIXED,
+        # SEND_ZC_FIXED) can reference it without per-op page pinning.
+        var iov = IOVec(iov_base: result.bufGroup,
+                        iov_len: (ReadBufGroupSize * DefaultBufSize).csize_t)
+        discard result.ring.registerBuffers(addr iov, 1)
         result.provideBuffers(ReadBufGroupSize, result.bufGroup,
                               DefaultBufSize, ReadBufBgid)
   else:
@@ -479,6 +528,9 @@ proc close*(loop: Loop) =
     loop.writabilityTokens.clear()
     loop.takeoverCbs.clear()
     loop.rearmQueue.setLen(0)
+    if loop.sendZcFixedBuf != nil:
+      deallocShared(loop.sendZcFixedBuf)
+      loop.sendZcFixedBuf = nil
     when defined(powpowBufferSelect):
       if loop.bufGroup != nil:
         deallocShared(loop.bufGroup)

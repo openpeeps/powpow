@@ -187,6 +187,9 @@ type
       # touched/reused before it does. Until then, new writes coalesce into
       # pendingBuf exactly like they do while a plain SEND op is in flight.
       zcPending:      bool
+      # This connection's in-flight SEND_ZC references the loop's shared
+      # registered buffer (send_zc_fixed); its NOTIF releases that buffer.
+      zcFixedActive:  bool
       # Retired connection: closed while an op was still in flight. Its read
       # buffer / send chunk stay alive until every outstanding op settles, so
       # the kernel can never write into a re-pooled buffer.
@@ -689,9 +692,13 @@ when iouEnabled:
     if conn.writeToken != token:
       return
     if (flags and uring.IORING_CQE_F_NOTIF) != 0:
-      # Zero-copy notification: the kernel is done with writeBuf's pages. The
+      # Zero-copy notification: the kernel is done with writeBuf's pages (and,
+      # for a SEND_ZC_FIXED, with the loop's shared registered buffer). The
       # token was kept set since the SEND_ZC data completion, so nothing reused
       # the buffer in between; settle it now.
+      if conn.zcFixedActive:
+        conn.zcFixedActive = false
+        conn.loop.sendZcFixedBusy = false
       conn.writeToken = 0
       conn.zcPending = false
       if conn.writePos >= conn.writeBuf.len:
@@ -792,6 +799,24 @@ when iouEnabled:
       # in two CQEs — a data completion (IORING_CQE_F_MORE) and, once the pages
       # may be reused, a notification (IORING_CQE_F_NOTIF). writeToken stays set
       # until the NOTIF so nothing touches writeBuf in between.
+      if conn.loop.zcFixedEnabled() and remaining <= conn.loop.sendZcFixedSize:
+        # SEND_ZC_FIXED against the loop's registered buffer: one copy into it,
+        # then the op avoids per-op page pinning entirely. The loop serializes
+        # these (one shared buffer); the NOTIF releases it.
+        copyMem(conn.loop.sendZcFixedBuf, unsafeAddr conn.writeBuf[start],
+                remaining)
+        sqe.opcode = IORING_OP_SEND_ZC.uint8
+        sqe.fd = conn.fd.int32
+        if conn.fixedFd:
+          sqe.flags = IOSQE_FIXED_FILE.uint8
+        sqe.paddr = cast[uint64](conn.loop.sendZcFixedBuf)
+        sqe.len = remaining.uint32
+        sqe.setBufIndex(0)   # fixed buffer slot 0
+        conn.writeToken = conn.loop.commitOp(sqe, conn.writeCb)
+        conn.zcPending = true
+        conn.zcFixedActive = true
+        conn.loop.sendZcFixedBusy = true
+        return
       sqe.opcode = IORING_OP_SEND_ZC.uint8
       sqe.fd = conn.fd.int32
       if conn.fixedFd:
@@ -1475,6 +1500,7 @@ when iouEnabled:
       result.tlsOutPos = 0
       result.tlsWriteToken = 0
       result.zcPending = false
+      result.zcFixedActive = false
       result.splicePipe = [-1.cint, -1.cint]
       result.splicePipeOk = false
       result.spliceChunk = 0
@@ -1522,6 +1548,7 @@ when iouEnabled:
     conn.tlsState = TlsOff
     conn.fixedFd = false
     conn.zcPending = false
+    conn.zcFixedActive = false
     conn.splicePipe = [-1.cint, -1.cint]
     conn.splicePipeOk = false
     conn.spliceChunk = 0
