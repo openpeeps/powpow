@@ -88,7 +88,8 @@ The aggregate module `src/powpow.nim` re-exports:
 | SIMD scanning (`proto/simdscan.nim`) | Done — SSE2 CRLF detection with scalar fallback |
 | Rate limiting (`proto/ratelimit.nim`) | Done — sliding window per IP |
 | io_uring backend (`io/uring.nim`) | Done — opt-in Linux submission-based backend: full io_uring API binding, probe-based feature detection, zero-copy `SEND_ZC` + `SPLICE` file sends, registered buffers (`-d:powpowIoUring`) |
-| HTTP/2, HTTP/3 (QUIC) | Not planned |
+| HTTP/2 | Planned — multiplexed frames over TCP (see [performance](performance.md) for why this fits io_uring) |
+| HTTP/3 (QUIC) | Not planned |
 
 ## Feature details
 

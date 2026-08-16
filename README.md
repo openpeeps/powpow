@@ -29,6 +29,14 @@
 - Opt-in Linux **io_uring** backend (submission-based, `--features:io_uring`) with
   zero-copy `send_zc` sends, `SPLICE` file transfers, registered buffers and a
   full `io_uring` API binding — [documentation](docs/contents/io_uring.md)
+
+> [!NOTE]
+> **io_uring expectations.** On plain HTTP/1.x, request/response cycles over TCP
+> are serialized per connection, so io_uring doesn't dramatically outpace epoll
+> on a single-connection benchmark — it's a way to reach parity with headroom
+> as concurrency scales and for zero-copy file serving. See the
+> [performance docs](docs/contents/performance.md) for details and where
+> HTTP/2/QUIC will make its parallelism count.
 - Support for edge-triggered and level-triggered event notification
 - Support for multiple event loops and multi-threaded applications
 - Support for MIME type detection based on file extensions
