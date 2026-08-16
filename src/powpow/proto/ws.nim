@@ -1245,35 +1245,56 @@ proc registerClientFd(ws: WsConnection) =
               return
         var buf: array[65536, byte]
         while true:
-          let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
-          if n > 0:
-            if ws.handshakeDone:
-              ws.parseWsFrames(buf.toOpenArray(0, n - 1))
-              if ws.conn.state != Connected:
-                return
+          when defined(windows):
+            # On Windows/IOCP the bytes arrive buffered by the in-flight WSARecv;
+            # a direct sockRecv returns WSAEWOULDBLOCK and the response stays
+            # stranded. getReadData drains the platform's read buffer instead.
+            let n = ws.conn.loop.platform.getReadData(
+              ws.conn.fd.int,
+              cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
+            if n > 0:
+              if ws.handshakeDone:
+                ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+                if ws.conn.state != Connected:
+                  return
+              else:
+                ws.handshakeBuf.add(buf.toOpenArray(0, n - 1))
+                if not ws.finishHandshake():
+                  discard  # wait for more response bytes
+                if ws.conn.state != Connected:
+                  return
             else:
-              ws.handshakeBuf.add(buf.toOpenArray(0, n - 1))
-              if not ws.finishHandshake():
-                discard  # wait for more response bytes
-              if ws.conn.state != Connected:
-                return
-          elif n == 0:
-            if not ws.handshakeDone:
-              if not ws.onError.isNil:
-                ws.onError(ws, "Connection closed during WebSocket handshake")
-            elif not ws.onClose.isNil:
-              ws.onClose(ws, 1006, "")
-            ws.conn.close()
-            return
-          else:
-            if sockWouldBlock():
               break
-            if sockInterrupted():
-              continue
-            if not ws.onError.isNil:
-              ws.onError(ws, "recv error: " & $lastSocketError())
-            ws.conn.close()
-            return
+          else:
+            let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
+            if n > 0:
+              if ws.handshakeDone:
+                ws.parseWsFrames(buf.toOpenArray(0, n - 1))
+                if ws.conn.state != Connected:
+                  return
+              else:
+                ws.handshakeBuf.add(buf.toOpenArray(0, n - 1))
+                if not ws.finishHandshake():
+                  discard  # wait for more response bytes
+                if ws.conn.state != Connected:
+                  return
+            elif n == 0:
+              if not ws.handshakeDone:
+                if not ws.onError.isNil:
+                  ws.onError(ws, "Connection closed during WebSocket handshake")
+              elif not ws.onClose.isNil:
+                ws.onClose(ws, 1006, "")
+              ws.conn.close()
+              return
+            else:
+              if sockWouldBlock():
+                break
+              if sockInterrupted():
+                continue
+              if not ws.onError.isNil:
+                ws.onError(ws, "recv error: " & $lastSocketError())
+              ws.conn.close()
+              return
         # Hup was reported but the drain neither parsed a close frame nor hit
         # EOF — the connection was lost without a close handshake.
         if Hup in ev and ws.conn.state == Connected:
