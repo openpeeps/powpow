@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.9"
+version       = "0.2.0"
 author        = "OpenPeeps"
 description   = "High-performance event notification library for Nim"
 license       = "MIT"
