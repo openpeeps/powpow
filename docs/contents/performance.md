@@ -15,8 +15,13 @@ them visible in the source and the benchmark numbers below.
   byte offsets — nothing is copied until you ask for it.
   ([parser](http/parser.md))
 - **Zero-copy file transmission.** Files are sent with `sendfile`
-  (`TransmitFile` on Windows) — no userspace round-trip.
-  ([static files](http/static-files.md))
+  (`TransmitFile` on Windows) — no userspace round-trip. Under the io_uring
+  backend they go through `IORING_OP_SPLICE` (file → pipe → socket), which is
+  equally copy-free. ([static files](http/static-files.md))
+- **Zero-copy sends (io_uring).** `IORING_OP_SEND_ZC` pins the buffer once and
+  reports a `IORING_CQE_F_NOTIF` before the pages may be reused; registered
+  buffers (`-d:powpowSendZcFixed`) remove the per-op pinning entirely.
+  ([io_uring](io_uring.md))
 - **SIMD scanning.** SSE2-accelerated CRLF / CRLFCRLF detection with a scalar
   fallback (`proto/simdscan.nim`). `findDoubleCRLF` locates the header terminator
   in a few instructions per 16 bytes.
@@ -33,6 +38,76 @@ them visible in the source and the benchmark numbers below.
 - **`SO_REUSEPORT`** distributes connections across one loop per CPU core with
   zero cross-thread communication. ([concurrency](concurrency.md))
 - **Edge-triggered I/O** on kqueue/epoll.
+
+## io_uring: what to expect
+
+On Linux powpow ships an opt-in **io_uring** backend (submission-based, enabled
+with `--features:io_uring` / `-d:powpowIoUring`) alongside the default epoll
+backend. It is built directly on `io_uring_setup`/`io_uring_enter` (no liburing
+dependency) and works on kernels ≥ 5.6.
+
+It helps to be precise about where io_uring wins and where it does not.
+
+### Why io_uring is not dramatically faster on plain HTTP/1.x
+
+io_uring's headline advantage is **parallelism**: many independent operations
+(files, sockets, storage, buffered I/O) can be submitted in a batch and executed
+asynchronously, with completions reaped in one pass. But HTTP/1.x over TCP is
+**serialized per connection** — at any moment a connection has at most one
+`RECV` and one `SEND` in flight, because a client sends a request and waits for
+the response before the next request. There is nothing for io_uring to parallelize
+in that single request/response cycle, so on a small number of connections the
+two backends do the same amount of work and epoll's lower per-op overhead can
+keep it at or near parity.
+
+The upshot: on a **single-threaded keep-alive `/hello`** workload, don't expect
+io_uring to beat epoll by a large margin. That benchmark is bounded by TCP
+serialization and parsing, not by the I/O backend.
+
+### Where io_uring does help
+
+The advantage shows up as **concurrency scales** and for **non-socket I/O**:
+
+- **High connection counts** — one `io_uring_enter` submits ops across many
+  connections at once (powpow keeps several `ACCEPT` ops in flight per
+  listener), and completions are reaped in a tight CQ loop. At thousands of
+  concurrent connections this reduces syscall overhead versus epoll's
+  per-event `recv`/`send` round trips.
+- **`Connection: close` churn** — the accept/connect/read/write/close lifecycle
+  is syscall-heavy, which is where batching and fixed-file registration pay off.
+- **Zero-copy static file serving** — `IORING_OP_SENDFILE` (kernel ≥ 6.0) streams
+  a file to the socket with no userspace round trip; older kernels fall back to a
+  `READ` + `SEND` pump.
+
+### Runtime-gated fast paths
+
+To stay correct on kernels ≥ 5.6 while still using newer features where present,
+fast paths are enabled at runtime based on the detected kernel version:
+
+- `IORING_OP_SENDFILE` — kernel ≥ 6.0 (fallback to READ + SEND below).
+- Multishot `ACCEPT` — kernel ≥ 6.0 (fallback to a batch of one-shot accepts).
+- Provided-buffer multishot `RECV` — opt-in via `-d:powpowBufferSelect`,
+  kernel ≥ 5.19 (falls back to the one-shot RECV path).
+
+A few build-time switches exist for A/B testing the implementation choices:
+`-d:powpowNoFixedFiles` (skip the per-connection fixed-file table syscalls),
+`-d:powpowNoSendfile`, `-d:powpowNoMultishotAccept`.
+
+### Looking ahead: HTTP/2 and HTTP/3
+
+io_uring's parallelism becomes genuinely relevant with protocols that multiplex
+many independent streams over a single connection:
+
+- **HTTP/2** multiplexes requests over one TCP connection, so multiple reads and
+  writes for independent streams are in flight at once — a much better fit for
+  io_uring than HTTP/1.x. powpow plans an HTTP/2 implementation soon.
+- **HTTP/3 (QUIC)** decouples streams from TCP entirely, running over UDP with
+  its own framing — the clearest case where io_uring's completion-driven model
+  can meaningfully reduce per-stream overhead.
+
+For today's HTTP/1.x, treat the io_uring backend as a way to reach epoll parity
+with headroom at scale and zero-copy file serving, rather than a guaranteed
+speed-up on every benchmark.
 
 ## Dummy benchmarks
 

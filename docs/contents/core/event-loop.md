@@ -10,7 +10,9 @@ The `Loop` is the heart of powpow. Everything — TCP, UDP, HTTP, WebSocket,
 DNS, signals, file watching, timers — is driven by a single `Loop`. It is a
 single-threaded non-blocking reactor over the platform's native multiplexer
 (`kqueue` on macOS/BSD, `epoll` on Linux, `IOCP` on Windows, `poll` as a
-fallback).
+fallback). On Linux the same loop can instead use the opt-in **io_uring**
+backend, where I/O is driven by submission/completion ops rather than
+readiness events — see the [io_uring guide](../io_uring.md).
 
 Runnable example: [`examples/timers_scheduler.nim`](../../examples/timers_scheduler.nim).
 
@@ -160,7 +162,7 @@ The platform layer is selected at compile time by `platform.nim`:
 
 | Platform | Backend |
 |---|---|
-| Linux | `epoll` (with eventfd wake) |
+| Linux | `epoll` (with eventfd wake), or opt-in **io_uring** (`-d:powpowIoUring`) |
 | macOS / BSD | `kqueue` (edge-triggered) |
 | Windows | `iocp` |
 | anything else | `poll` |
@@ -168,6 +170,10 @@ The platform layer is selected at compile time by `platform.nim`:
 Every backend exposes the same surface: `Platform.init`, `add`, `remove`,
 `modify`, `wake`, `poll`, `close`, plus the `Platform`/`PlatformEvent` types.
 You almost never touch these directly — see the [platform API page](../api/platform.md).
+
+The **io_uring** backend shares this same `Loop` type and the timer
+wheel/deferred/idle machinery; only the I/O driving differs (submission-based
+ops instead of readiness events). See the [io_uring guide](../io_uring.md).
 
 ## API reference
 

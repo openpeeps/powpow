@@ -32,7 +32,9 @@ when compiling a Supranim app.
 - **Zero-copy where it counts.** Request fields are materialized lazily from
   byte offsets; files are sent with `sendfile`; responses can be streamed.
 - **Platform-native event notification.** Built on top of `epoll` (Linux),
-  `kqueue` (BSD, macOS) and `IOCP` (Windows), with a `poll` fallback.
+  `kqueue` (BSD, macOS) and `IOCP` (Windows), with a `poll` fallback — plus an
+  opt-in Linux **io_uring** backend ([guide](io_uring.md)) that drives
+  everything through submission/completion ops instead of readiness events.
 
 ## Architecture
 
@@ -85,13 +87,18 @@ The aggregate module `src/powpow.nim` re-exports:
 | TLS (`net/tls.nim`) | Done — OpenSSL, implicit + upgrade (not on Windows) |
 | SIMD scanning (`proto/simdscan.nim`) | Done — SSE2 CRLF detection with scalar fallback |
 | Rate limiting (`proto/ratelimit.nim`) | Done — sliding window per IP |
-| HTTP/2, HTTP/3 (QUIC) | Not planned |
+| io_uring backend (`io/uring.nim`) | Done — opt-in Linux submission-based backend: full io_uring API binding, probe-based feature detection, zero-copy `SEND_ZC` + `SPLICE` file sends, registered buffers (`-d:powpowIoUring`) |
+| HTTP/2 | Planned — multiplexed frames over TCP (see [performance](performance.md) for why this fits io_uring) |
+| HTTP/3 (QUIC) | Not planned |
 
 ## Feature details
 
 ### Core event loop
 - Single-threaded non-blocking reactor
 - I/O multiplexing via kqueue (macOS/BSD), epoll (Linux), IOCP (Windows) or poll (fallback)
+- **io_uring** (Linux, opt-in): the same loop driven by submission/completion
+  ops — one `io_uring_enter` per iteration, op-driven sockets, kernel-timeout
+  sleeps ([guide](io_uring.md))
 - 4-level hierarchical timer wheel — O(1) insert/fire/cancel
 - One-shot and repeating interval timers
 - Deferred callbacks (executed before each I/O poll iteration)
@@ -102,6 +109,20 @@ The aggregate module `src/powpow.nim` re-exports:
 - Thread-safe `stop()` via eventfd (Linux) or self-pipe (macOS/BSD)
 - Buffer pool for shared read buffers
 - Adaptive event capacity scaling (min 64, max 4096)
+
+### io_uring backend
+- Full io_uring API binding against `linux/io_uring.h` — all opcodes, register
+  ops, SQE/CQE/setup/enter flags and the ABI structs, with `io_uring_prep_*`
+  style helpers; no liburing dependency
+- Feature detection via `IORING_REGISTER_PROBE` (per-opcode bitmap) instead of
+  kernel-version guessing
+- Op-driven sockets: one-shot `ACCEPT`/`RECV`/`SEND`/`CONNECT` per connection,
+  multishot accept/recv on capable kernels
+- Zero-copy writes: `IORING_OP_SEND_ZC` for large payloads with
+  `IORING_CQE_F_NOTIF` buffer-lifetime tracking
+- Zero-copy file sends: `IORING_OP_SPLICE` (file → pipe → socket)
+- Registered buffers: `IORING_REGISTER_BUFFERS` lifecycle + opt-in
+  `SEND_ZC_FIXED` (`-d:powpowSendZcFixed`)
 
 ### TCP networking
 - Non-blocking TCP server with connection pooling

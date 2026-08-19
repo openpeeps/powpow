@@ -1,46 +1,7 @@
 name: test
-on:
-  push:
-    branches:
-      - '**'
-    paths-ignore:
-      - LICENSE
-      - README.*
-      - examples
-  pull_request:
-    paths-ignore:
-      - LICENSE
-      - README.*
-      - examples
+on: [push, pull_request]
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        nim-version:
-          - 'binary:stable'
-    steps:
-      - uses: actions/checkout@v3
-      - uses: iffy/install-nim@v5
-        with:
-          version: ${{ matrix.nim-version }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: nimble install -Y
-      - run: nimble test
-
-  smuggler:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: iffy/install-nim@v5
-        with:
-          version: 'binary:stable'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: nimble install -Y
-      # Install smuggler (the `testSmuggler` task resolves `import smuggler` and
-      # the `smuggler` CLI binary via nimble).
-      - run: nimble install https://github.com/openpeeps/smuggler
-      - run: nimble testSmuggler
+    uses: nimbase/setup-nim-action/.github/workflows/test.yml@main
+    with:
+      nim-version: stable

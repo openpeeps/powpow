@@ -588,19 +588,33 @@ proc sendFile*(res: HttpResponse, path: string;
     var fileOff = rangeStart
     var remain = rangeLen
 
-    while remain > 0:
-      let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
-      if n > 0:
-        continue
-      elif n == 0:
-        res.conn.sendFileFd = fileFd
-        res.conn.sendFileOff = fileOff
-        res.conn.sendFileRemain = remain
-        res.conn.loop.modify(res.conn.fd.int, {Read, Write})
-        return
-      else:
-        closeFile(fileFd)
-        return
+    when iouEnabled:
+      # io_uring writes are fully asynchronous: the header SEND op above is still
+      # in flight, so a synchronous sendfile() here would put file bytes on the
+      # wire BEFORE the response headers (clients see HTTP/0.9 garbage). Hand the
+      # transfer to the op-driven pump, which waits for the headers to drain
+      # first, then streams the file via READ + SEND ops.
+      res.conn.sendFileFd = fileFd
+      res.conn.sendFileOff = fileOff
+      res.conn.sendFileRemain = remain
+      discard res.conn.continueSendFile()
+      if res.closeConn:
+        res.conn.closeAfterDrain()
+      return
+    else:
+      while remain > 0:
+        let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
+        if n > 0:
+          continue
+        elif n == 0:
+          res.conn.sendFileFd = fileFd
+          res.conn.sendFileOff = fileOff
+          res.conn.sendFileRemain = remain
+          res.conn.loop.modify(res.conn.fd.int, {Read, Write})
+          return
+        else:
+          closeFile(fileFd)
+          return
 
     closeFile(fileFd)
     if res.closeConn:
@@ -721,19 +735,29 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
     var fileOff = rangeStart
     var remain = rangeLen
 
-    while remain > 0:
-      let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
-      if n > 0:
-        continue
-      elif n == 0:
-        res.conn.sendFileFd = fileFd
-        res.conn.sendFileOff = fileOff
-        res.conn.sendFileRemain = remain
-        res.conn.loop.modify(res.conn.fd.int, {Read, Write})
-        return
-      else:
-        closeFile(fileFd)
-        return
+    when iouEnabled:
+      # Same ordering constraint as sendFile: the header SEND op is async, so the
+      # file must not be sent before the headers complete. The op-driven pump
+      # waits for the headers to drain before streaming the file.
+      res.conn.sendFileFd = fileFd
+      res.conn.sendFileOff = fileOff
+      res.conn.sendFileRemain = remain
+      discard res.conn.continueSendFile()
+      return
+    else:
+      while remain > 0:
+        let n = sendFileChunk(res.conn.fd, fileFd, fileOff, remain)
+        if n > 0:
+          continue
+        elif n == 0:
+          res.conn.sendFileFd = fileFd
+          res.conn.sendFileOff = fileOff
+          res.conn.sendFileRemain = remain
+          res.conn.loop.modify(res.conn.fd.int, {Read, Write})
+          return
+        else:
+          closeFile(fileFd)
+          return
 
     closeFile(fileFd)
 

@@ -41,11 +41,12 @@ test "ws_client_echo_roundtrip":
         case kind
         of wsText:
           echoText = cast[string](@data)
-          ws.closeWs(1000, "done")
         of wsBinary:
           echoBin = @data
         else:
           discard
+        if echoText.len > 0 and echoBin.len > 0:
+          ws.closeWs(1000, "done")
       ,
       onClose = proc(ws: WsConnection, code: int, reason: string) =
         discard

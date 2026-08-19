@@ -95,6 +95,9 @@ commands.
   ([concurrency](concurrency.md)) and the thread-safety tests. The core event
   loop itself is single-threaded and does not require it.
 - **`-d:release`** — always use release for benchmarking or real workloads.
+- **`--features:io_uring` / `-d:powpowIoUring`** — Linux only: switch the I/O
+  backend to io_uring (submission-based). The same code runs unchanged; see the
+  [io_uring guide](io_uring.md) for the zero-copy options and configuration.
 - **`-d:powpowEnableMetrics`** — compile-time opt-in for event-loop metrics
   (roadmap item; not yet implemented).
 - **Windows** — supported via IOCP, but TLS is not available on Windows and the

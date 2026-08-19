@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.9"
+version       = "0.2.0"
 author        = "OpenPeeps"
 description   = "High-performance event notification library for Nim"
 license       = "MIT"
@@ -14,6 +14,13 @@ requires "mimedb >= 0.1.1"
 requires "openparser >= 0.1.8"
 requires "multipart >= 0.1.4"
 requires "checksums >= 0.2.2"
+
+# Features
+
+feature "io_uring":
+  ## Linux io_uring backend (submission-based I/O). Opt-in: build with
+  ## `nimble --features:io_uring <cmd>` or depend via `requires "powpow[io_uring]"`.
+  ## Guarded in code with `when defined(features.powpow.io_uring)`.
 
 # Tasks
 
@@ -34,6 +41,7 @@ task test, "Run the unit test suite":
     "test_sse2_chunk", "test_sse2_direct", "test_sse2_raw",     "test_stream",
     "test_tls", "test_httpclient", "test_httpclient_security",
     "test_ws_client", "test_ws_pool", "test_ws_threads",
+    "test_io_uring",
   ]
   for t in tests:
     # --outdir keeps the produced test binaries in the (gitignored) cache dir
