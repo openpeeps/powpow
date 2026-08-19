@@ -7,7 +7,7 @@
 ## Perf: nim c -d:release -r tests/test_bench_event_loop.nim
 
 import ../src/powpow
-import std/[times, unittest, monotimes, os, strformat]
+import std/[times, unittest, monotimes, os, strformat, tables]
 
 when not defined(windows):
   import std/posix
@@ -140,13 +140,16 @@ when not defined(windows):
     const N = 1000
     let loop = newLoop()
     var pipes = newSeq[array[2, cint]](N)
+    var fdToIdx: Table[cint, int]
     for i in 0 ..< N:
       pipes[i] = createPipe()
+      fdToIdx[pipes[i][0].int.cint] = i
     for i in 0 ..< N:
       var cb: FdCallback
       cb = proc(fd: int, ev: set[EventType]) =
+        let idx = fdToIdx[fd.cint]
         loop.unregister(fd)
-        loop.register(pipes[i][0].int, {Read}, cb, edgeTriggered = true)
+        loop.register(pipes[idx][0].int, {Read}, cb, edgeTriggered = true)
       loop.register(pipes[i][0].int, {Read}, cb, edgeTriggered = true)
     discard loop.addTimer(10) do (id: int):
       for i in 0 ..< N:
@@ -166,14 +169,17 @@ when not defined(windows):
     var pipes = newSeq[array[2, cint]](N)
     var pipesWritten: seq[bool]
     pipesWritten.setLen(N)
+    var fdToIdx: Table[cint, int]
     for i in 0 ..< N:
       pipes[i] = createPipe()
+      fdToIdx[pipes[i][0].int.cint] = i
     for i in 0 ..< N:
       var cb: FdCallback
       cb = proc(fd: int, ev: set[EventType]) =
+        let idx = fdToIdx[fd.cint]
         loop.unregister(fd)
-        if not pipesWritten[i]:
-          loop.register(pipes[i][0].int, {Read}, cb, edgeTriggered = true)
+        if not pipesWritten[idx]:
+          loop.register(pipes[idx][0].int, {Read}, cb, edgeTriggered = true)
       loop.register(pipes[i][0].int, {Read}, cb, edgeTriggered = true)
     discard loop.addTimer(10) do (id: int):
       for i in 0 ..< N:

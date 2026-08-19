@@ -29,6 +29,19 @@
 - Opt-in Linux **io_uring** backend (submission-based, `--features:io_uring`) with
   zero-copy `send_zc` sends, `SPLICE` file transfers, registered buffers and a
   full `io_uring` API binding — [documentation](docs/contents/io_uring.md)
+- Support for edge-triggered and level-triggered event notification
+- Support for multiple event loops and multi-threaded applications
+- Support for MIME type detection based on file extensions
+- FileSystem Monitoring via `inotify` (Linux) and `kqueue` (BSD, macOS) (Windows - not yet implemented)
+
+> [!NOTE]
+> 💥 PowPow is now available in [Supranim](https://github.com/supranim/supranim) as a backend.
+> Just switch `--features:powpow` when compiling your Supranim app!
+
+> [!WARNING]
+> 💥 This library is not production-ready and may contain bugs and security vulnerabilities.
+> It has been tested on Linux and macOS, but may not work on all platforms.
+> **Use it, test it, and do not hesitate to report any issues you find!** 💥 
 
 > [!NOTE]
 > **io_uring expectations.** On plain HTTP/1.x, request/response cycles over TCP
@@ -37,16 +50,6 @@
 > as concurrency scales and for zero-copy file serving. See the
 > [performance docs](docs/contents/performance.md) for details and where
 > HTTP/2/QUIC will make its parallelism count.
-- Support for edge-triggered and level-triggered event notification
-- Support for multiple event loops and multi-threaded applications
-- Support for MIME type detection based on file extensions
-- FileSystem Monitoring via `inotify` (Linux) and `kqueue` (BSD, macOS) (Windows - not yet implemented)
-
-> [!NOTE]
-> 💥 PowPow is now available in [Supranim](https://github.com/supranim/supranim) as a backend. Just switch `--features:powpow` when compiling your Supranim app!
-
-> [!WARNING]
-> 💥 This library is not production-ready and may contain bugs and security vulnerabilities. It has been tested on Linux and macOS, but may not work on all platforms. **Use it, test it, and do not hesitate to report any issues you find!** 💥 
 
 ## 📚 Documentation
 
@@ -99,6 +102,9 @@ response-pairing technique.
 ## Examples (the fun part)
 Most web servers out there are all rainbows and flowers, until you upload or stream a file, and it transforms into a nightmare at runtime. PowPow is slowly moving toward a production-ready server. Everything below is runnable and lives in the `examples/` directory.
 
+<details>
+  <summary>Check runnable examples 👇</summary>
+
 - `httpserver.nim` the classic. A tiny, functional HTTP/1.1 server
 
 - `httpserver_threads.nim` the same server, but it spawns **one event loop per CPU core** and binds them all to the same port via `SO_REUSEPORT`. The kernel load-balances connections across workers for you
@@ -139,6 +145,9 @@ Most web servers out there are all rainbows and flowers, until you upload or str
 - `timers_scheduler.nim` a guided tour of the timer wheel: one-shot timers, repeating intervals, deferred callbacks, and idle handlers, all ticking on the same loop for ~8 seconds before politely stopping
 
 - `ws_chat.nim` a multi-client WebSocket chat with broadcast. Open `http://localhost:9006` in two browser tabs, type in one, and enjoy the other one agreeing with you. The browser page lives in `ws_chat.html`
+</details>
+
+
 
 ## Dummy Benchmarks
 **Pow Pow is the #1 fastest HTTP server** from [Web Framework Benchmarks](https://web-frameworks-benchmark.netlify.app/result). Find the wrk-based benchmark I manually ran via Github Actions ([see bench.yml](https://github.com/openpeeps/powpow/blob/main/.github/workflows/bench.yml))
@@ -206,6 +215,28 @@ Requests/sec:  52687.29
 Transfer/sec:     26.98MB
 
 ```
+
+- Event loop concurrency (macOS kqueue, release build)
+
+  Capacity scaling:
+
+  | N | throughput | p50 | p99 |
+  |---|-----------|-----|-----|
+  | 100 | 613k/s | 43µs | 79µs |
+  | 500 | 649k/s | 193µs | 382µs |
+  | 1k | 534k/s | 451µs | 862µs |
+  | 2k | 539k/s | 854µs | 1.7ms |
+  | 4k | 486k/s | 2.0ms | 4.0ms |
+  | 8k | 439k/s | 4.7ms | 9.0ms |
+  | 12k | 473k/s | 6.5ms | 12.4ms |
+
+  Head-of-line blocking (1024 fast + 64 slow at 200µs):
+
+  | | p50 | p99 |
+  |---|-----|-----|
+  | baseline (0 slow) | 421µs | 830µs |
+  | with 64 slow | 415µs | 820µs |
+  | penalty | ~0µs | ~0µs |
 
 ### Security roadmap
 
