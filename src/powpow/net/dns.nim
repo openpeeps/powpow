@@ -40,6 +40,7 @@ const
   DnsRecvBufSize      = 2048
   DnsMaxLabelJumps    = 128
   DnsQtypeA           = 1'u16
+  DnsQtypeMX          = 15'u16
   DnsQtypeAAAA        = 28'u16
 
 when defined(windows):
@@ -51,6 +52,12 @@ else:
 type
   DnsCallback* = proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.}
 
+  MxRecord* = object
+    pref*: int
+    exchange*: string
+
+  MxCallback* = proc(records: seq[MxRecord]; err: string) {.closure.}
+
   ResolvedIp* = object
     af: cint
     addr4: array[4, byte]
@@ -58,6 +65,7 @@ type
 
   DnsCacheEntry* = object
     addrs: seq[ResolvedIp]
+    mxs: seq[MxRecord]
     expiresAt: int64
     negative: bool
 
@@ -68,6 +76,7 @@ type
     sockType: cint
     qtype: uint16
     cb: DnsCallback
+    mcb: MxCallback
     resolver: DnsResolver
     server: Sockaddr_storage   ## nameserver the query is currently directed at
     serverIdx: int
@@ -185,40 +194,73 @@ proc skipName(msg: openArray[byte]; start: int): int =
     if pos > msg.len: return -1
   return -1
 
+proc readName(msg: openArray[byte]; start: int): tuple[name: string, next: int] =
+  ## Decode a (possibly compressed) domain name starting at `start`.
+  ## Returns the decoded name (no trailing dot) and the position just past the
+  ## name in the original stream, or ("", -1) on malformed data. Pointers are
+  ## bounded by DnsMaxLabelJumps to defeat compression loops.
+  var parts: seq[string]
+  var pos = start
+  var next = -1
+  var jumps = 0
+  while pos < msg.len:
+    let b = msg[pos]
+    if b == 0:
+      if next < 0: next = pos + 1
+      return (parts.join("."), next)
+    if (b and 0xC0) == 0xC0:
+      if pos + 1 >= msg.len: return ("", -1)
+      if next < 0: next = pos + 2
+      inc jumps
+      if jumps > DnsMaxLabelJumps: return ("", -1)
+      pos = ((b.int and 0x3F) shl 8) or msg[pos + 1].int
+      continue
+    if (b and 0xC0) != 0:
+      return ("", -1)
+    if pos + 1 + b.int > msg.len: return ("", -1)
+    var label = newString(b.int)
+    for i in 0 ..< b.int:
+      label[i] = chr(msg[pos + 1 + i])
+    parts.add(label)
+    pos += 1 + b.int
+  return ("", -1)
+
 proc parseResponse(msg: openArray[byte]):
-    tuple[rcode: int, addrs: seq[ResolvedIp], minTtl: int, truncated: bool] =
+    tuple[rcode: int, addrs: seq[ResolvedIp], mxs: seq[MxRecord], minTtl: int, truncated: bool] =
   ## Parse a DNS response. Returns the rcode (0 = NOERROR), the A/AAAA
-  ## addresses found, the smallest answer TTL, and whether the TC bit was set.
+  ## addresses found, any MX records, the smallest answer TTL, and whether the
+  ## TC bit was set.
   if msg.len < 12:
-    return (1, newSeq[ResolvedIp](), 0, false)
+    return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, false)
   let flags = (uint16(msg[2]) shl 8) or msg[3]
   if (flags and 0x8000) == 0:
-    return (1, newSeq[ResolvedIp](), 0, false)   # not a response
+    return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, false)   # not a response
   let truncated = (flags and 0x0200) != 0
   let rcode = int(flags and 0x0F)
   if rcode != 0:
-    return (rcode, newSeq[ResolvedIp](), 0, truncated)
+    return (rcode, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
   let qd = int(msg[4]) shl 8 or int(msg[5])
   let an = int(msg[6]) shl 8 or int(msg[7])
   var pos = 12
   for i in 0 ..< qd:
     pos = skipName(msg, pos)
-    if pos < 0: return (1, newSeq[ResolvedIp](), 0, truncated)
+    if pos < 0: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
     pos += 4
   var addrs: seq[ResolvedIp]
+  var mxs: seq[MxRecord]
   var minTtl = 60
   var haveTtl = false
   for i in 0 ..< an:
     pos = skipName(msg, pos)
-    if pos < 0: return (1, newSeq[ResolvedIp](), 0, truncated)
-    if pos + 10 > msg.len: return (1, newSeq[ResolvedIp](), 0, truncated)
+    if pos < 0: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
+    if pos + 10 > msg.len: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
     let qtype = (uint16(msg[pos]) shl 8) or msg[pos + 1]
     let qclass = (uint16(msg[pos + 2]) shl 8) or msg[pos + 3]
     let ttl = (int(msg[pos + 4]) shl 24) or (int(msg[pos + 5]) shl 16) or
               (int(msg[pos + 6]) shl 8) or int(msg[pos + 7])
     let rdlen = (int(msg[pos + 8]) shl 8) or int(msg[pos + 9])
     pos += 10
-    if pos + rdlen > msg.len: return (1, newSeq[ResolvedIp](), 0, truncated)
+    if pos + rdlen > msg.len: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
     if qclass == 1:
       if not haveTtl or ttl < minTtl:
         minTtl = ttl
@@ -233,8 +275,13 @@ proc parseResponse(msg: openArray[byte]):
         ip.af = AF_INET6.cint
         copyMem(addr ip.addr6[0], addr msg[pos], 16)
         addrs.add(ip)
+      elif qtype == DnsQtypeMX and rdlen >= 3:
+        let pref = (int(msg[pos]) shl 8) or msg[pos + 1].int
+        let (name, _) = readName(msg, pos + 2)
+        if name.len > 0:
+          mxs.add(MxRecord(pref: pref, exchange: name.toLowerAscii()))
     pos += rdlen
-  result = (0, addrs, minTtl, truncated)
+  result = (0, addrs, mxs, minTtl, truncated)
 
 # ── System config ─────────────────────────────────────────────────────────────
 
@@ -317,6 +364,15 @@ proc defaultNameservers(): seq[ResolvedIp] =
 
 # ── Resolver internals ────────────────────────────────────────────────────────
 
+proc cacheKey(hostname: string; qtype: uint16): string =
+  ## Cache entries are keyed by record type so A/AAAA/MX answers for the same
+  ## name never collide.
+  case qtype
+  of DnsQtypeA: "a/" & hostname.toLowerAscii()
+  of DnsQtypeAAAA: "aaaa/" & hostname.toLowerAscii()
+  of DnsQtypeMX: "mx/" & hostname.toLowerAscii()
+  else: "q" & $qtype & "/" & hostname.toLowerAscii()
+
 proc nextQueryId(resolver: DnsResolver): uint16 =
   while true:
     inc resolver.nextId
@@ -337,21 +393,29 @@ proc sendQuery(q: DnsQuery) =
     discard sendto(resolver.fd, unsafeAddr msg[0], msg.len.cint, 0,
                    cast[ptr Sockaddr](addr server), sLen)
 
-proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; err: string) =
+proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; mxs: seq[MxRecord]; err: string) =
   if q.done: return
   q.done = true
   q.resolver.queries.del(q.id)
   if q.timer != TimerId(0):
     q.resolver.loop.cancelTimer(q.timer)
     q.timer = TimerId(0)
-  if err.len == 0 and addrs.len > 0:
+  if err.len == 0 and q.mcb != nil:
+    # MX query: an empty answer is a valid result (the caller decides whether
+    # to fall back to address resolution, e.g. RFC 5321 §5.1).
+    q.mcb(mxs, "")
+  elif err.len == 0 and addrs.len > 0:
     var outAddrs: seq[Sockaddr_storage]
     for ip in addrs:
       outAddrs.add(makeSockaddr(ip, q.port))
     q.cb(outAddrs, "")
   else:
-    q.cb(newSeq[Sockaddr_storage](),
-         if err.len > 0: err else: "DNS: no addresses for " & q.hostname)
+    if q.mcb != nil:
+      q.mcb(newSeq[MxRecord](),
+           if err.len > 0: err else: "DNS: no records for " & q.hostname)
+    else:
+      q.cb(newSeq[Sockaddr_storage](),
+           if err.len > 0: err else: "DNS: no addresses for " & q.hostname)
 
 proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: cint;
                 qtype: uint16; cb: DnsCallback)
@@ -377,36 +441,49 @@ proc onTimeout(q: DnsQuery) =
     q.sendQuery()
     q.timer = q.resolver.loop.addTimer(q.resolver.timeoutMs) do (tid: int):
       onTimeout(q)
-  elif q.qtype == DnsQtypeAAAA:
+  elif q.qtype == DnsQtypeAAAA and q.mcb == nil:
     startAFallback(q)
   else:
-    q.completeQuery(newSeq[ResolvedIp](), "DNS: timed out resolving " & q.hostname)
+    q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](),
+                    "DNS: timed out resolving " & q.hostname)
 
 proc onDnsResponse(q: DnsQuery; msg: openArray[byte]) =
   if q.done: return
-  let (rcode, addrs, minTtl, truncated) = parseResponse(msg)
+  let (rcode, addrs, mxs, minTtl, truncated) = parseResponse(msg)
   let resolver = q.resolver
-  let key = q.hostname.toLowerAscii()
+  let key = cacheKey(q.hostname, q.qtype)
   if truncated:
-    q.completeQuery(newSeq[ResolvedIp](),
+    q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](),
       "DNS: truncated response for " & q.hostname & " (TCP fallback not implemented)")
     return
   if rcode != 0:
     if rcode == 3:
       resolver.cache[key] =
         DnsCacheEntry(addrs: @[], expiresAt: monoMs() + NegativeCacheMs, negative: true)
-    q.completeQuery(newSeq[ResolvedIp](),
-      "DNS: " & (if rcode == 3: "host not found: " else: "query failed (rcode " & $rcode & "): ") &
-      q.hostname)
-  elif addrs.len > 0:
-    resolver.cache[key] =
-      DnsCacheEntry(addrs: addrs, expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
-    q.completeQuery(addrs, "")
-  elif q.qtype == DnsQtypeAAAA:
+    let msg = "DNS: " & (if rcode == 3: "host not found: " else: "query failed (rcode " & $rcode & "): ") &
+      q.hostname
+    q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](), msg)
+  elif addrs.len > 0 or (q.mcb != nil and mxs.len > 0):
+    if q.mcb != nil:
+      resolver.cache[key] =
+        DnsCacheEntry(mxs: mxs, expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
+      q.completeQuery(newSeq[ResolvedIp](), mxs, "")
+    else:
+      resolver.cache[key] =
+        DnsCacheEntry(addrs: addrs, expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
+      q.completeQuery(addrs, newSeq[MxRecord](), "")
+  elif q.qtype == DnsQtypeAAAA and q.mcb == nil:
     # Name exists but has no AAAA records — fall back to A.
     startAFallback(q)
   else:
-    q.completeQuery(newSeq[ResolvedIp](), "DNS: no addresses for " & q.hostname)
+    # NOERROR with no usable records. For MX this is a valid empty answer;
+    # for address queries it means the name exists without A records.
+    if q.mcb != nil:
+      resolver.cache[key] =
+        DnsCacheEntry(mxs: @[], expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
+      q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](), "")
+    else:
+      q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](), "DNS: no addresses for " & q.hostname)
 
 proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: cint;
                 qtype: uint16; cb: DnsCallback) =
@@ -417,6 +494,22 @@ proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: ci
   let q = DnsQuery(
     id: id, hostname: hostname, port: port, sockType: sockType,
     qtype: qtype, cb: cb, resolver: resolver,
+    serverIdx: 0, attemptsLeft: resolver.attempts, timer: TimerId(0),
+    done: false,
+  )
+  resolver.queries[id] = q
+  q.sendQuery()
+  q.timer = resolver.loop.addTimer(resolver.timeoutMs) do (tid: int):
+    onTimeout(q)
+
+proc startMxQuery(resolver: DnsResolver; domain: string; mcb: MxCallback) =
+  if resolver.queries.len >= MaxOutstandingQueries:
+    mcb(newSeq[MxRecord](), "DNS: too many outstanding queries")
+    return
+  let id = resolver.nextQueryId()
+  let q = DnsQuery(
+    id: id, hostname: domain, port: 0, sockType: 0,
+    qtype: DnsQtypeMX, mcb: mcb, resolver: resolver,
     serverIdx: 0, attemptsLeft: resolver.attempts, timer: TimerId(0),
     done: false,
   )
@@ -555,24 +648,27 @@ proc resolveAddrAsync*(loop: Loop; address: string; port: int;
     cb(@[addrBuf], "")
     return
 
-  let key = address.toLowerAscii()
+  let name = address.toLowerAscii()
 
   if loop.dns != nil:
     let r = cast[DnsResolver](loop.dns)
-    let cached = r.cache.getOrDefault(key)
-    if cached.addrs.len > 0 or cached.negative:
-      if cached.expiresAt > monoMs():
-        if cached.negative:
-          cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & address)
-        else:
-          var outAddrs: seq[Sockaddr_storage]
-          for ip in cached.addrs:
-            outAddrs.add(makeSockaddr(ip, port))
-          cb(outAddrs, "")
-        return
-      r.cache.del(key)
+    # The single-family path prefers AAAA but may have fallen back to A in a
+    # previous resolution, so consult both family caches.
+    for qtype in [DnsQtypeAAAA, DnsQtypeA]:
+      let cached = r.cache.getOrDefault(cacheKey(name, qtype))
+      if cached.addrs.len > 0 or cached.negative:
+        if cached.expiresAt > monoMs():
+          if cached.negative:
+            cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & address)
+          else:
+            var outAddrs: seq[Sockaddr_storage]
+            for ip in cached.addrs:
+              outAddrs.add(makeSockaddr(ip, port))
+            cb(outAddrs, "")
+          return
+        r.cache.del(cacheKey(name, qtype))
 
-  let h = getHosts().getOrDefault(key)
+  let h = getHosts().getOrDefault(name)
   if h.len > 0:
     var outAddrs: seq[Sockaddr_storage]
     for ip in h:
@@ -587,6 +683,152 @@ proc resolveAddrAsync*(loop: Loop; address: string; port: int;
     cb(newSeq[Sockaddr_storage](), e.msg)
     return
   startQuery(resolver, address, port, sockType, DnsQtypeAAAA, cb)
+
+proc resolveMxAsync*(loop: Loop; domain: string; mcb: MxCallback) =
+  ## Resolve MX records for `domain` asynchronously on `loop`. `mcb` runs on
+  ## the loop thread with the records sorted by ascending preference (or an
+  ## empty seq when the name exists but publishes no MX — callers decide
+  ## whether to fall back to address resolution, e.g. RFC 5321 §5.1). A
+  ## non-empty `err` signals NXDOMAIN or a resolver failure. Never blocks the
+  ## loop on DNS.
+  let key = cacheKey(domain, DnsQtypeMX)
+  if loop.dns != nil:
+    let r = cast[DnsResolver](loop.dns)
+    let cached = r.cache.getOrDefault(key)
+    if cached.expiresAt != 0:
+      if cached.expiresAt > monoMs():
+        if cached.negative:
+          mcb(newSeq[MxRecord](), "DNS: host not found: " & domain)
+        else:
+          mcb(cached.mxs, "")
+        return
+      r.cache.del(key)
+
+  var resolver: DnsResolver
+  try:
+    resolver = loop.getResolver()
+  except CatchableError as e:
+    mcb(newSeq[MxRecord](), e.msg)
+    return
+  startMxQuery(resolver, domain, mcb)
+
+proc resolveAddrBothAsync*(loop: Loop; address: string; port: int;
+                           cb: DnsCallback) =
+  ## Resolve both address families for `address` and deliver all socket
+  ## addresses ordered IPv6-first (RFC 8305 family-block order) — the input
+  ## for Happy Eyeballs connection attempts. If one family fails or is
+  ## empty, the other is still delivered; only when both yield nothing does
+  ## `cb` fire with an error. Never blocks the loop on DNS.
+  if isIpAddress(address):
+    var addrBuf: Sockaddr_storage
+    try:
+      addrBuf = sockaddrFromIp(address, port)
+    except NetError as e:
+      cb(newSeq[Sockaddr_storage](), e.msg)
+      return
+    cb(@[addrBuf], "")
+    return
+
+  let key = "both/" & address.toLowerAscii()
+
+  if loop.dns != nil:
+    let r = cast[DnsResolver](loop.dns)
+    let cached = r.cache.getOrDefault(key)
+    if cached.expiresAt != 0:
+      if cached.expiresAt > monoMs():
+        if cached.negative:
+          cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & address)
+        else:
+          var outAddrs: seq[Sockaddr_storage]
+          for ip in cached.addrs:
+            outAddrs.add(makeSockaddr(ip, port))
+          cb(outAddrs, "")
+        return
+      r.cache.del(key)
+
+  let h = getHosts().getOrDefault(address.toLowerAscii())
+  if h.len > 0:
+    var outAddrs: seq[Sockaddr_storage]
+    for ip in h:
+      outAddrs.add(makeSockaddr(ip, port))
+    cb(outAddrs, "")
+    return
+
+  var resolver: DnsResolver
+  try:
+    resolver = loop.getResolver()
+  except CatchableError as e:
+    cb(newSeq[Sockaddr_storage](), e.msg)
+    return
+
+  # Fire AAAA and A queries concurrently and merge when both settle.
+  type BothState = ref object
+    pending: int
+    v6: seq[ResolvedIp]
+    v4: seq[ResolvedIp]
+    errAaaa: string
+    errA: string
+    finished: bool
+
+  let bs = BothState(pending: 2)
+
+  proc finish() {.closure.} =
+    if bs.finished: return
+    bs.finished = true
+    if bs.v6.len == 0 and bs.v4.len == 0:
+      var err = if bs.errA.len > 0: bs.errA else: bs.errAaaa
+      if err.len == 0:
+        err = "DNS: no addresses for " & address
+      cb(newSeq[Sockaddr_storage](), err)
+      return
+    # Cache the merged list under a short TTL (the per-family entries carry
+    # their own authoritative TTLs; the merge itself is refreshed often).
+    if loop.dns != nil:
+      let r = cast[DnsResolver](loop.dns)
+      r.cache[key] = DnsCacheEntry(
+        addrs: bs.v6 & bs.v4,
+        expiresAt: monoMs() + 60_000,
+        negative: false,
+      )
+    var merged: seq[Sockaddr_storage]
+    for ip in bs.v6: merged.add(makeSockaddr(ip, port))
+    for ip in bs.v4: merged.add(makeSockaddr(ip, port))
+    cb(merged, "")
+
+  proc settle(qtype: uint16; addrs: seq[Sockaddr_storage]; err: string) {.closure.} =
+    if qtype == DnsQtypeAAAA:
+      dec bs.pending
+      if err.len == 0:
+        for sa in addrs:
+          if sa.ss_family == AF_INET6.cushort:
+            var ip: ResolvedIp
+            ip.af = AF_INET6.cint
+            let s6 = cast[ptr Sockaddr_in6](unsafeAddr sa)
+            copyMem(addr ip.addr6[0], addr s6.sin6_addr, 16)
+            bs.v6.add(ip)
+      else:
+        bs.errAaaa = err
+    else:
+      dec bs.pending
+      if err.len == 0:
+        for sa in addrs:
+          if sa.ss_family == AF_INET.cushort:
+            var ip: ResolvedIp
+            ip.af = AF_INET.cint
+            let s4 = cast[ptr Sockaddr_in](unsafeAddr sa)
+            copyMem(addr ip.addr4[0], addr s4.sin_addr, 4)
+            bs.v4.add(ip)
+      else:
+        bs.errA = err
+    if bs.pending == 0:
+      finish()
+
+  startQuery(resolver, address, port, SOCK_STREAM, DnsQtypeAAAA,
+             proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.} =
+               settle(DnsQtypeAAAA, addrs, err))
+  startQuery(resolver, address, port, SOCK_STREAM, DnsQtypeA,
+             proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.} =
+               settle(DnsQtypeA, addrs, err))
 
 proc configureDns*(loop: Loop; timeoutMs: int; attempts: int) =
   ## Override the resolver's timeout/attempts (e.g. for tests). Values <= 0

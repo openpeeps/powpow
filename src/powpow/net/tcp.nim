@@ -248,6 +248,36 @@ proc getClientSockAddr*(conn: Connection): Sockaddr_storage {.inline.} =
   ## Return the client's raw socket address (set at accept/connect time).
   conn.clientAddr
 
+# ── Happy Eyeballs (RFC 6555 / RFC 8305) ─────────────────────────────────────
+#
+# Client connects race the resolved address list instead of walking it
+# sequentially: the first attempt starts immediately and every further
+# address joins ConnectionAttemptDelayMs later while earlier attempts are
+# still in flight. The first successful connect wins; all other attempts are
+# torn down. The scheduling core below is shared by both backends — each
+# backend's `connect` supplies only the per-attempt socket/connect
+# initiation and completion plumbing.
+
+const ConnectionAttemptDelayMs = 250
+
+type
+  HeAttempt = ref object
+    idx: int                # index into HeState.addrs
+    conn: Connection        # nil until the socket is created
+    timer: TimerId          # per-attempt connect timeout
+    dead: bool              # failed / timed out / torn down
+
+  HeState = ref object
+    loop: Loop
+    host: string            # original hostname (for error messages)
+    addrs: seq[Sockaddr_storage]   # RFC 8305 ordered (IPv6-first)
+    nextIdx: int            # next address index to start
+    staggerTimer: TimerId   # inter-attempt delay timer
+    attempts: seq[HeAttempt]
+    finished: bool          # a terminal outcome was delivered
+    onConnect: proc(conn: Connection) {.closure.}
+    onError: OnError
+
 when iouEnabled:
   import ./tlsapi
 
@@ -1982,6 +2012,171 @@ when iouEnabled:
         attemptNext()
     )
 
+  # ── Client connect — Happy Eyeballs (RFC 6555) ─────────────────────────────
+
+  proc connectHe*(loop: Loop, address: string, port: int,
+                  onConnect: proc(conn: Connection) {.closure.},
+                  onData: OnData,
+                  onClose: OnClose = nil,
+                  onError: OnError = nil) =
+    ## Non-blocking TCP connect with Happy Eyeballs (RFC 6555): both address
+    ## families are resolved, the first attempt starts immediately and further
+    ## addresses join every ConnectionAttemptDelayMs while earlier attempts are
+    ## still connecting. The first successful connect wins.
+    resolveAddrBothAsync(loop, address, port,
+      proc(addrs: seq[Sockaddr_storage]; err: string) =
+        if err.len > 0:
+          if onError != nil:
+            onError(err)
+          return
+        if addrs.len == 0:
+          if onError != nil:
+            onError("connect: no addresses resolved for " & address)
+          return
+
+        let he = HeState(
+          loop: loop, host: address, addrs: addrs,
+          onConnect: onConnect, onError: onError,
+        )
+
+        proc failAll() {.closure.} =
+          if he.finished: return
+          he.finished = true
+          if he.staggerTimer != TimerId(0):
+            loop.cancelTimer(he.staggerTimer)
+            he.staggerTimer = TimerId(0)
+          if onError != nil:
+            onError("connect() failed on all resolved addresses for " & address)
+
+        proc attemptDead(a: HeAttempt) {.closure.} =
+          if a.dead: return
+          a.dead = true
+          if a.timer != TimerId(0):
+            loop.cancelTimer(a.timer)
+            a.timer = TimerId(0)
+          if he.finished: return
+          if he.nextIdx >= he.addrs.len:
+            for o in he.attempts:
+              if not o.dead: return
+            failAll()
+
+        proc reportSuccess(a: HeAttempt): bool {.closure.} =
+          if he.finished:
+            a.dead = true
+            if a.timer != TimerId(0):
+              loop.cancelTimer(a.timer)
+              a.timer = TimerId(0)
+            return false
+          he.finished = true
+          if he.staggerTimer != TimerId(0):
+            loop.cancelTimer(he.staggerTimer)
+            he.staggerTimer = TimerId(0)
+          for o in he.attempts:
+            if o != a and not o.dead:
+              o.dead = true
+              if o.timer != TimerId(0):
+                loop.cancelTimer(o.timer)
+                o.timer = TimerId(0)
+              if o.conn != nil:
+                o.conn.closeAndRelease()
+                o.conn = nil
+          a.dead = true
+          if a.timer != TimerId(0):
+            loop.cancelTimer(a.timer)
+            a.timer = TimerId(0)
+          return true
+
+        proc armTimeout(a: HeAttempt) {.closure.} =
+          a.timer = loop.addTimer(ConnectTimeoutMs) do (id: int):
+            a.timer = TimerId(0)
+            if a.dead or he.finished: return
+            if a.conn != nil:
+              a.conn.closeAndRelease()
+              a.conn = nil
+            attemptDead(a)
+
+        proc armStagger() {.closure.} =
+          he.staggerTimer = loop.addTimer(ConnectionAttemptDelayMs) do (id: int):
+            he.staggerTimer = TimerId(0)
+            if he.finished: return
+            if he.nextIdx < he.addrs.len:
+              let i = he.nextIdx
+              inc he.nextIdx
+              startOne(i)
+              if he.nextIdx < he.addrs.len:
+                armStagger()
+
+        proc startOne(idx: int) {.closure.} =
+          let addrBuf = he.addrs[idx]
+          let a = HeAttempt(idx: idx)
+          he.attempts.add(a)
+
+          let fd = socket(cast[ptr Sockaddr](addr addrBuf).sa_family.cint,
+                          SOCK_STREAM, 0)
+          if fd.cint < 0:
+            attemptDead(a)
+            return
+
+          setNonBlocking(fd)
+          setTcpNoDelay(fd)
+
+          let conn = Connection(
+            fd:        fd,
+            loop:      loop,
+            state:     Connecting,
+            readBuf:   acquireBuf(loop),
+            readBufLen: DefaultBufSize,
+            onDataCb:  onData,
+            onCloseCb: onClose,
+            splicePipe: [-1.cint, -1.cint],
+          )
+          conn.initOpCallbacks()
+          a.conn = conn
+          let sLen = getSockLen(addr addrBuf)
+          conn.connectAddr = addrBuf
+          conn.fixedFd = loop.registerFixedFd(fd.int)
+          let cSqe = loop.getOpSqe()
+          if cSqe == nil:
+            conn.closeAndRelease()
+            attemptDead(a)
+            return
+          cSqe.opcode = IORING_OP_CONNECT.uint8
+          cSqe.fd = fd.int32
+          if conn.fixedFd:
+            cSqe.flags = IOSQE_FIXED_FILE.uint8
+          cSqe.paddr = cast[uint64](addr conn.connectAddr)
+          cSqe.off = sLen.uint64   # kernel 5.15: sockaddr length in addr2 (offset 8)
+          conn.connectToken = loop.commitOp(cSqe, proc(token: uint64, res: int32, flags: uint32) =
+              if conn.connectToken != token:
+                return
+              conn.connectToken = 0
+              if conn.state == Closed:
+                return
+              if res < 0:
+                conn.closeAndRelease()
+                attemptDead(a)
+                return
+              if reportSuccess(a):
+                conn.state = Connected
+                conn.clientAddr = addrBuf
+                onConnect(conn)
+                if conn.state == Closed:
+                  return
+                conn.armRead()
+              else:
+                conn.closeAndRelease())
+          if conn.connectToken == 0:
+            conn.closeAndRelease()
+            attemptDead(a)
+            return
+          armTimeout(a)
+
+        he.nextIdx = 1
+        startOne(0)
+        if not he.finished and he.nextIdx < he.addrs.len:
+          armStagger()
+    )
+
   when not defined(windows):
     proc connectUnix*(loop: Loop; path: string;
                       onConnect: proc(conn: Connection) {.closure.};
@@ -2966,6 +3161,213 @@ else:
               conn.closeAndRelease()
               attemptNext()
         attemptNext()
+    )
+
+  # ── Client connect — Happy Eyeballs (RFC 6555) ─────────────────────────────
+
+  proc connectHe*(loop: Loop, address: string, port: int,
+                  onConnect: proc(conn: Connection) {.closure.},
+                  onData: OnData,
+                  onClose: OnClose = nil,
+                  onError: OnError = nil) =
+    ## Non-blocking TCP connect with Happy Eyeballs (RFC 6555): both address
+    ## families are resolved, the first attempt starts immediately and further
+    ## addresses join every ConnectionAttemptDelayMs while earlier attempts are
+    ## still connecting. The first successful connect wins.
+    resolveAddrBothAsync(loop, address, port,
+      proc(addrs: seq[Sockaddr_storage]; err: string) =
+        if err.len > 0:
+          if onError != nil:
+            onError(err)
+          return
+        if addrs.len == 0:
+          if onError != nil:
+            onError("connect: no addresses resolved for " & address)
+          return
+
+        let he = HeState(
+          loop: loop, host: address, addrs: addrs,
+          onConnect: onConnect, onError: onError,
+        )
+
+        proc failAll() {.closure.} =
+          if he.finished: return
+          he.finished = true
+          if he.staggerTimer != TimerId(0):
+            loop.cancelTimer(he.staggerTimer)
+            he.staggerTimer = TimerId(0)
+          if onError != nil:
+            onError("connect() failed on all resolved addresses for " & address)
+
+        proc attemptDead(a: HeAttempt) {.closure.} =
+          if a.dead: return
+          a.dead = true
+          if a.timer != TimerId(0):
+            loop.cancelTimer(a.timer)
+            a.timer = TimerId(0)
+          if he.finished: return
+          if he.nextIdx >= he.addrs.len:
+            for o in he.attempts:
+              if not o.dead: return
+            failAll()
+
+        proc reportSuccess(a: HeAttempt): bool {.closure.} =
+          if he.finished:
+            a.dead = true
+            if a.timer != TimerId(0):
+              loop.cancelTimer(a.timer)
+              a.timer = TimerId(0)
+            return false
+          he.finished = true
+          if he.staggerTimer != TimerId(0):
+            loop.cancelTimer(he.staggerTimer)
+            he.staggerTimer = TimerId(0)
+          for o in he.attempts:
+            if o != a and not o.dead:
+              o.dead = true
+              if o.timer != TimerId(0):
+                loop.cancelTimer(o.timer)
+                o.timer = TimerId(0)
+              if o.conn != nil:
+                o.conn.closeAndRelease()
+                o.conn = nil
+          a.dead = true
+          if a.timer != TimerId(0):
+            loop.cancelTimer(a.timer)
+            a.timer = TimerId(0)
+          return true
+
+        proc armTimeout(a: HeAttempt) {.closure.} =
+          a.timer = loop.addTimer(ConnectTimeoutMs) do (id: int):
+            a.timer = TimerId(0)
+            if a.dead or he.finished: return
+            if a.conn != nil:
+              a.conn.closeAndRelease()
+              a.conn = nil
+            attemptDead(a)
+
+        proc startOne(idx: int) {.closure.} =
+          let addrBuf = he.addrs[idx]
+          let a = HeAttempt(idx: idx)
+          he.attempts.add(a)
+
+          let fd = socket(cast[ptr Sockaddr](addr addrBuf).sa_family.cint,
+                          SOCK_STREAM, 0)
+          if fd.cint < 0:
+            attemptDead(a)
+            return
+
+          setNonBlocking(fd)
+          setTcpNoDelay(fd)
+
+          let conn = Connection(
+            fd:        fd,
+            loop:      loop,
+            state:     Connecting,
+            readBuf:   acquireBuf(loop),
+            readBufLen: DefaultBufSize,
+          )
+
+          let sLen = getSockLen(addr addrBuf)
+          let ret = connect(fd, cast[ptr Sockaddr](addr addrBuf), sLen)
+          if ret < 0 and not sockInProgress():
+            conn.closeAndRelease()
+            attemptDead(a)
+            return
+
+          a.conn = conn
+
+          if ret == 0:
+            if reportSuccess(a):
+              conn.state = Connected
+              conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
+                if Error in ev:
+                  conn.closeAndRelease()
+                  if onClose != nil: onClose(conn)
+                  return
+                if conn.tlsState == TlsHandshaking:
+                  if not conn.driveHandshake():
+                    return
+                if Write in ev:
+                  if conn.flushWriteBuffer():
+                    if conn.closeAfterFlush:
+                      conn.closeAndRelease()
+                      if onClose != nil: onClose(conn)
+                      return
+                    if conn.state == Connected:
+                      conn.loop.modify(rfd, {Read})
+                if Read in ev or Hup in ev:
+                  conn.handleClientRead(onData, onClose)
+                if Hup in ev and conn.state == Connected:
+                  conn.closeAndRelease()
+                  if onClose != nil: onClose(conn)
+              onConnect(conn)
+              if conn.state == Closed: return
+            else:
+              conn.closeAndRelease()
+            return
+
+          conn.loop.register(fd.int, {Write}) do (wfd: int, ev: set[EventType]):
+            conn.loop.unregister(wfd)
+            if conn.fd.int != wfd:
+              return
+            if Error in ev:
+              conn.closeAndRelease()
+              attemptDead(a)
+              return
+            var err: cint = 0
+            var errLen: SockLen = sizeof(err).SockLen
+            discard getsockopt(fd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
+            if err != 0:
+              conn.closeAndRelease()
+              attemptDead(a)
+              return
+
+            if reportSuccess(a):
+              conn.state = Connected
+              setTcpNoDelay(SocketHandle(wfd))
+              conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
+                if Error in ev:
+                  conn.closeAndRelease()
+                  if onClose != nil: onClose(conn)
+                  return
+                if conn.tlsState == TlsHandshaking:
+                  if not conn.driveHandshake():
+                    return
+                if Write in ev:
+                  if conn.flushWriteBuffer():
+                    if conn.closeAfterFlush:
+                      conn.closeAndRelease()
+                      if onClose != nil: onClose(conn)
+                      return
+                    if conn.state == Connected:
+                      conn.loop.modify(rfd, {Read})
+                if Read in ev or Hup in ev:
+                  conn.handleClientRead(onData, onClose)
+                if Hup in ev and conn.state == Connected:
+                  conn.closeAndRelease()
+                  if onClose != nil: onClose(conn)
+              onConnect(conn)
+              if conn.state == Closed: return
+            else:
+              conn.closeAndRelease()
+          armTimeout(a)
+
+        proc armStagger() {.closure.} =
+          he.staggerTimer = loop.addTimer(ConnectionAttemptDelayMs) do (id: int):
+            he.staggerTimer = TimerId(0)
+            if he.finished: return
+            if he.nextIdx < he.addrs.len:
+              let i = he.nextIdx
+              inc he.nextIdx
+              startOne(i)
+              if he.nextIdx < he.addrs.len:
+                armStagger()
+
+        he.nextIdx = 1
+        startOne(0)
+        if not he.finished and he.nextIdx < he.addrs.len:
+          armStagger()
     )
 
   when not defined(windows):
