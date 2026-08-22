@@ -2,6 +2,6 @@ name: test
 on: [push, pull_request]
 jobs:
   test:
-    uses: nimbase/setup-nim-action/.github/workflows/test.yml@main
+    uses: nimbase/setup-nim-action/.github/workflows/test_clue.yml@main
     with:
       nim-version: stable
