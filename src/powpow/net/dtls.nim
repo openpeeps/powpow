@@ -370,6 +370,11 @@ else:
     ## Drain decrypted application data and hand it to the user callback.
     var outBuf: array[16 * 1024, byte]
     while true:
+      # Re-validate every turn: the onData callback may close the session
+      # re-entrantly (e.g. an echo handler whose send() fails), which frees
+      # sess.ssl — looping into SSL_read(nil) would segfault.
+      if sess.ssl == nil or sess.state != DtlsActive:
+        return
       let r = SSL_read(sess.ssl, addr outBuf[0], outBuf.len.cint)
       if r <= 0:
         let e = SSL_get_error(sess.ssl, r)

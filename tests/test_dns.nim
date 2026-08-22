@@ -352,14 +352,24 @@ when not defined(macosx):
   # non-127.0.0.1 loopback addresses), so the test cannot complete there — the
   # fallback path is covered by Linux/Windows CI, and multi-address resolution
   # is still tested above.
+  proc boundPort(sock: SocketHandle): int =
+    ## Read back the kernel-assigned port after binding to :0, so concurrent
+    ## runs / leftover listeners can never collide with the test's sockets.
+    var sa: Sockaddr_storage
+    var sl: SockLen = sizeof(sa).SockLen
+    if getsockname(sock, cast[ptr Sockaddr](addr sa), addr sl) != 0:
+      raise newException(NetError, "getsockname failed")
+    let p = cast[ptr Sockaddr_in](unsafeAddr sa).sin_port.uint16
+    result = ((p shr 8) or ((p and 0xFF'u16) shl 8)).int   # ntohs
+
   test "test_dns_connect_fallback_across_addresses":
     # multi.example resolves to [127.0.0.2, 127.0.0.1]; the echo server is on
     # 127.0.0.1. connect() must fail on 127.0.0.2 (connection refused) then fall
     # back to 127.0.0.1 and succeed.
     let loop = newLoop()
-    loop.setDnsServers([("127.0.0.1", 29989)])
+    var fake = startFakeDns(loop, 0)
     loop.configureDns(300, 2)
-    var fake = startFakeDns(loop, 29989)
+    loop.setDnsServers([("127.0.0.1", boundPort(fake.sock.fd))])
     fake.answers["multi.example"] = @["127.0.0.2", "127.0.0.1"]
 
     var server: TcpServer
@@ -368,12 +378,14 @@ when not defined(macosx):
       onData = proc(conn: Connection, data: openArray[byte]) =
         discard conn.send(data)
     )
-    server.listen("127.0.0.1", 29990)
+    server.listen("127.0.0.1", 0)
+    let serverPort = boundPort(server.fd)
 
     var connected = false
     var received = ""
     var failed = false
-    loop.connect("multi.example", 29990,
+    var lastErr = ""
+    loop.connect("multi.example", serverPort,
       onConnect = proc(conn: Connection) =
         connected = true
         discard conn.send("fallback ok")
@@ -386,6 +398,7 @@ when not defined(macosx):
       ,
       onError = proc(err: string) =
         failed = true
+        lastErr = err
         echo "  (onError: ", err, ")"
         # A total connect failure must not hang `loop.run()` forever.
         loop.stop()
@@ -397,8 +410,10 @@ when not defined(macosx):
       loop.stop()
     loop.run()
 
-    assert connected, "connect should fall back to the reachable address"
-    assert received == "fallback ok", "echo mismatch: " & received
+    assert connected, "connect should fall back to the reachable address" &
+      (if lastErr.len > 0: " (last error: " & lastErr & ")" else: "")
+    assert received == "fallback ok",
+      "echo mismatch: '" & received & "'"
     assert not failed, "fallback should have succeeded"
     stopFakeDns(loop, fake)
     loop.close()
