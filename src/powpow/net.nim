@@ -19,6 +19,7 @@ import ./net/common
 import ./net/tcp
 import ./net/tls
 import ./net/udp
+import ./net/dtls
 import ./net/dns
 import ./stream
 
@@ -26,6 +27,7 @@ export common
 export tcp
 export tls
 export udp
+export dtls
 export dns
 export stream
 export loop

@@ -18,6 +18,7 @@
 - Built-in HTTP/1.1 server implementation
 - Built-in **WebSocket support** with standalone and upgrade modes
 - **TLS/SSL** support (implicit + STARTTLS-style upgrades)
+- **DTLS 1.2** over UDP — one socket, per-peer sessions, stateless cookie exchange
 - **Signal/Relay** system for in-process event dispatch
 - Built-in **rate limiting** per client IP
 - **HTTP over Unix Domain Sockets** (UDS) support for super fast local IPC

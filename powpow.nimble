@@ -39,7 +39,7 @@ task test, "Run the unit test suite":
     "test_multipart_streamer", "test_net", "test_ratelimit_threads",
     "test_security", "test_signal", "test_sse2", "test_sse2_225",
     "test_sse2_chunk", "test_sse2_direct", "test_sse2_raw",     "test_stream",
-    "test_tls", "test_httpclient", "test_httpclient_security",
+    "test_tls", "test_dtls", "test_httpclient", "test_httpclient_security",
     "test_ws_client", "test_ws_pool", "test_ws_threads",
     "test_io_uring",
   ]

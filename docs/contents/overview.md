@@ -85,6 +85,7 @@ The aggregate module `src/powpow.nim` re-exports:
 | WebSocket (`proto/ws.nim`) | Done — RFC 6455, standalone + upgrade, deflate |
 | Multi-threaded HTTP server (`proto/multithread.nim`) | Done — `SO_REUSEPORT`, one loop per worker |
 | TLS (`net/tls.nim`) | Done — OpenSSL, implicit + upgrade (not on Windows) |
+| DTLS (`net/dtls.nim`) | Done — DTLS 1.2 (RFC 6347) over the UDP backend: one socket, per-peer sessions, stateless HMAC cookie exchange, retransmission timers, idle/handshake sweepers (not on Windows) |
 | SIMD scanning (`proto/simdscan.nim`) | Done — SSE2 CRLF detection with scalar fallback |
 | Rate limiting (`proto/ratelimit.nim`) | Done — sliding window per IP |
 | io_uring backend (`io/uring.nim`) | Done — opt-in Linux submission-based backend: full io_uring API binding, probe-based feature detection, zero-copy `SEND_ZC` + `SPLICE` file sends, registered buffers (`-d:powpowIoUring`) |

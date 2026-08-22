@@ -91,3 +91,86 @@ proc opensslError*(): string =
   var buf {.noinit.}: array[256, char]
   ERR_error_string_n(e, cast[cstring](addr buf[0]), buf.len.csize_t)
   result = $cast[cstring](addr buf[0])
+
+# ── DTLS bindings ─────────────────────────────────────────────────────────────
+#
+# OpenSSL supports DTLS 1.2 (RFC 6347) via the DTLS_server_method /
+# DTLS_client_method family. DTLS records ride datagrams, so the transport
+# layer is a UDP socket rather than TCP.  The handshake is driven through
+# memory BIOs the same way the io_uring TLS path already does for TCP:
+# ciphertext is fed into a read BIO; SSL_do_handshake / SSL_read /
+## SSL_write output is drained from a write BIO and sent via sendto.
+
+const
+  DTLS1_2_VERSION* = 0xFEFD
+    ## `DTLS1_2_VERSION` — minimum and maximum supported version.
+
+  SSL_CTRL_SET_MIN_PROTO_VERSION* = 123
+  SSL_CTRL_SET_MAX_PROTO_VERSION* = 124
+  SSL_CTRL_SET_MTU* = 17
+
+  DTLS_CTRL_GET_TIMEOUT* = 73
+  DTLS_CTRL_HANDLE_TIMEOUT* = 74
+  DTLS_CTRL_SET_LINK_MTU* = 120
+
+  SSL_OP_COOKIE_EXCHANGE* = 1'u64 shl 13
+    ## Enable the DTLS cookie exchange on the server side.  When set, the
+    ## server issues a HelloVerifyRequest carrying an HMAC cookie before
+    ## allocating session state — stateless DoS mitigation per RFC 6347 §4.2.
+
+proc DTLS_server_method*(): pointer {.importc: "DTLS_server_method".}
+proc DTLS_client_method*(): pointer {.importc: "DTLS_client_method".}
+
+proc SSL_CTX_set_options*(ctx: SslCtx; options: uint64): uint64 {.
+  importc: "SSL_CTX_set_options".}
+proc SSL_set_options*(ssl: SslPtr; options: uint64): uint64 {.
+  importc: "SSL_set_options".}
+
+proc SSL_CTX_ctrl*(ctx: SslCtx; cmd: cint; larg: cint;
+                   parg: pointer): cint {.importc: "SSL_CTX_ctrl".}
+
+proc RAND_bytes*(buf: pointer; num: cint): cint {.importc: "RAND_bytes".}
+
+type
+  DtlsCookieGenerateCb* = proc(ssl: SslPtr; cookie: ptr UncheckedArray[byte];
+                                cookieLen: ptr cuint): cint {.cdecl.}
+  DtlsCookieVerifyCb* = proc(ssl: SslPtr; cookie: ptr UncheckedArray[byte];
+                              cookieLen: cuint): cint {.cdecl.}
+
+proc SSL_CTX_set_cookie_generate_cb*(ctx: SslCtx;
+    cb: DtlsCookieGenerateCb) {.importc: "SSL_CTX_set_cookie_generate_cb".}
+proc SSL_CTX_set_cookie_verify_cb*(ctx: SslCtx;
+    cb: DtlsCookieVerifyCb) {.importc: "SSL_CTX_set_cookie_verify_cb".}
+
+# ── HMAC (cookie integrity) ───────────────────────────────────────────────────
+
+type EvpMdPtr* = pointer  ## `EVP_MD*`
+
+proc EVP_sha256*(): EvpMdPtr {.importc: "EVP_sha256".}
+
+proc HMAC*(evp_md: EvpMdPtr; key: pointer; key_len: cint;
+           data: pointer; data_len: cint;
+           md: ptr UncheckedArray[byte]; md_len: ptr cuint): pointer {.
+  importc: "HMAC".}
+
+const
+  CookieSecretLen* = 32
+  CookieMacLen* = 16
+
+# ── SSL ex_data (per-object app data) ─────────────────────────────────────────
+#
+# `SSL_get_ex_new_index` is a macro over `CRYPTO_get_ex_new_index` (OpenSSL
+# 1.1+/3), so bind the crypto-layer function and pass CRYPTO_EX_INDEX_SSL.
+
+const CRYPTO_EX_INDEX_SSL* = 0.cint
+
+proc CRYPTO_get_ex_new_index*(cls: cint; argl: clong; argp: pointer;
+                              newCb, dupCb, freeCb: pointer): cint {.
+  importc: "CRYPTO_get_ex_new_index".}
+proc SSL_set_ex_data*(ssl: SslPtr; idx: cint; arg: pointer): cint {.
+  importc: "SSL_set_ex_data".}
+proc SSL_get_ex_data*(ssl: SslPtr; idx: cint): pointer {.
+  importc: "SSL_get_ex_data".}
+
+const SSL_OP_NO_QUERY_MTU* = 1'u64 shl 12
+  ## Memory BIOs cannot report an MTU; pair with DTLS_set_link_mtu.
