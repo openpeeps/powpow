@@ -96,6 +96,7 @@ type
     onDataCb*:           proc(sess: DtlsSession; data: openArray[byte]) {.closure.}
     onHandshakeDoneCb*:  proc(sess: DtlsSession) {.closure.}
     onCloseCb*:          proc(sess: DtlsSession) {.closure.}
+    onErrorCb*:          proc(sess: DtlsSession; msg: string) {.closure.}
 
   DtlsError* = object of CatchableError
 
@@ -217,6 +218,7 @@ else:
 
   proc drainWriteBio(sess: DtlsSession) {.gcsafe.}
   proc armFlushRetry(sess: DtlsSession) {.gcsafe.}
+  proc driveHandshake(sess: DtlsSession) {.gcsafe.}
 
   proc flushPending(sess: DtlsSession) {.gcsafe.} =
     ## Send queued ciphertext records as individual datagrams. A datagram is
@@ -278,15 +280,27 @@ else:
       let delay = clamp(tv.tv_sec.int64 * 1000 + (tv.tv_usec.int64 + 999) div 1000,
                         1, 60_000).int
       sess.retryTimer = sess.server.loop.addTimer(delay) do (id: int):
+        sess.retryTimer = TimerId(0)
         if sess.state == DtlsHandshaking and sess.ssl != nil:
+          # Retransmit the last flight (HANDLE_TIMEOUT writes it into the
+          # write BIO), then re-drive the state machine so an exhausted
+          # retransmission budget surfaces its fatal error HERE and closes
+          # the session — previously only HANDLE_TIMEOUT ran, the give-up
+          # error was never read, and a vanished peer was retried forever.
           discard SSL_ctrl(sess.ssl, DTLS_CTRL_HANDLE_TIMEOUT, 0, nil)
           sess.lastActivityMs = monoMs()
-          sess.drainWriteBio()
-          sess.armRetryTimer()
+          sess.driveHandshake()
 
   proc close*(sess: DtlsSession) {.gcsafe.} =
     ## Tear the session down: notify, free OpenSSL state, drop from the table.
+    ##
+    ## Emits a best-effort close_notify for BOTH roles while the socket is
+    ## still open: SSL_shutdown queues the record into the write BIO and
+    ## drainWriteBio flushes it as a datagram. (Previously the record was
+    ## never drained and clients never shut down at all, so peers only learned
+    ## about closure through their sweeper/idle timeout.)
     if sess.state == DtlsClosed: return
+    let wasActive = sess.state == DtlsActive
     if sess.state == DtlsHandshaking:
       dec sess.server.handshakes
     sess.state = DtlsClosed
@@ -294,20 +308,43 @@ else:
     if sess.flushTimer != TimerId(0):
       sess.server.loop.cancelTimer(sess.flushTimer)
       sess.flushTimer = TimerId(0)
+    if sess.ssl != nil:
+      if wasActive:
+        # Best-effort close_notify for BOTH roles: SSL_shutdown queues the
+        # alert into the write BIO and drainWriteBio pushes it out while the
+        # socket is still open. (SSL_shutdown returning 0 just means the
+        # peer's close_notify has not arrived yet — fire and forget on UDP.)
+        discard SSL_shutdown(sess.ssl)
+        sess.drainWriteBio()
+        # The drain may re-arm the flush retry on EAGAIN; cancel it — this
+        # socket is going away regardless.
+        if sess.flushTimer != TimerId(0):
+          sess.server.loop.cancelTimer(sess.flushTimer)
+          sess.flushTimer = TimerId(0)
+      SSL_free(sess.ssl)
+      sess.ssl = nil
     if sess.ownSock != nil:
       sess.ownSock.close()
       sess.ownSock = nil
-    if sess.ssl != nil:
-      if sess.server.ctx.role == DtlsServerRole:
-        discard SSL_shutdown(sess.ssl)   # best effort; UDP has no FIN anyway
-      SSL_free(sess.ssl)
-      sess.ssl = nil
     let srv = sess.server
     srv.sessions.del(sess.peerKey)
     if srv.onCloseCb != nil:
       let cb = srv.onCloseCb
       {.cast(gcsafe).}:
         cb(sess)
+
+  proc fail(sess: DtlsSession; msg: string) {.gcsafe.} =
+    ## Surface a fatal error to the application, then tear the session down.
+    ## The app observes onError(msg) followed by onClose — two callbacks per
+    ## fatal. Idempotent: a callback that closes the session re-entrantly
+    ## makes the trailing close() a no-op.
+    if sess.state == DtlsClosed: return
+    let srv = sess.server
+    if srv.onErrorCb != nil:
+      let cb = srv.onErrorCb
+      {.cast(gcsafe).}:
+        cb(sess, msg)
+    sess.close()
 
   proc send*(sess: DtlsSession; data: openArray[byte]): int {.gcsafe.} =
     ## Encrypt and transmit application data. Returns plaintext bytes accepted,
@@ -333,7 +370,9 @@ else:
         let e = SSL_get_error(sess.ssl, r)
         if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
           break                       # congested; caller retries remainder
-        sess.close()
+        let detail = opensslError()
+        sess.fail(if detail.len > 0: "DTLS write failed: " & detail
+                  else: "DTLS write failed")
         return if sent > 0: sent else: -1
       inc sent, r.int
       sess.drainWriteBio()            # ship each record immediately
@@ -364,7 +403,9 @@ else:
     if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
       sess.armRetryTimer()
     else:
-      sess.close()
+      let detail = opensslError()
+      sess.fail(if detail.len > 0: "DTLS handshake failed: " & detail
+                else: "DTLS handshake failed")
 
   proc deliverPlaintext(sess: DtlsSession) {.gcsafe.} =
     ## Drain decrypted application data and hand it to the user callback.
@@ -378,9 +419,14 @@ else:
       let r = SSL_read(sess.ssl, addr outBuf[0], outBuf.len.cint)
       if r <= 0:
         let e = SSL_get_error(sess.ssl, r)
+        if e == SSL_ERROR_ZERO_RETURN:
+          sess.close()            # clean close_notify from the peer
+          return
         if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
           return                  # whole record not yet available
-        sess.close()
+        let detail = opensslError()
+        sess.fail(if detail.len > 0: "DTLS read failed: " & detail
+                  else: "DTLS read failed")
         return
       sess.drainWriteBio()        # SSL_read may trigger retransmits/alerts
       if sess.state != DtlsActive: return   # closed by close-notify alert
@@ -566,9 +612,14 @@ else:
                       onData: proc(sess: DtlsSession; data: openArray[byte]) {.closure.};
                       onHandshakeDone: proc(sess: DtlsSession) {.closure.} = nil;
                       onClose: proc(sess: DtlsSession) {.closure.} = nil;
+                      onError: proc(sess: DtlsSession; msg: string) {.closure.} = nil;
                       config = defaultDtlsConfig()): DtlsServer =
     ## Bind a DTLS 1.2 server on `address:port`. One UDP socket multiplexes all
     ## peers; each gets a `DtlsSession` once it sends a ClientHello.
+    ##
+    ## `onError` fires for fatal session errors (handshake failures, alerts,
+    ## read/write errors) followed by `onClose`; user-initiated `close()`
+    ## produces only `onClose`.
     if ctx.role != DtlsServerRole:
       raise newException(DtlsError, "expected a server DTLS context")
     result = DtlsServer(
@@ -580,7 +631,8 @@ else:
       sweepTimer: TimerId(0),
       onDataCb: onData,
       onHandshakeDoneCb: onHandshakeDone,
-      onCloseCb: onClose)
+      onCloseCb: onClose,
+      onErrorCb: onError)
     let srv = result
     result.sock = bindUdp(loop, address, port) do (sender: Sockaddr_storage, data: openArray[byte]):
       srv.handleDatagram(sender, data)
@@ -618,6 +670,7 @@ else:
                     onData: proc(sess: DtlsSession; data: openArray[byte]) {.closure.} = nil;
                     onHandshakeDone: proc(sess: DtlsSession) {.closure.} = nil;
                     onClose: proc(sess: DtlsSession) {.closure.} = nil;
+                    onError: proc(sess: DtlsSession; msg: string) {.closure.} = nil;
                     config = defaultDtlsConfig()): DtlsSession =
     ## Open a client-side DTLS session to `address:port` and start the
     ## handshake immediately (the first datagram is the ClientHello).
@@ -632,7 +685,8 @@ else:
       sweepTimer: TimerId(0),
       onDataCb: onData,
       onHandshakeDoneCb: onHandshakeDone,
-      onCloseCb: onClose)
+      onCloseCb: onClose,
+      onErrorCb: onError)
 
     let sock = connectUdp(loop, address, port) do (sender: Sockaddr_storage,
                                                    data: openArray[byte]):

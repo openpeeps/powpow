@@ -1,11 +1,12 @@
 ## tests/test_dtls.nim — DTLS 1.2 tests for powpow.
 ##
 ## Tests: cookie-exchange handshake, echo roundtrip, multi-peer,
-## large fragmented payloads, the session cap, and handshake-timeout sweep.
+## large fragmented payloads, the session cap, handshake-timeout sweep,
+## close_notify propagation, and fatal-handshake onError reporting.
 
 ##
 import ../src/powpow
-import std/[unittest, os]
+import std/[unittest, os, strutils]
 
 const TestCert = """-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIUQ9SLaN1JcfaYyluaCXKsGhNnIa4wDQYJKoZIhvcNAQEL
@@ -316,4 +317,109 @@ when not defined(windows):
 
     doAssert closedCount == 1, "stuck handshake should have been swept"
     doAssert srv.sessionCount() == 0
+    loop.close()
+
+  test "dtls_close_notify_reaches_peer":
+    # The server echoes once and then closes its session. The client must
+    # observe the closure via close_notify (SSL_ERROR_ZERO_RETURN) promptly —
+    # not hang until the safety timer. Before the drain fix the record died
+    # inside the server's write BIO and clients only found out via timeouts.
+    const Port = 29916
+    let (cert, key) = writeTestCert()
+    let ctx = newServerDtlsContext(cert, key)
+    let loop = newLoop()
+
+    var srvEchoedAndClosed = false
+    var srvClosed = false
+    var clientGotEcho = false
+    var clientClosed = false
+    var timedOut = false
+
+    let srv = newDtlsServer(loop, "127.0.0.1", Port, ctx,
+      onData = proc(sess: DtlsSession; data: openArray[byte]) =
+        if srvEchoedAndClosed: return
+        srvEchoedAndClosed = true
+        discard sess.send(data)
+        sess.close()                  # server-initiated close_notify
+      ,
+      onClose = proc(sess: DtlsSession) =
+        srvClosed = true)
+
+    discard loop.addTimer(30) do (id: int):
+      let cctx = newClientDtlsContext(false)
+      var cli: DtlsSession
+      cli = connectDtls(loop, "127.0.0.1", Port, cctx,
+        onData = proc(sess: DtlsSession; data: openArray[byte]) =
+          clientGotEcho = true
+          # Deliberately do NOT close here — wait for the peer's close_notify.
+        ,
+        onHandshakeDone = proc(sess: DtlsSession) =
+          discard sess.send("ping"),
+        onClose = proc(sess: DtlsSession) =
+          clientClosed = true
+          srv.close()
+          loop.stop())
+
+    discard loop.addTimer(5000) do (id: int):
+      timedOut = true
+      srv.close()
+      loop.stop()
+
+    loop.run()
+
+    doAssert not timedOut, "close_notify from the server should reach the client"
+    doAssert clientGotEcho, "echo should have completed before closure"
+    doAssert srvEchoedAndClosed and srvClosed, "server session lifecycle broken"
+    doAssert clientClosed, "client must observe the server's close_notify"
+    loop.close()
+
+  test "dtls_handshake_fatal_onerror":
+    # A datagram that parses far enough to fail inside OpenSSL (garbage
+    # ClientHello body) must surface as onError(...) followed by onClose,
+    # with the session removed from the table — not a silent close.
+    const Port = 29917
+    let (cert, key) = writeTestCert()
+    let ctx = newServerDtlsContext(cert, key, cookieExchange = false)
+    let loop = newLoop()
+    var cfg = defaultDtlsConfig(cookieExchange = false)
+
+    var errSeen = ""
+    var closedCount = 0
+    let srv = newDtlsServer(loop, "127.0.0.1", Port, ctx,
+      config = cfg,
+      onData = proc(sess: DtlsSession; data: openArray[byte]) =
+        discard)
+
+    srv.onErrorCb = proc(sess: DtlsSession; msg: string) =
+      errSeen = msg
+    srv.onCloseCb = proc(sess: DtlsSession) =
+      inc closedCount
+      loop.stop()
+
+    discard loop.addTimer(30) do (id: int):
+      let raw = connectUdp(loop, "127.0.0.1", Port)
+      var pkt: array[29, byte]
+      pkt[0] = 22'u8            # handshake content type
+      pkt[1] = 0xFE'u8          # DTLS 1.2
+      pkt[2] = 0xFD'u8
+      pkt[11] = 0x00'u8         # record length hi
+      pkt[12] = 16'u8           # record length lo (12 hs hdr + 4 body)
+      pkt[13] = 1'u8            # ClientHello msg type
+      pkt[14] = 0x00'u8; pkt[15] = 0x00'u8; pkt[16] = 4'u8   # msg length 4
+      pkt[17] = 0x00'u8; pkt[18] = 0x00'u8                      # message_seq 0
+      pkt[19] = 0x00'u8; pkt[20] = 0x00'u8; pkt[21] = 0x00'u8  # frag offset
+      pkt[22] = 0x00'u8; pkt[23] = 0x00'u8; pkt[24] = 4'u8   # frag length 4
+      pkt[25] = 0xFF'u8; pkt[26] = 0xFF'u8; pkt[27] = 0xFF'u8; pkt[28] = 0xFF'u8
+      discard raw.send(pkt)
+
+    discard loop.addTimer(3000) do (id: int):
+      srv.close()
+      loop.stop()
+
+    loop.run()
+
+    doAssert errSeen.len > 0, "fatal handshake must fire onError"
+    doAssert errSeen.contains("DTLS handshake failed"), "unexpected error: " & errSeen
+    doAssert closedCount == 1, "onError must be followed by exactly one onClose"
+    doAssert srv.sessionCount() == 0, "failed session must leave the table"
     loop.close()

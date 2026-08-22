@@ -29,4 +29,6 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
   else:
     res.sendError(Http404, "Not Found")
 
+echo "💥 powpow HTTP server listening on http://localhost:9002"
+echo "  Press Ctrl+C to stop"
 server.start(handler, Port(9002))

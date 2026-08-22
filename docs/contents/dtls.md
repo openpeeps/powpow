@@ -38,8 +38,15 @@ let srv = newDtlsServer(loop, "0.0.0.0", 4433, ctx,
     echo "peer up: ", sess.peerAddrStr()
   ,
   onClose         = proc(sess: DtlsSession) =
-    discard)
+    discard
+  ,
+  onError         = proc(sess: DtlsSession; msg: string) =
+    echo "session failed: ", msg)
 ```
+
+`onError` fires for fatal session errors — handshake failures, TLS alerts,
+read/write errors — followed by `onClose`. User-initiated `sess.close()`
+produces only `onClose`.
 
 A session is created only when an inbound datagram looks like a DTLS
 ClientHello — random garbage never allocates OpenSSL state.
@@ -107,6 +114,16 @@ forever. Keep `idleTimeoutMs` finite for anything internet-facing.
 - While the socket send buffer is full, records stay queued and flush on a
   short internal retry timer; `send` then reports only the accepted prefix
   (or `0`) rather than blocking.
+
+## Closure semantics
+
+`sess.close()` emits a best-effort `close_notify` for **both roles** while the
+socket is still open, so peers learn about the closure immediately instead of
+waiting for their idle/handshake sweeper. A peer that stops responding
+mid-handshake is reaped by OpenSSL's retransmission budget: when the flight
+retransmissions are exhausted, the session fails with `onError` (if wired)
+followed by `onClose` — it never lingers forever. UDP has no FIN, so the
+sweeper remains the backstop for silently vanished *active* sessions.
 
 ## Platform support
 
