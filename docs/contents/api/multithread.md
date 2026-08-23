@@ -1,6 +1,6 @@
 ---
 title: multithread
-description: "The multi-threaded HTTP server API: newMultiThreadHttpServer, listen, start and close."
+description: "The multi-threaded HTTP server API: newHttpServer, listen, start and close."
 keywords: ["powpow", "api", "multithread", "reuseport", "threads"]
 ---
 
@@ -20,7 +20,7 @@ MultiThreadHttpServer* = ref object
 ## Procs
 
 ```nim
-proc newMultiThreadHttpServer*(numThreads: int = 0): MultiThreadHttpServer
+proc newHttpServer*(numThreads: int = 0): MultiThreadHttpServer
 proc listen*(srv: MultiThreadHttpServer, address: string, port: int)
 proc start*(srv: MultiThreadHttpServer, cb: OnRequestCallback, address: string, port: int)
 proc close*(srv: MultiThreadHttpServer)

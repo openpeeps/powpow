@@ -8,9 +8,9 @@ keywords: ["powpow", "websocket", "ws", "realtime"]
 
 `proto/ws.nim` is a RFC 6455-compliant WebSocket implementation in two modes:
 
-1. **Standalone** — a dedicated WebSocket server that handles the upgrade
+1. **Standalone**: a dedicated WebSocket server that handles the upgrade
    handshake internally (no HTTP routes).
-2. **Upgrade** — a WebSocket endpoint on an existing `HttpServer` route, so HTTP
+2. **Upgrade**: a WebSocket endpoint on an existing `HttpServer` route, so HTTP
    and WebSocket share one port.
 
 Runnable examples: [`examples/wsserver.nim`](../examples/wsserver.nim),
@@ -93,7 +93,7 @@ the frame parser; `WsFrameParser.reset` clears it.
 | `idleTimeoutMs` | post-upgrade idle close |
 
 Per-message deflate is supported. Frame caps still apply in
-`maxFrameSize = 0` ("unlimited") mode — see [security](security.md).
+`maxFrameSize = 0` ("unlimited") mode, see [security](security.md).
 
 ## API reference
 

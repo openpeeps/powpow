@@ -84,6 +84,7 @@ The aggregate module `src/powpow.nim` re-exports:
 | HTTP server (`proto/httpserver.nim`) | Done — own-router design, static files, Range/conditional requests, pipelining |
 | WebSocket (`proto/ws.nim`) | Done — RFC 6455, standalone + upgrade, deflate |
 | Multi-threaded HTTP server (`proto/multithread.nim`) | Done — `SO_REUSEPORT`, one loop per worker |
+| Thread pool (`threadpool.nim`) | Done — N workers + dispatch thread owning a private loop; generic `submitWork[T]` results delivered as serialized callbacks; graceful drain close + discard shutdown |
 | TLS (`net/tls.nim`) | Done — OpenSSL, implicit + upgrade (not on Windows) |
 | DTLS (`net/dtls.nim`) | Done — DTLS 1.2 (RFC 6347) over the UDP backend: one socket, per-peer sessions, stateless HMAC cookie exchange, retransmission timers, idle/handshake sweepers (not on Windows) |
 | SIMD scanning (`proto/simdscan.nim`) | Done — SSE2 CRLF detection with scalar fallback |

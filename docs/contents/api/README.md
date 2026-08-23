@@ -41,6 +41,7 @@ so `import powpow` brings in everything below.
 - [ws](ws.md) — WebSocket
 - [ratelimit](ratelimit.md) — the rate limiter
 - [multithread](multithread.md) — the multi-threaded HTTP server
+- [threadpool](threadpool.md) — self-managed worker pool with loop-based delivery
 - [simdscan](simdscan.md) — SIMD CRLF scanning
 
 ## Platform
