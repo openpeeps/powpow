@@ -21,6 +21,23 @@ Sliding window: each IP may make up to `maxRequests` requests per `windowMs`.
 `enableCleanup = true` (default) sweeps idle buckets. `rl.close()` frees the
 limiter's timers.
 
+## Multi-window limits
+
+One limiter can enforce several time windows at once — e.g. a per-IP hourly
+quota *and* a daily quota:
+
+```nim
+let rl = newMultiRateLimiter(loop, [
+  (maxRequests: 100, windowMs: 3_600_000),   # 100/hour
+  (maxRequests: 1_000, windowMs: 86_400_000) # 1000/day
+])
+```
+
+Every window is verified before any is incremented (two-phase `allow`), so a
+request rejected by the daily quota is not also counted against the hourly.
+Entries with `maxRequests <= 0` are unlimited. `newRateLimiter` is shorthand
+for a single-window `newMultiRateLimiter`.
+
 ## Using it in a handler
 
 ```nim

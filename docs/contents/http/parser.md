@@ -89,6 +89,22 @@ Constants enforced by the parser/server:
 
 See [security](../security.md) for how these protect against DoS.
 
+## Chunked trailers
+
+Chunked bodies may carry trailers — `Name: value` lines after the zero-size
+chunk (RFC 9112 §7.1.3). The parser accepts them incrementally, enforces the
+same strictness as headers (CRLF only, colon required, no obs-fold,
+`MaxHeaderSize` per section, `MaxHeaders` per count; violations are 400/431),
+and exposes them once complete:
+
+```nim
+if parser.isComplete():
+  if parser.hasTrailers():
+    for (name, value) in parser.getTrailers():
+      echo name, ": ", value
+  let crc = req.getTrailer("X-Crc32")   # case-insensitive lookup, "" if absent
+```
+
 ## Body streaming on requests
 
 For fully parsed requests, the `BodyStream` API in

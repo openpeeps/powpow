@@ -32,12 +32,17 @@
 ## Both support Unix domain sockets via the `unixSocket` argument (POSIX only)
 ## and HTTPS via a `SslContext` from `newClientTlsContext`.
 ##
-## Connections are reused across sequential requests when `keepAlive` is true
-## (the default). Response headers/body must be consumed before issuing the
-## next request on the same client. `close` shuts down the client's idle
-## connection and its private loop.
+## Keep-alive connections are pooled per origin when `keepAlive` is true (the
+## default): up to `maxIdlePerHost` per host and `maxIdleTotal` overall, each
+## trusted for reuse for `idleTimeoutMs`. A pooled connection that the server
+## closed between requests is detected and retried transparently on a fresh
+## connection (as long as no response bytes arrived). Interim `100 Continue`
+## responses are consumed automatically, so callers may send
+## `Expect: 100-continue` via request headers. Response headers/body must be
+## consumed before issuing the next request. `close` drains the pool and shuts
+## down the client's private loop.
 
-import std/[asyncdispatch, httpcore, strutils]
+import std/[asyncdispatch, httpcore, strutils, tables]
 
 import ../net/tcp
 import ../net/common
@@ -53,8 +58,39 @@ const DefaultMaxResponseBody* = 64 * 1024 * 1024
   ## (or delivering more chunked data) fails the request instead of letting the
   ## parser buffer it in RAM (unbounded-response memory DoS).
 
+const DefaultMaxIdlePerHost* = 4
+  ## Default cap on idle keep-alive connections held per origin.
+const DefaultMaxIdleTotal* = 16
+  ## Default overall cap on idle keep-alive connections.
+const DefaultIdleTimeoutMs* = 60_000
+  ## How long an idle keep-alive connection is trusted for reuse (0 = no
+  ## timeout). Eviction is lazy: stale entries are dropped when a request
+  ## would use them, not on a background timer.
+
 type
   HttpError* = object of CatchableError
+
+  PoolKey* = tuple[host: string, port: int, tls: bool, uds: string]
+    ## Origin identity of a pooled connection. Two URLs share a connection only
+    ## when every field matches — reusing across origins would send requests to
+    ## the wrong host.
+
+  PooledConn* = object
+    conn*: Connection
+    parser*: HttpParser
+    idleSinceMs*: int64   ## When the connection became idle (monoMs clock)
+    order*: int64         ## Monotonic insertion stamp — deterministic eviction
+                          ## tiebreak when pushes land in the same millisecond
+
+  HttpConnPool* = ref object
+    ## Idle keep-alive connection pool, keyed by origin. LIFO per key (the most
+    ## recently used connection is reused first — its TCP path is still warm).
+    conns*: Table[PoolKey, seq[PooledConn]]
+    totalIdle*: int
+    orderCounter: int64
+    maxPerHost*: int
+    maxTotal*: int
+    idleTimeoutMs*: int
 
   HttpClientBase* = ref object of RootObj
     tlsCtx*: SslContext
@@ -62,8 +98,7 @@ type
     timeoutMs*: int
     maxBodySize*: int
     defaultHeaders*: seq[(string, string)]
-    idleConn: Connection
-    idleParser: HttpParser
+    pool*: HttpConnPool     ## Idle keep-alive connections by origin
 
   AsyncHttpClient* = ref object of HttpClientBase
     loop*: Loop
@@ -91,6 +126,113 @@ type
     timer: TimerId
     noBodyExpected: bool      # request method implies no response body (HEAD)
     pendingCloseDelimited: bool  # body delimited by connection close
+    key: PoolKey              # origin this request targets (pool identity)
+    cameFromPool: bool        # conn was reused from the pool — retry once on stale
+    retried: bool             # already did the fresh-connection retry
+    tlsNeeded: bool           # request goes over TLS (wrap on connect)
+    reqHeaders: string        # serialized request head (built once)
+    bodyBytes: seq[byte]      # request body copy (sent after reqHeaders)
+
+# ── Connection pool ──────────────────────────────────────────────────────────
+
+func newHttpConnPool*(maxPerHost: int = DefaultMaxIdlePerHost,
+                      maxTotal: int = DefaultMaxIdleTotal,
+                      idleTimeoutMs: int = DefaultIdleTimeoutMs): HttpConnPool =
+  HttpConnPool(maxPerHost: maxPerHost, maxTotal: maxTotal,
+               idleTimeoutMs: idleTimeoutMs)
+
+proc closePooled(pc: PooledConn) {.inline.} =
+  pc.conn.close()
+
+proc evictOldest(pool: HttpConnPool) =
+  ## Close and drop the globally oldest idle connection (smallest
+  ## `idleSinceMs`). No-op on an empty pool.
+  var oldestKey: PoolKey
+  var oldestIdx = -1
+  var oldestOrder = int64.high
+  for key, seqs in pool.conns:
+    for i in 0 ..< seqs.len:
+      if seqs[i].order < oldestOrder:
+        oldestOrder = seqs[i].order
+        oldestKey = key
+        oldestIdx = i
+  if oldestIdx >= 0:
+    closePooled(pool.conns[oldestKey][oldestIdx])
+    pool.conns[oldestKey].delete(oldestIdx)
+    if pool.conns[oldestKey].len == 0:
+      pool.conns.del(oldestKey)
+    dec pool.totalIdle
+
+proc push*(pool: HttpConnPool, key: PoolKey, conn: Connection,
+           parser: HttpParser) =
+  ## Return a keep-alive connection to the pool, enforcing per-host and total
+  ## caps (oldest connections are closed first).
+  if conn.state != Connected or parser.isNil:
+    conn.close()
+    return
+  pool.conns.withValue(key, list):
+    # Per-host cap: drop the oldest of this origin.
+    while list[].len >= max(pool.maxPerHost, 1):
+      closePooled(list[][0])
+      list[].delete(0)
+      dec pool.totalIdle
+  inc pool.orderCounter
+  let pc = PooledConn(conn: conn, parser: parser,
+                      idleSinceMs: monoMs(), order: pool.orderCounter)
+  pool.conns.mgetOrPut(key, @[]).add(pc)
+  inc pool.totalIdle
+  while pool.totalIdle > max(pool.maxTotal, 1):
+    pool.evictOldest()
+
+proc pop*(pool: HttpConnPool, loop: Loop, key: PoolKey): PooledConn =
+  ## Take the most recently idled connection for `key`, skipping entries that
+  ## have expired (lazy idle timeout) or died. Returns default(PooledConn)
+  ## (conn == nil) when none is usable.
+  while true:
+    var list: ptr seq[PooledConn] = addr pool.conns.mgetOrPut(key, @[])
+    if list[].len == 0:
+      pool.conns.del(key)
+      return
+    let idx = list[].len - 1  # LIFO
+    var pc = list[][idx]
+    list[].delete(idx)
+    if list[].len == 0:
+      pool.conns.del(key)
+    dec pool.totalIdle
+    # Lazy expiry check.
+    if pool.idleTimeoutMs > 0 and monoMs() - pc.idleSinceMs > pool.idleTimeoutMs:
+      closePooled(pc)
+      continue
+    if pc.conn.state != Connected or pc.conn.loop != loop:
+      closePooled(pc)
+      continue
+    return pc
+
+proc removeFromPool*(pool: HttpConnPool, conn: Connection): bool =
+  ## Drop `conn` from the pool (closing it). True when it was pooled.
+  for key, list in pool.conns.mpairs:
+    for i in 0 ..< list.len:
+      if list[i].conn == conn:
+        closePooled(list[i])
+        list.delete(i)
+        dec pool.totalIdle
+        if list.len == 0:
+          pool.conns.del(key)
+        return true
+  false
+
+proc closeAll*(pool: HttpConnPool) =
+  for key, list in pool.conns.mpairs:
+    for pc in list:
+      closePooled(pc)
+  pool.conns.clear()
+  pool.totalIdle = 0
+
+func idleConnections*(pool: HttpConnPool): int {.inline.} =
+  pool.totalIdle
+
+func idleConnectionsFor*(pool: HttpConnPool, key: PoolKey): int {.inline.} =
+  if pool.conns.hasKey(key): pool.conns[key].len else: 0
 
 # ── URL parsing ──────────────────────────────────────────────────────────────
 
@@ -180,10 +322,8 @@ proc failReq(st: HttpReq, client: HttpClientBase, msg: string) =
     if st.conn != nil:
       st.conn.loop.cancelTimer(st.timer)
     st.timer = TimerId(0)
-  if client.idleConn == st.conn:
-    client.idleConn = nil
-    client.idleParser = nil
   if st.conn != nil:
+    discard client.pool.removeFromPool(st.conn)
     st.conn.close()
   if not st.delivered and st.onError != nil:
     st.onError(msg)
@@ -199,8 +339,7 @@ proc deliverReq(st: HttpReq, client: HttpClientBase) =
   let res = HttpClientResponse(parser: st.parser, reqConn: st.conn)
   if client.keepAlive and st.conn.state == Connected and
      st.parser.getHttpMinor() == 1 and not st.parser.getConnectionClose():
-    client.idleConn = st.conn
-    client.idleParser = st.parser
+    client.pool.push(st.key, st.conn, st.parser)
   else:
     st.conn.close()
   if st.onResponse != nil:
@@ -218,6 +357,207 @@ proc closeDelimitedResponse(st: HttpReq): bool =
   p.getContentLength() < 0 and not p.isChunked() and
     not st.noBodyExpected and not noBodyStatus(p.getStatusCode())
 
+proc responseStarted(st: HttpReq): bool {.inline.} =
+  ## True once any response bytes have advanced the parser past the status
+  ## line. Used to decide whether a failed pooled-connection reuse may be
+  ## retried transparently (the server sent nothing back yet).
+  st.parser != nil and st.parser.phase != PhaseRequestLine
+
+proc retryFresh(st: HttpReq, client: HttpClientBase): bool =
+  ## A pooled connection died before the server sent anything. Prepare one
+  ## transparent retry on a brand-new connection (classic stale keep-alive
+  ## recovery). Returns true when the caller must now open a fresh connection.
+  if not st.active or not st.cameFromPool or st.retried or
+     st.responseStarted() or st.conn == nil:
+    return false
+  st.retried = true
+  st.cameFromPool = false
+  if st.timer != TimerId(0):
+    st.conn.loop.cancelTimer(st.timer)
+    st.timer = TimerId(0)
+  discard client.pool.removeFromPool(st.conn)
+  st.conn.close()
+  st.conn = nil
+  true
+
+proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
+              ev: set[EventType])
+  ## Forward declaration: `beginConn` registers this as the watcher callback.
+
+proc beginConn(st: HttpReq, client: HttpClientBase, conn: Connection,
+               reuseParser: HttpParser = nil) =
+  ## Run the prepared request on `conn` (fresh or reused from the pool).
+  st.conn = conn
+  if not st.active:
+    conn.close()
+    return
+  try:
+    if st.tlsNeeded:
+      if client.tlsCtx == nil:
+        failReq(st, client, "https requested but no tlsCtx configured")
+        return
+      conn.wrapTls(client.tlsCtx, st.key.host)
+  except SslError:
+    failReq(st, client, getCurrentExceptionMsg())
+    return
+  if reuseParser != nil:
+    st.parser = reuseParser
+    st.parser.resetForNext()
+  else:
+    st.parser = newHttpParser()
+  st.parser.responseMode = true
+  st.parser.maxBodySize = client.maxBodySize.int64
+  if st.onBodyData != nil:
+    st.parser.onBodyData = st.onBodyData
+  discard conn.send(st.reqHeaders)
+  if st.bodyBytes.len > 0:
+    discard conn.send(st.bodyBytes)
+  # Re-register in place: register() already replaces the existing watcher.
+  # Unregistering first would trash the fd state while its WSARecv is still
+  # in flight on Windows/IOCP, so the response bytes would land in the trash
+  # and be lost (hanging the request or surfacing as a connection error).
+  conn.loop.register(conn.fd.int, {Read, Write}, edgeTriggered = true,
+    callback = proc(fd: int, ev: set[EventType]) =
+      onFdImpl(st, client, fd, ev))
+
+proc connectFresh(st: HttpReq, client: HttpClientBase, loop: Loop) =
+  ## Open a new TCP/UDS connection and run the request on it.
+  when not defined(windows):
+    if st.key.uds.len > 0:
+      try:
+        loop.connectUnix(st.key.uds,
+          onConnect = proc(conn: Connection) =
+            beginConn(st, client, conn)
+          ,
+          onData = proc(conn: Connection, data: openArray[byte]) = discard,
+          onClose = proc(conn: Connection) =
+            if st.active:
+              failReq(st, client, "connection closed during request")
+        )
+      except NetError as e:
+        failReq(st, client, e.msg)
+      return
+
+  loop.connect(st.key.host, st.key.port,
+    onConnect = proc(conn: Connection) =
+      beginConn(st, client, conn)
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) = discard,
+    onClose = proc(conn: Connection) =
+      if st.active:
+        if retryFresh(st, client):
+          connectFresh(st, client, loop)
+        else:
+          failReq(st, client, "connection closed during request")
+    ,
+    onError = proc(err: string) =
+      if st.active:
+        failReq(st, client, err)
+  )
+
+proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
+              ev: set[EventType]) =
+  let conn = st.conn
+  if conn == nil or conn.state != Connected:
+    return
+  if not st.active:
+    # Stale event on an idle/pooled connection — drop it from the pool.
+    if client.pool.removeFromPool(conn):
+      conn.close()
+    return
+  if Error in ev and Read notin ev:
+    failReq(st, client, "connection error")
+    return
+  if conn.tlsState == TlsHandshaking:
+    if not conn.driveHandshake():
+      return
+  if Write in ev:
+    if conn.flushWriteBuffer():
+      if conn.state != Connected:
+        failReq(st, client, "connection closed while writing")
+        return
+      if conn.tlsState != TlsHandshaking:
+        conn.loop.modify(fd, {Read})
+  if Read in ev or Hup in ev:
+    var buf: array[65536, byte]
+    while true:
+      var n: int
+      when defined(windows):
+        n = conn.loop.platform.getReadData(
+          conn.fd.int, cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
+      else:
+        n = sockRecv(conn.fd, addr buf[0], buf.len)
+      if n > 0:
+        discard st.parser.feed(buf.toOpenArray(0, n - 1))
+        if st.parser.isError():
+          failReq(st, client, "invalid HTTP response")
+          return
+        if st.parser.headersDone and st.parser.headerEnd > MaxHeaderSize:
+          # The parser's header cap only fires while the section is still
+          # incomplete; a hostile header block that arrives in one packet
+          # must still be rejected.
+          failReq(st, client, "response headers too large")
+          return
+        if st.parser.headersDone and st.parser.getStatusCode() == Http100:
+          # Interim "100 Continue" (e.g. after we sent Expect: 100-continue):
+          # not the final answer. Drop it, replay any already-buffered bytes,
+          # and keep reading until the real response arrives.
+          st.parser.resetForNext()
+          st.parser.tryAdvance()
+          if st.parser.isError():
+            failReq(st, client, "invalid HTTP response")
+            return
+        if st.parser.isComplete():
+          if st.closeDelimitedResponse():
+            # Headers done, no framing — wait for EOF, then promote the
+            # buffered bytes to the body.
+            st.pendingCloseDelimited = true
+          else:
+            deliverReq(st, client)
+            return
+        elif st.parser.headersDone and
+             (st.noBodyExpected or noBodyStatus(st.parser.getStatusCode())):
+          # Body-less response (HEAD request, 1xx/204/304): the parser
+          # would wait on a Content-Length that never arrives.
+          deliverReq(st, client)
+          return
+      elif n == 0:
+        if st.pendingCloseDelimited or
+           (st.parser.phase == PhaseComplete and st.closeDelimitedResponse()):
+          st.parser.finalizeCloseDelimited()
+          deliverReq(st, client)
+        elif st.parser.phase == PhaseComplete:
+          deliverReq(st, client)
+        elif retryFresh(st, client):
+          # Pooled connection was closed by the server between requests and
+          # nothing came back yet — silently open a fresh connection.
+          connectFresh(st, client, conn.loop)
+        else:
+          failReq(st, client, "connection closed before response completed")
+        return
+      else:
+        when defined(windows):
+          # getReadData < 0: a WSARecv is in flight with no data buffered
+          # yet — wait for the next completion instead of treating it as an
+          # error (mirrors POSIX EAGAIN).
+          break
+        else:
+          if sockWouldBlock():
+            break
+          if sockInterrupted():
+            continue
+          failReq(st, client, "recv error")
+          return
+    if (Hup in ev or Error in ev) and conn.state == Connected and st.active:
+      if st.parser.phase == PhaseComplete:
+        if st.pendingCloseDelimited or st.closeDelimitedResponse():
+          st.parser.finalizeCloseDelimited()
+        deliverReq(st, client)
+      elif retryFresh(st, client):
+        connectFresh(st, client, conn.loop)
+      else:
+        failReq(st, client, "connection closed before response completed")
+
 proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
                  url: string, body: openArray[byte],
                  headers: openArray[(string, string)],
@@ -227,15 +567,18 @@ proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
                  onError: proc(err: string) {.closure.}): HttpReq =
   let parsed = parseHttpUrl(url)
   let timeout = if timeoutOverride < 0: client.timeoutMs else: timeoutOverride
+  let tlsNeeded = parsed.scheme == "https"
+  let key: PoolKey = (
+    host: parsed.host.toLowerAscii(),
+    port: parsed.port,
+    tls: tlsNeeded,
+    uds: unixSocket,
+  )
   let hostForHeader =
     if (parsed.port != 80 and parsed.port != 443):
       parsed.host & ":" & $parsed.port
     else:
       parsed.host
-  let tlsNeeded = parsed.scheme == "https"
-  let reqHeaders = buildRequestHeaders(client, meth, parsed.path, hostForHeader,
-                                       body.len, headers)
-  let bodyBytes = @body
 
   let st = HttpReq(
     client: client,
@@ -244,6 +587,12 @@ proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
     onError: onError,
     active: true,
     timer: TimerId(0),
+    key: key,
+    tlsNeeded: tlsNeeded,
+    reqHeaders: buildRequestHeaders(client, meth, parsed.path, hostForHeader,
+                                    body.len, headers),
+    bodyBytes: @body,
+    noBodyExpected: meth == HttpHead,
   )
 
   if timeout > 0:
@@ -251,171 +600,16 @@ proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
       if st.active:
         failReq(st, client, "request timed out")
 
-  proc onFd(st: HttpReq, client: HttpClientBase, fd: int, ev: set[EventType]) =
-    let conn = st.conn
-    if conn == nil or conn.state != Connected:
-      return
-    if not st.active:
-      # Stale event on an idle/closed connection — drop the idle slot.
-      if client.idleConn == conn:
-        client.idleConn = nil
-        client.idleParser = nil
-        conn.close()
-      return
-    if Error in ev and Read notin ev:
-      failReq(st, client, "connection error")
-      return
-    if conn.tlsState == TlsHandshaking:
-      if not conn.driveHandshake():
-        return
-    if Write in ev:
-      if conn.flushWriteBuffer():
-        if conn.state != Connected:
-          failReq(st, client, "connection closed while writing")
-          return
-        if conn.tlsState != TlsHandshaking:
-          conn.loop.modify(fd, {Read})
-    if Read in ev or Hup in ev:
-      var buf: array[65536, byte]
-      while true:
-        var n: int
-        when defined(windows):
-          n = conn.loop.platform.getReadData(
-            conn.fd.int, cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
-        else:
-          n = sockRecv(conn.fd, addr buf[0], buf.len)
-        if n > 0:
-          discard st.parser.feed(buf.toOpenArray(0, n - 1))
-          if st.parser.isError():
-            failReq(st, client, "invalid HTTP response")
-            return
-          if st.parser.headersDone and st.parser.headerEnd > MaxHeaderSize:
-            # The parser's header cap only fires while the section is still
-            # incomplete; a hostile header block that arrives in one packet
-            # must still be rejected.
-            failReq(st, client, "response headers too large")
-            return
-          if st.parser.isComplete():
-            if st.closeDelimitedResponse():
-              # Headers done, no framing — wait for EOF, then promote the
-              # buffered bytes to the body.
-              st.pendingCloseDelimited = true
-            else:
-              deliverReq(st, client)
-              return
-          elif st.parser.headersDone and
-               (st.noBodyExpected or noBodyStatus(st.parser.getStatusCode())):
-            # Body-less response (HEAD request, 1xx/204/304): the parser
-            # would wait on a Content-Length that never arrives.
-            deliverReq(st, client)
-            return
-        elif n == 0:
-          if st.pendingCloseDelimited or
-             (st.parser.phase == PhaseComplete and st.closeDelimitedResponse()):
-            st.parser.finalizeCloseDelimited()
-            deliverReq(st, client)
-          elif st.parser.phase == PhaseComplete:
-            deliverReq(st, client)
-          else:
-            failReq(st, client, "connection closed before response completed")
-          return
-        else:
-          when defined(windows):
-            # getReadData < 0: a WSARecv is in flight with no data buffered
-            # yet — wait for the next completion instead of treating it as an
-            # error (mirrors POSIX EAGAIN).
-            break
-          else:
-            if sockWouldBlock():
-              break
-            if sockInterrupted():
-              continue
-            failReq(st, client, "recv error")
-            return
-      if (Hup in ev or Error in ev) and conn.state == Connected and st.active:
-        if st.parser.phase == PhaseComplete:
-          if st.pendingCloseDelimited or st.closeDelimitedResponse():
-            st.parser.finalizeCloseDelimited()
-          deliverReq(st, client)
-        else:
-          failReq(st, client, "connection closed before response completed")
-
-  proc begin(conn: Connection, reuseParser: HttpParser = nil) =
-    st.conn = conn
-    if not st.active:
-      conn.close()
-      return
-    st.noBodyExpected = meth == HttpHead
-    try:
-      if tlsNeeded:
-        if client.tlsCtx == nil:
-          failReq(st, client, "https requested but no tlsCtx configured")
-          return
-        conn.wrapTls(client.tlsCtx, parsed.host)
-    except SslError:
-      failReq(st, client, getCurrentExceptionMsg())
-      return
-    if reuseParser != nil:
-      st.parser = reuseParser
-      st.parser.resetForNext()
-    else:
-      st.parser = newHttpParser()
-    st.parser.responseMode = true
-    st.parser.maxBodySize = client.maxBodySize.int64
-    if st.onBodyData != nil:
-      st.parser.onBodyData = st.onBodyData
-    discard conn.send(reqHeaders)
-    if bodyBytes.len > 0:
-      discard conn.send(bodyBytes)
-    # Re-register in place: register() already replaces the existing watcher.
-    # Unregistering first would trash the fd state while its WSARecv is still
-    # in flight on Windows/IOCP, so the response bytes would land in the trash
-    # and be lost (hanging the request or surfacing as a connection error).
-    conn.loop.register(conn.fd.int, {Read, Write}, edgeTriggered = true,
-      callback = proc(fd: int, ev: set[EventType]) =
-        onFd(st, client, fd, ev))
-
-  # Reuse the idle keep-alive connection when available.
-  if client.idleConn != nil and client.idleParser != nil and
-     client.idleConn.loop == loop and client.idleConn.state == Connected:
-    let conn = client.idleConn
-    let parser = client.idleParser
-    client.idleConn = nil
-    client.idleParser = nil
-    begin(conn, parser)
-    return st
-
-  when not defined(windows):
-    if unixSocket.len > 0:
-      try:
-        loop.connectUnix(unixSocket,
-          onConnect = proc(conn: Connection) =
-            begin(conn)
-          ,
-          onData = proc(conn: Connection, data: openArray[byte]) = discard,
-          onClose = proc(conn: Connection) =
-            if st.active:
-              failReq(st, client, "connection closed during request")
-        )
-      except NetError as e:
-        failReq(st, client, e.msg)
+  # Reuse a pooled keep-alive connection for this origin when available.
+  if client.keepAlive:
+    let pc = client.pool.pop(loop, key)
+    if pc.conn != nil:
+      st.cameFromPool = true
+      beginConn(st, client, pc.conn, pc.parser)
       return st
 
-  loop.connect(parsed.host, parsed.port,
-    onConnect = proc(conn: Connection) =
-      begin(conn)
-    ,
-    onData = proc(conn: Connection, data: openArray[byte]) = discard,
-    onClose = proc(conn: Connection) =
-      if st.active:
-        failReq(st, client, "connection closed during request")
-    ,
-    onError = proc(err: string) =
-      if st.active:
-        failReq(st, client, err)
-  )
+  connectFresh(st, client, loop)
   st
-
 # ── Response accessors ───────────────────────────────────────────────────────
 
 proc getStatusCode*(res: HttpClientResponse): HttpCode {.inline.} =
@@ -450,9 +644,15 @@ proc isOk*(res: HttpClientResponse): bool {.inline.} =
 proc newAsyncHttpClient*(tlsCtx: SslContext = nil,
                          keepAlive: bool = true,
                          timeoutMs: int = 0,
-                         maxBodySize: int = DefaultMaxResponseBody): AsyncHttpClient =
+                         maxBodySize: int = DefaultMaxResponseBody,
+                         maxIdlePerHost: int = DefaultMaxIdlePerHost,
+                         maxIdleTotal: int = DefaultMaxIdleTotal,
+                         idleTimeoutMs: int = DefaultIdleTimeoutMs): AsyncHttpClient =
   ## Create an async HTTP client with its own event loop. Await the request
   ## methods from an `async` proc with asyncdispatch.
+  ##
+  ## Pooling knobs: `maxIdlePerHost`/`maxIdleTotal` cap idle keep-alive
+  ## connections; `idleTimeoutMs` retires idle connections lazily (0 disables).
   AsyncHttpClient(
     loop: newLoop(),
     tlsCtx: tlsCtx,
@@ -460,11 +660,15 @@ proc newAsyncHttpClient*(tlsCtx: SslContext = nil,
     timeoutMs: timeoutMs,
     maxBodySize: maxBodySize,
     defaultHeaders: @[],
+    pool: newHttpConnPool(maxIdlePerHost, maxIdleTotal, idleTimeoutMs),
   )
 
 proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
                     timeoutMs: int = 0,
-                    maxBodySize: int = DefaultMaxResponseBody): HttpClient =
+                    maxBodySize: int = DefaultMaxResponseBody,
+                    maxIdlePerHost: int = DefaultMaxIdlePerHost,
+                    maxIdleTotal: int = DefaultMaxIdleTotal,
+                    idleTimeoutMs: int = DefaultIdleTimeoutMs): HttpClient =
   HttpClient(
     syncLoop: newLoop(),
     tlsCtx: tlsCtx,
@@ -472,6 +676,7 @@ proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
     timeoutMs: timeoutMs,
     maxBodySize: maxBodySize,
     defaultHeaders: @[],
+    pool: newHttpConnPool(maxIdlePerHost, maxIdleTotal, idleTimeoutMs),
   )
 
 proc getLoop*(client: HttpClient): Loop {.inline.} =
@@ -480,20 +685,19 @@ proc getLoop*(client: HttpClient): Loop {.inline.} =
   ## client's `poll` while a request is in flight.
   client.syncLoop
 
+func idleConnections*(client: HttpClientBase): int {.inline.} =
+  ## Number of idle keep-alive connections currently held in the pool.
+
+  client.pool.totalIdle
+
 proc close*(client: AsyncHttpClient) =
-  ## Close the idle keep-alive connection and the client's event loop.
-  if client.idleConn != nil:
-    client.idleConn.close()
-    client.idleConn = nil
-    client.idleParser = nil
+  ## Close all pooled keep-alive connections and the client's event loop.
+  client.pool.closeAll()
   client.loop.close()
 
 proc close*(client: HttpClient) =
-  ## Close the idle keep-alive connection and the client's event loop.
-  if client.idleConn != nil:
-    client.idleConn.close()
-    client.idleConn = nil
-    client.idleParser = nil
+  ## Close all pooled keep-alive connections and the client's event loop.
+  client.pool.closeAll()
   client.syncLoop.close()
 
 # ── Async API (await-able) ───────────────────────────────────────────────────

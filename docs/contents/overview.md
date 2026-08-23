@@ -87,7 +87,7 @@ The aggregate module `src/powpow.nim` re-exports:
 | TLS (`net/tls.nim`) | Done — OpenSSL, implicit + upgrade (not on Windows) |
 | DTLS (`net/dtls.nim`) | Done — DTLS 1.2 (RFC 6347) over the UDP backend: one socket, per-peer sessions, stateless HMAC cookie exchange, retransmission timers, idle/handshake sweepers (not on Windows) |
 | SIMD scanning (`proto/simdscan.nim`) | Done — SSE2 CRLF detection with scalar fallback |
-| Rate limiting (`proto/ratelimit.nim`) | Done — sliding window per IP |
+| Rate limiting (`proto/ratelimit.nim`) | Done — sliding window per IP, multi-window support (e.g. hourly + daily quotas checked atomically) |
 | io_uring backend (`io/uring.nim`) | Done — opt-in Linux submission-based backend: full io_uring API binding, probe-based feature detection, zero-copy `SEND_ZC` + `SPLICE` file sends, registered buffers (`-d:powpowIoUring`) |
 | HTTP/2 | Planned — multiplexed frames over TCP (see [performance](performance.md) for why this fits io_uring) |
 | HTTP/3 (QUIC) | Not planned |

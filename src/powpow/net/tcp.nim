@@ -2165,17 +2165,6 @@ when iouEnabled:
               a.conn = nil
             attemptDead(a)
 
-        proc armStagger() {.closure.} =
-          he.staggerTimer = loop.addTimer(ConnectionAttemptDelayMs) do (id: int):
-            he.staggerTimer = TimerId(0)
-            if he.finished: return
-            if he.nextIdx < he.addrs.len:
-              let i = he.nextIdx
-              inc he.nextIdx
-              startOne(i)
-              if he.nextIdx < he.addrs.len:
-                armStagger()
-
         proc startOne(idx: int) {.closure.} =
           let addrBuf = he.addrs[idx]
           let a = HeAttempt(idx: idx)
@@ -2241,6 +2230,17 @@ when iouEnabled:
             attemptDead(a)
             return
           armTimeout(a)
+
+        proc armStagger() {.closure.} =
+          he.staggerTimer = loop.addTimer(ConnectionAttemptDelayMs) do (id: int):
+            he.staggerTimer = TimerId(0)
+            if he.finished: return
+            if he.nextIdx < he.addrs.len:
+              let i = he.nextIdx
+              inc he.nextIdx
+              startOne(i)
+              if he.nextIdx < he.addrs.len:
+                armStagger()
 
         he.nextIdx = 1
         startOne(0)

@@ -96,6 +96,12 @@ type
     bodyLen: int                ## Total body length (for Content-Length)
     chunkBodyLen: int           ## Total decoded chunked body length
 
+    # Chunked trailers (RFC 9112 §7.1.3): header lines after the zero-size
+    # chunk. Materialized eagerly during parse — they are small and rare, and
+    # buffer offsets shift when keep-alive pipelining consumes the message.
+    trailers*:     seq[(string, string)]  ## Parsed trailer key/value pairs
+    trailerBytes:  int                    ## Total trailer-section bytes seen
+
     # Expect: 100-continue
     expectContinue*: bool         ## Client sent Expect: 100-continue
 
@@ -263,6 +269,8 @@ proc reset*(p: HttpParser) =
   p.bodyStart     = 0
   p.bodyLen       = 0
   p.chunkBodyLen  = 0
+  p.trailers      = @[]
+  p.trailerBytes  = 0
   p.bodyStreamed  = 0
   p.streamingBody = false
   p.phase         = PhaseRequestLine
@@ -323,6 +331,8 @@ proc resetForNext*(p: HttpParser) =
   p.bodyStart     = 0
   p.bodyLen       = 0
   p.chunkBodyLen  = 0
+  p.trailers      = @[]
+  p.trailerBytes  = 0
   p.bodyStreamed  = 0
   p.streamingBody = false
   p.expectContinue = false
@@ -827,37 +837,89 @@ proc parseChunkedBody(p: HttpParser): bool =
   ## Parse chunked transfer encoding. Returns true when complete.
   ## The decoded-body cap is enforced even when maxBodySize == 0 (a hostile
   ## client must not drive unbounded RAM/disk through a chunked upload).
+  ##
+  ## After the zero-size chunk, an optional trailer section is parsed
+  ## (RFC 9112 §7.1.3): `Name: value` lines terminated by an empty line.
   let cap = p.streamCap()
-  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+  var buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
   var pos = p.bodyStart
 
   while pos < p.bufLen:
     # Check if this is the last chunk (size 0)
     if p.chunkSize == 0:
-      # After the last chunk, we expect optional trailers followed by CRLF
-      # For simplicity, just look for CRLF to indicate end of chunked body
-      # (trailers are rare in practice and can be handled later if needed)
-      if pos < p.bufLen and char(buf[pos]) == '\r':
-        if pos + 1 < p.bufLen and char(buf[pos + 1]) == '\n':
+      # Trailer section: `Name: value\r\n` lines until an empty line (`\r\n`).
+      # Incremental: committed lines advance bodyStart so a re-entry after
+      # more data arrives never double-counts them; the scan resumes at the
+      # first unconsumed byte. Strictness mirrors the main header parser:
+      # CRLF only (no bare LF), colon required, no leading whitespace
+      # (obs-fold), bounded count and size.
+      while pos < p.bufLen:
+        # Find end of this trailer line (or the terminating empty line).
+        var lineEnd = -1
+        var i = pos
+        while i + 1 < p.bufLen:
+          if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+            lineEnd = i
+            break
+          inc i
+        if lineEnd < 0:
+          # No complete line yet — enforce the section size cap.
+          if p.trailerBytes + (p.bufLen - pos) > MaxHeaderSize:
+            p.phase = PhaseError
+            p.errorCode = Http431
+            return false
+          p.bodyStart = pos
+          return false  # need more data
+
+        let lineLen = lineEnd - pos
+        if lineLen == 0:
+          # Empty line: end of trailer section — message complete.
           p.phase = PhaseComplete
           # Advance past the final CRLF so resetForNext/getRemainingData know
-          # the exact end of the chunked message (previously the framing bytes
-          # were left behind and the next keep-alive request was misparsed).
-          p.bodyStart = pos + 2
+          # the exact end of the chunked message.
+          p.bodyStart = lineEnd + 2
           return true
-        else:
-          # Incomplete - need more data
-          p.bodyStart = pos
+
+        inc p.trailerBytes, lineLen + 2
+        if p.trailerBytes > MaxHeaderSize:
+          p.phase = PhaseError
+          p.errorCode = Http431
           return false
-      elif pos < p.bufLen and char(buf[pos]) == '\n':
-        # Handle LF-only line ending
-        p.phase = PhaseComplete
-        p.bodyStart = pos + 1
-        return true
-      else:
-        # Incomplete - need more data
+
+        # Validate "Name: value" (mirrors header strictness).
+        var colonPos = -1
+        for j in 0 ..< lineLen:
+          if char(buf[pos + j]) == ':':
+            colonPos = j
+            break
+        if colonPos <= 0 or char(buf[pos]) == ' ' or char(buf[pos]) == '\t':
+          # Missing colon, empty name, or leading whitespace (obs-fold).
+          p.phase = PhaseError
+          p.errorCode = Http400
+          return false
+        if p.trailers.len >= MaxHeaders:
+          p.phase = PhaseError
+          p.errorCode = Http431
+          return false
+
+        var name = newString(colonPos)
+        copyMem(addr name[0], addr buf[pos], colonPos)
+        var valStart = pos + colonPos + 1
+        while valStart < lineEnd and char(buf[valStart]) == ' ':
+          inc valStart
+        let valLen = lineEnd - valStart
+        var value = newString(valLen)
+        if valLen > 0:
+          copyMem(addr value[0], addr buf[valStart], valLen)
+
+        # Commit this trailer and consume its bytes before waiting for more.
+        p.trailers.add((name, value))
+        pos = lineEnd + 2
         p.bodyStart = pos
-        return false
+
+      # Buffer exhausted mid-trailers.
+      p.bodyStart = pos
+      return false
 
     # Need at least chunk size + CRLF
     if p.chunkSize < 0:
@@ -916,6 +978,7 @@ proc parseChunkedBody(p: HttpParser): bool =
       # Ensure body buffer capacity
       if p.buf.len < p.headerEnd + p.chunkBodyLen:
         p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
+        buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])  # setLen may realloc
 
       # Copy chunk data to body area
       if remaining > 0:
@@ -950,6 +1013,7 @@ proc parseChunkedBody(p: HttpParser): bool =
         # Ensure body buffer capacity
         if p.buf.len < p.headerEnd + p.chunkBodyLen:
           p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
+          buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])  # setLen may realloc
 
         # Copy partial chunk data
         copyMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], available)
@@ -1306,6 +1370,32 @@ proc getHeaders*(req: HttpRequest): HttpHeaders =
     req.parser.materializeHeaders(req.headersVal)
     req.headersReady = true
   return req.headersVal
+
+proc hasTrailers*(p: HttpParser): bool {.inline.} =
+  ## True when the chunked message carried a non-empty trailer section.
+  p.trailers.len > 0
+
+func getTrailers*(p: HttpParser): lent seq[(string, string)] {.inline.} =
+  ## Trailers sent after the zero-size chunk of a chunked body (RFC 9112
+  ## §7.1.3). Empty for non-chunked messages or when no trailers were sent.
+  ## Only meaningful once `phase` is `PhaseComplete`.
+  p.trailers
+
+proc getTrailer*(p: HttpParser, name: string): string =
+  ## First trailer value matching `name` (case-insensitive), or "".
+  for (k, v) in p.trailers:
+    if k.toLowerAscii() == name.toLowerAscii():
+      return v
+  ""
+
+proc getTrailers*(req: HttpRequest): lent seq[(string, string)] {.inline.} =
+  req.parser.getTrailers()
+
+proc hasTrailers*(req: HttpRequest): bool {.inline.} =
+  req.parser.hasTrailers()
+
+proc getTrailer*(req: HttpRequest, name: string): string {.inline.} =
+  req.parser.getTrailer(name)
 
 proc getHeaders*(p: HttpParser): HttpHeaders =
   ## Materialize the response headers (response mode).

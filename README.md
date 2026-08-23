@@ -20,7 +20,7 @@
 - **TLS/SSL** support (implicit + STARTTLS-style upgrades)
 - **DTLS 1.2** over UDP — one socket, per-peer sessions, stateless cookie exchange
 - **Signal/Relay** system for in-process event dispatch
-- Built-in **rate limiting** per client IP
+- Built-in **rate limiting** per client IP with multi-window support (e.g. hourly + daily quotas checked atomically via `newMultiRateLimiter`)
 - **HTTP over Unix Domain Sockets** (UDS) support for super fast local IPC
 - **Zero-copy file transmission** using `sendfile` (Unix) and `TransmitFile` (Windows)
 - Chunked Request Body support for streaming uploads and large payloads

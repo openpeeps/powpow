@@ -201,8 +201,6 @@ test "test_chunked_extensions":
 # ── Test 12: Chunked with trailers ──────────────────────────────────────────
 
 test "test_chunked_trailers":
-  # Note: Current implementation doesn't support trailers, so this test
-  # verifies that we can handle the common case without trailers
   let raw = "POST /api/data HTTP/1.1\r\n" &
             "Host: localhost\r\n" &
             "Transfer-Encoding: chunked\r\n" &
@@ -217,6 +215,157 @@ test "test_chunked_trailers":
 
   let req = parser.getRequest()
   doAssert req.getBodyString() == "hello"
+  doAssert not req.hasTrailers(), "no trailers sent"
+  doAssert req.getTrailers().len == 0
+
+test "test_chunked_trailers_basic":
+  let raw = "POST /upload HTTP/1.1\r\n" &
+            "Host: localhost\r\n" &
+            "Transfer-Encoding: chunked\r\n" &
+            "\r\n" &
+            "5\r\n" &
+            "hello\r\n" &
+            "6\r\n" &
+            " world\r\n" &
+            "0\r\n" &
+            "X-Checksum: abc123\r\n" &
+            "Content-MD5: deadbeef\r\n" &
+            "\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isComplete(), "chunked with trailers should be complete"
+  doAssert not parser.isError()
+
+  let req = parser.getRequest()
+  doAssert req.getBodyString() == "hello world", "body must exclude framing/trailers"
+  doAssert req.hasTrailers()
+  let tr = req.getTrailers()
+  doAssert tr.len == 2, "expected exactly two trailers, got " & $tr.len
+  doAssert tr[0][0] == "X-Checksum" and tr[0][1] == "abc123"
+  doAssert tr[1][0] == "Content-MD5" and tr[1][1] == "deadbeef"
+
+test "test_chunked_trailers_lookup":
+  let raw = "POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "0\r\nX-Crc32: 89f1cd2b\r\nX-Other: v\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isComplete()
+  doAssert parser.getTrailer("x-crc32") == "89f1cd2b", "case-insensitive lookup"
+  doAssert parser.getTrailer("X-CRC32") == "89f1cd2b"
+  doAssert parser.getTrailer("Missing") == ""
+
+test "test_chunked_trailers_incremental":
+  # Byte-by-byte feeding across the whole trailer section.
+  let raw = "POST /x HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "3\r\nabc\r\n0\r\nA: 1\r\nB: 22\r\n\r\n"
+  let parser = newHttpParser()
+  for i in 0 ..< raw.len:
+    discard parser.feed(raw[i .. i].toOpenArrayByte(0, 0))
+    if i < raw.len - 1:
+      doAssert not parser.isComplete(), "premature completion at byte " & $i
+      doAssert not parser.isError(), "error at byte " & $i
+  doAssert parser.isComplete()
+  let req = parser.getRequest()
+  doAssert req.getBodyString() == "abc"
+  doAssert req.getTrailers().len == 2
+  doAssert req.getTrailer("B") == "22"
+
+test "test_chunked_trailers_split_feeds":
+  # Trailer section split mid-line across feeds (resumable scanner).
+  let raw = "POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "0\r\nX-Trailer: half"
+  let rest = "-value\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert not parser.isComplete()
+  parser.feed(rest)
+  doAssert parser.isComplete()
+  doAssert parser.getTrailer("X-Trailer") == "half-value"
+
+test "test_chunked_trailers_pipelining":
+  # Trailered message followed by a pipelined GET on the same connection.
+  let first = "POST /a HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n" &
+              "2\r\nhi\r\n0\r\nX-T: 9\r\n\r\n"
+  let second = "GET /b HTTP/1.1\r\nHost: h\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(first & second)
+  doAssert parser.isComplete()
+  doAssert parser.getTrailer("X-T") == "9"
+
+  parser.resetForNext()
+  discard parser.feed(second)
+  doAssert parser.isComplete(), "next pipelined request should parse cleanly"
+  let req = parser.getRequest()
+  doAssert req.getMethod() == HttpGet
+  doAssert req.getPath() == "/b"
+  doAssert req.hasTrailers() == false
+
+test "test_chunked_trailers_bad_no_colon":
+  let raw = "POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "0\r\nNoColonHere\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isError(), "trailer without colon must be rejected"
+  doAssert parser.error() == Http400
+
+test "test_chunked_trailers_bad_obsfold":
+  let raw = "POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "0\r\n X-Leading-Space: v\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isError(), "leading whitespace (obs-fold) trailer must be rejected"
+  doAssert parser.error() == Http400
+
+test "test_chunked_trailers_too_many":
+  var raw = "POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n"
+  for i in 0 ..< MaxHeaders + 1:
+    raw.add("X-T" & $i & ": v\r\n")
+  raw.add("\r\n")
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isError(), "too many trailers must be rejected"
+  doAssert parser.error() == Http431
+
+test "test_chunked_trailers_oversized":
+  var raw = "POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n"
+  # One trailer value larger than MaxHeaderSize.
+  raw.add("X-Big: ")
+  raw.add('a'.repeat(MaxHeaderSize))
+  raw.add("\r\n\r\n")
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isError(), "oversized trailer section must be rejected"
+  doAssert parser.error() == Http431
+
+test "test_chunked_trailers_streaming":
+  # Streaming callback mode: chunked bodies are buffered/decoded then
+  # delivered with done=true; trailers remain accessible afterwards.
+  let raw = "POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "4\r\ndata\r\n0\r\nX-After: yes\r\n\r\n"
+  let parser = newHttpParser()
+  var streamed: string
+  var doneFlag = false
+  parser.onBodyData = proc(data: openArray[byte], done: bool) =
+    streamed.add($cast[string](@data))
+    if done: doneFlag = true
+  parser.feed(raw)
+  doAssert parser.isComplete()
+  doAssert doneFlag, "terminal done=true expected"
+  doAssert streamed == "data"
+  doAssert parser.getTrailer("X-After") == "yes"
+
+test "test_chunked_response_trailers":
+  # Client-side response mode shares the chunked path — trailers work there too.
+  let raw = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" &
+            "5\r\nhello\r\n0\r\nServer-Timing: t=0.1\r\n\r\n"
+  let parser = newHttpParser()
+  parser.responseMode = true
+  parser.feed(raw)
+  doAssert parser.isComplete()
+  doAssert parser.getStatusCode() == Http200
+  let body = parser.getBody()
+  doAssert cast[string](body) == "hello"
+  doAssert parser.getTrailer("Server-Timing") == "t=0.1"
 
 # ── Test 13: Chunked incremental feeding ────────────────────────────────────
 
