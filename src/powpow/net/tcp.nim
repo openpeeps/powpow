@@ -137,6 +137,14 @@ type
     sendFileFd*:      int
     sendFileOff*:     int64
     sendFileRemain*:  int64
+    sendFileKeepOpen*: bool
+      ## When true, powpow leaves `sendFileFd` open after the transfer ends
+      ## (completion or error) so callers can stream many ranges from one
+      ## long-lived fd. Defaults to false (legacy single-shot behavior).
+    sendFileOnComplete*: proc() {.closure.}
+      ## Fired once when the queued range fully drains (remain == 0).
+    sendFileOnError*: proc(msg: string) {.closure.}
+      ## Fired instead of OnComplete when the transfer fails mid-flight.
     data*:            pointer
     clientAddr:       Sockaddr_storage
     ssl*:             pointer
@@ -302,6 +310,28 @@ when iouEnabled:
   proc armWrite(conn: Connection) {.gcsafe.}
   proc pumpSendFile(conn: Connection)
   proc fireClose(conn: Connection)
+
+  proc finishSendFile(conn: Connection, errMsg = "") =
+    ## End the current file transfer: close fd unless keep-open, fire callback.
+    if conn.sendFileFd >= 0 and not conn.sendFileKeepOpen:
+      closeFile(conn.sendFileFd)
+    conn.sendFileFd = -1
+    conn.sendFileOff = 0
+    conn.sendFileRemain = 0
+    conn.sendState = sfIdle
+    if errMsg.len > 0:
+      if conn.sendFileOnError != nil:
+        let cb = conn.sendFileOnError
+        conn.sendFileOnError = nil
+        {.cast(gcsafe).}:
+          cb(errMsg)
+    else:
+      if conn.sendFileOnComplete != nil:
+        let cb = conn.sendFileOnComplete
+        conn.sendFileOnComplete = nil
+        {.cast(gcsafe).}:
+          cb()
+
   proc afterData(conn: Connection)
   proc handleTlsData(conn: Connection, data: ptr UncheckedArray[byte], n: int)
   proc tlsSend(conn: Connection, data: openArray[byte]) {.gcsafe.}
@@ -339,7 +369,10 @@ when iouEnabled:
     if conn.server != nil:
       conn.server.fdConn.del(conn.fd.int)
     if conn.sendFileFd >= 0:
-      closeFile(conn.sendFileFd)
+      # Teardown: an owned fd dies with the connection; a keep-open fd
+      # belongs to the caller and is left untouched.
+      if not conn.sendFileKeepOpen:
+        closeFile(conn.sendFileFd)
       conn.sendFileFd = -1
     # Cancel in-flight ops. Any op that can still write into a connection buffer
     # (RECV → readBuf, sendfile READ → sendChunk, CONNECT → connectAddr, SEND →
@@ -940,9 +973,10 @@ when iouEnabled:
     if conn.state == Closed:
       return
     if res <= 0:
-      closeFile(conn.sendFileFd)
-      conn.sendFileFd = -1
-      conn.sendState = sfIdle
+      # res == 0: file EOF before declared length — report completion with
+      # what was sent; res < 0: hard read error.
+      let msg = if res < 0: "sendfile read failed (errno " & $lastSocketError() & ")" else: ""
+      conn.finishSendFile(msg)
       conn.pumpSendFile()
       return
     conn.sendFileSendChunk(res)
@@ -1021,10 +1055,9 @@ when iouEnabled:
         # EOF (0) or error on the file leg. A file shorter than the declared
         # Content-Length still sends what it has; pumpSendFile sees remain > 0
         # and just finishes the transfer.
+        let msg = if res < 0: "sendfile splice failed (errno " & $lastSocketError() & ")" else: ""
         conn.closeSplicePipe()
-        closeFile(conn.sendFileFd)
-        conn.sendFileFd = -1
-        conn.sendState = sfIdle
+        conn.finishSendFile(msg)
         conn.pumpSendFile()
         return
       conn.spliceChunk = res
@@ -1086,9 +1119,7 @@ when iouEnabled:
     case conn.sendState
     of sfIdle:
       if conn.sendFileRemain <= 0:
-        closeFile(conn.sendFileFd)
-        conn.sendFileFd = -1
-        conn.sendState = sfIdle
+        conn.finishSendFile()
         conn.pumpSendFile()
         return
       when not defined(powpowNoSplice):
@@ -1129,6 +1160,44 @@ when iouEnabled:
     ## Public API parity with net/tcp.nim: kick the op-driven sendfile pump.
     conn.pumpSendFile()
     true
+
+  proc sendFileActive*(conn: Connection): bool {.inline.} =
+    ## True while a queued file range is still transferring.
+    conn.sendFileFd >= 0
+
+  proc cancelSendFile*(conn: Connection) =
+    ## Abort the in-flight transfer. The fd is closed unless the transfer was
+    ## started with keepOpen; callbacks are dropped, not fired.
+    if conn.sendFileToken != 0:
+      conn.loop.cancelOp(conn.sendFileToken)
+      conn.sendFileToken = 0
+    conn.sendFileOnComplete = nil
+    conn.sendFileOnError = nil
+    if conn.sendFileFd >= 0 and not conn.sendFileKeepOpen:
+      closeFile(conn.sendFileFd)
+    conn.sendFileFd = -1
+    conn.sendState = sfIdle
+
+  proc sendFile*(conn: Connection; fd: cint; offset: int64; length: int64;
+                 keepOpen = false;
+                 onComplete: proc() {.closure, gcsafe.} = nil;
+                 onError: proc(msg: string) {.closure, gcsafe.} = nil): bool =
+    ## Queue `length` bytes from `fd` starting at `offset` for zero-copy
+    ## transfer (SPLICE / READ+SEND ops). See the POSIX-backend twin for the
+    ## full contract: keepOpen leaves fd ownership with the caller so many
+    ## ranges can be streamed sequentially from one file.
+    if conn.state != Connected: return false
+    if conn.tlsState != TlsOff: return false
+    if conn.sendFileActive(): return false
+    if length <= 0: return true
+    conn.sendFileFd = fd.int
+    conn.sendFileOff = offset
+    conn.sendFileRemain = length
+    conn.sendFileKeepOpen = keepOpen
+    conn.sendFileOnComplete = onComplete
+    conn.sendFileOnError = onError
+    discard conn.continueSendFile()
+    result = true
 
   proc flushWriteBuffer*(conn: Connection): bool =
     ## API parity with net/tcp.nim (used by the standalone WebSocket server's
@@ -1965,6 +2034,7 @@ when iouEnabled:
             readBufLen: DefaultBufSize,
             onDataCb:  onData,
             onCloseCb: onClose,
+            sendFileFd: -1,
             splicePipe: [-1.cint, -1.cint],
           )
           conn.initOpCallbacks()
@@ -2128,6 +2198,7 @@ when iouEnabled:
             readBufLen: DefaultBufSize,
             onDataCb:  onData,
             onCloseCb: onClose,
+            sendFileFd: -1,
             splicePipe: [-1.cint, -1.cint],
           )
           conn.initOpCallbacks()
@@ -2196,6 +2267,7 @@ when iouEnabled:
         readBufLen: DefaultBufSize,
         onDataCb:  onData,
         onCloseCb: onClose,
+        sendFileFd: -1,
         splicePipe: [-1.cint, -1.cint],
       )
       conn.initOpCallbacks()
@@ -2255,7 +2327,10 @@ else:
     if conn.server != nil:
       conn.server.fdConn.del(conn.fd.int)
     if conn.sendFileFd >= 0:
-      closeFile(conn.sendFileFd)
+      # Teardown: an owned fd dies with the connection; a keep-open fd
+      # belongs to the caller and is left untouched.
+      if not conn.sendFileKeepOpen:
+        closeFile(conn.sendFileFd)
       conn.sendFileFd = -1
     setLinger0(conn.fd)
     conn.loop.unregisterFd(conn.fd.int)
@@ -2688,6 +2763,26 @@ else:
       releaseBuf(conn.loop, conn.readBuf)
       conn.readBuf = nil
 
+  proc finishSendFile(conn: Connection, errMsg = "") =
+    ## End the current file transfer: close fd unless keep-open, fire callback.
+    if conn.sendFileFd >= 0 and not conn.sendFileKeepOpen:
+      closeFile(conn.sendFileFd)
+    conn.sendFileFd = -1
+    conn.sendFileOff = 0
+    conn.sendFileRemain = 0
+    if errMsg.len > 0:
+      if conn.sendFileOnError != nil:
+        let cb = conn.sendFileOnError
+        conn.sendFileOnError = nil
+        {.cast(gcsafe).}:
+          cb(errMsg)
+    else:
+      if conn.sendFileOnComplete != nil:
+        let cb = conn.sendFileOnComplete
+        conn.sendFileOnComplete = nil
+        {.cast(gcsafe).}:
+          cb()
+
   proc continueSendFile*(conn: Connection): bool =
     ## Resume an in-progress zero-copy file send when the socket becomes writable.
     ## Drains as much data as possible per edge-triggered Write event.
@@ -2699,16 +2794,21 @@ else:
       if conn.writeBuf.len > 0:
         return false
     # Drain sendfile until EAGAIN (edge-triggered: send all we can per event)
+    var failed = ""
     while conn.sendFileFd >= 0:
       if conn.sendFileRemain <= 0:
-        closeFile(conn.sendFileFd)
-        conn.sendFileFd = -1
         break
       let n = sendFileChunk(conn.fd, conn.sendFileFd, conn.sendFileOff, conn.sendFileRemain)
-      if n < 0: closeFile(conn.sendFileFd); conn.sendFileFd = -1; return true
-      if n == 0: return false  # ← triggered by remaining==0, treated as EAGAIN
-      # conn.sendFileFd is NEVER cleared on success
-    
+      if n < 0:
+        failed = "sendfile failed (errno " & $lastSocketError() & ")"
+        break
+      if n == 0:
+        return false  # socket buffer full; retry on next Write event
+      # n > 0: sendFileChunk advanced sendFileOff/sendFileRemain internally
+
+    if conn.sendFileFd >= 0:
+      # Transfer ended (completed or failed) — finalize ownership/callbacks.
+      conn.finishSendFile(failed)
     # All file data sent; flush any remaining headers
     if conn.writeBuf.len > 0:
       discard conn.flushWriteBuffer()
@@ -2717,6 +2817,60 @@ else:
     if conn.closeAfterFlush:
       conn.close()
     return true
+
+  proc sendFileActive*(conn: Connection): bool {.inline.} =
+    ## True while a queued file range is still transferring.
+    conn.sendFileFd >= 0
+
+  proc cancelSendFile*(conn: Connection) =
+    ## Abort the in-flight transfer. The fd is closed unless the transfer was
+    ## started with keepOpen; callbacks are dropped, not fired.
+    conn.sendFileOnComplete = nil
+    conn.sendFileOnError = nil
+    if conn.sendFileFd >= 0 and not conn.sendFileKeepOpen:
+      closeFile(conn.sendFileFd)
+    conn.sendFileFd = -1
+    conn.sendFileOff = 0
+    conn.sendFileRemain = 0
+
+  proc sendFile*(conn: Connection; fd: cint; offset: int64; length: int64;
+                 keepOpen = false;
+                 onComplete: proc() {.closure, gcsafe.} = nil;
+                 onError: proc(msg: string) {.closure, gcsafe.} = nil): bool =
+    ## Queue `length` bytes from `fd` starting at `offset` for zero-copy
+    ## transfer to this connection via sendfile(2).
+    ##
+    ## With keepOpen=false (default) powpow closes fd when the range drains or
+    ## fails — matching single-shot usage. With keepOpen=true the fd stays open
+    ## so callers can stream many ranges sequentially (e.g. media tags); call
+    ## again once `sendFileActive` turns false, or react to onComplete.
+    ##
+    ## Returns false when another transfer is active, the connection is not
+    ## connected, or TLS is enabled (sendfile over TLS is unsupported).
+    ## On success the transfer self-pumps across Write events on both server
+    ## and client connections.
+    if conn.state != Connected:
+      return false
+    if conn.tlsState != TlsOff:
+      return false
+    if conn.sendFileActive():
+      return false
+    if length <= 0:
+      return true   # nothing to do; treat as instant success
+    conn.sendFileFd = fd.int
+    conn.sendFileOff = offset
+    conn.sendFileRemain = length
+    conn.sendFileKeepOpen = keepOpen
+    conn.sendFileOnComplete = onComplete
+    conn.sendFileOnError = onError
+    # Kick the first pump; if the socket takes EAGAIN, watch writability so
+    # the client/server watchers keep pumping continueSendFile.
+    # Note: deliberately NOT corking — TCP_NOPUSH can stall the first
+    # sendfile segment on macOS/BSD.
+    let pumped = conn.continueSendFile()
+    if not pumped:
+      conn.loop.modify(conn.fd.int, {Read, Write})
+    result = true
 
   {.pop.}
   proc acquireConnection(server: TcpServer, fd: SocketHandle): Connection =
@@ -3068,6 +3222,7 @@ else:
             state:     Connecting,
             readBuf:   acquireBuf(loop),
             readBufLen: DefaultBufSize,
+            sendFileFd: -1,
           )
 
           let sLen = getSockLen(addr addrBuf)
@@ -3266,6 +3421,7 @@ else:
             state:     Connecting,
             readBuf:   acquireBuf(loop),
             readBufLen: DefaultBufSize,
+            sendFileFd: -1,
           )
 
           let sLen = getSockLen(addr addrBuf)
@@ -3289,7 +3445,11 @@ else:
                   if not conn.driveHandshake():
                     return
                 if Write in ev:
-                  if conn.flushWriteBuffer():
+                  if conn.sendFileFd >= 0:
+                    # Keep pumping an in-flight sendfile until it drains.
+                    if conn.continueSendFile() and conn.state == Connected:
+                      conn.loop.modify(rfd, {Read})
+                  elif conn.flushWriteBuffer():
                     if conn.closeAfterFlush:
                       conn.closeAndRelease()
                       if onClose != nil: onClose(conn)
@@ -3297,7 +3457,8 @@ else:
                     if conn.state == Connected:
                       conn.loop.modify(rfd, {Read})
                 if Read in ev or Hup in ev:
-                  conn.handleClientRead(onData, onClose)
+                  if conn.sendFileFd < 0:
+                    conn.handleClientRead(onData, onClose)
                 if Hup in ev and conn.state == Connected:
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
@@ -3335,7 +3496,11 @@ else:
                   if not conn.driveHandshake():
                     return
                 if Write in ev:
-                  if conn.flushWriteBuffer():
+                  if conn.sendFileFd >= 0:
+                    # Keep pumping an in-flight sendfile until it drains.
+                    if conn.continueSendFile() and conn.state == Connected:
+                      conn.loop.modify(rfd, {Read})
+                  elif conn.flushWriteBuffer():
                     if conn.closeAfterFlush:
                       conn.closeAndRelease()
                       if onClose != nil: onClose(conn)
@@ -3343,7 +3508,8 @@ else:
                     if conn.state == Connected:
                       conn.loop.modify(rfd, {Read})
                 if Read in ev or Hup in ev:
-                  conn.handleClientRead(onData, onClose)
+                  if conn.sendFileFd < 0:
+                    conn.handleClientRead(onData, onClose)
                 if Hup in ev and conn.state == Connected:
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
@@ -3387,6 +3553,7 @@ else:
         state:     Connecting,
         readBuf:   acquireBuf(loop),
         readBufLen: DefaultBufSize,
+        sendFileFd: -1,
       )
 
       var sockAddr: Sockaddr_un
@@ -3415,7 +3582,10 @@ else:
             if not conn.driveHandshake():
               return
           if Write in ev:
-            if conn.flushWriteBuffer():
+            if conn.sendFileFd >= 0:
+              if conn.continueSendFile() and conn.state == Connected:
+                conn.loop.modify(rfd, {Read})
+            elif conn.flushWriteBuffer():
               if conn.closeAfterFlush:
                 conn.closeAndRelease()
                 if onClose != nil: onClose(conn)
@@ -3423,7 +3593,8 @@ else:
               if conn.state == Connected:
                 conn.loop.modify(rfd, {Read})
           if Read in ev or Hup in ev:
-            conn.handleClientRead(onData, onClose)
+            if conn.sendFileFd < 0:
+              conn.handleClientRead(onData, onClose)
           if Hup in ev and conn.state == Connected:
             conn.closeAndRelease()
             if onClose != nil: onClose(conn)
@@ -3449,7 +3620,10 @@ else:
               if not conn.driveHandshake():
                 return
             if Write in ev:
-              if conn.flushWriteBuffer():
+              if conn.sendFileFd >= 0:
+                if conn.continueSendFile() and conn.state == Connected:
+                  conn.loop.modify(rfd, {Read})
+              elif conn.flushWriteBuffer():
                 if conn.closeAfterFlush:
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
@@ -3457,7 +3631,8 @@ else:
                 if conn.state == Connected:
                   conn.loop.modify(rfd, {Read})
             if Read in ev or Hup in ev:
-              conn.handleClientRead(onData, onClose)
+              if conn.sendFileFd < 0:
+                conn.handleClientRead(onData, onClose)
             if Hup in ev and conn.state == Connected:
               conn.closeAndRelease()
               if onClose != nil: onClose(conn)

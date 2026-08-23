@@ -709,18 +709,28 @@ proc unregisterFd*(loop: Loop, fd: int) =
   ## the OS removes it from epoll/kqueue automatically, so only in-memory
   ## state is cleaned. On Windows/IOCP the per-fd state must be explicitly
   ## removed — deferred-free handles late completions from closesocket.
-  if fd in loop.fdWatchers:
-    let w = loop.fdWatchers[fd]
+  ##
+  ## Safe to call on an fd whose watcher was already torn down via
+  ## `unregister` (e.g. the TCP connect fallback path: the event handler
+  ## unregisters, then close() calls this). Only the first teardown pools the
+  ## watcher — pooling twice would hand the SAME watcher object to two live
+  ## registrations, aliasing their fd/callback fields and silently swallowing
+  ## one registration's events.
+  if fd notin loop.fdWatchers:
+    return
+  let w = loop.fdWatchers[fd]
+  if w.alive:
     w.alive = false
     inc loop.deadCount
     loop.fdWatcherPool.add(w)
-    loop.fdWatchers.del(fd)
     when iouEnabled:
-      loop.watcherTokens.del(w.token)
       loop.cancelOp(w.token)
     else:
       when defined(windows):
         loop.platform.remove(fd)
+  when iouEnabled:
+    loop.watcherTokens.del(w.token)
+  loop.fdWatchers.del(fd)
 
 proc modify*(loop: Loop, fd: int, events: set[EventType]) {.inline.} =
   when iouEnabled:
