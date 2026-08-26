@@ -15,6 +15,7 @@ type
     sock: UdpSocket
     queries: int
     answers: Table[string, seq[string]]   # hostname -> IPv4 list, or @["nx"]
+    txtAnswers: Table[string, seq[string]] # hostname -> TXT record strings
     dropHosts: seq[string]
 
 proc decodeName(msg: seq[byte]; start: int): tuple[name: string, next: int] =
@@ -61,6 +62,15 @@ proc dnsResponse(id: uint16; qname: string; rcode: int; qtype: uint16;
       result.add(0); result.add(16)
       for part in ip.split(':'):
         result.add(0); result.add(parseHexInt(part).uint8)
+    elif qtype == 16:
+      # TXT record: each string is length-prefixed per RFC 1035 §3.3.14
+      let txt = ip  # repurpose ips seq as raw TXT strings
+      var rdata: seq[byte]
+      for ch in txt:
+        rdata.add(ch.uint8)
+      result.add(byte((rdata.len shr 8) and 0xFF))
+      result.add(byte(rdata.len and 0xFF))
+      result.add(rdata)
     else:
       result.add(0); result.add(4)
       for part in ip.split('.'):
@@ -85,14 +95,64 @@ proc startFakeDns(loop: Loop; port: int): FakeDns =
       if pos + 4 > data.len:
         return
       let qtype = (uint16(data[pos]) shl 8) or data[pos + 1]
-      let ips = fake.answers.getOrDefault(name.toLowerAscii())
-      if ips == @["nx"]:
-        discard fake.sock.sendTo(
-          dnsResponse(id, name, 3, qtype, @[]), sender)
-      elif ips.len > 0 and qtype == 1:
-        # AAAA queries return an empty answer so the resolver falls back to A.
-        discard fake.sock.sendTo(
-          dnsResponse(id, name, 0, qtype, ips), sender)
+      let key = name.toLowerAscii()
+      if qtype == 16:  # TXT
+        if key in fake.answers and fake.answers[key] == @["nx"]:
+          discard fake.sock.sendTo(
+            dnsResponse(id, name, 3, qtype, @[]), sender)
+        else:
+          let txts = fake.txtAnswers.getOrDefault(key)
+          if txts.len > 0:
+            # Return each TXT string as a separate answer RR with proper
+            # character-string encoding per RFC 1035 §3.3.14.
+            var resp = newSeq[byte](12)
+            resp[0] = byte((id shr 8) and 0xFF)
+            resp[1] = byte(id and 0xFF)
+            resp[2] = 0x81
+            resp[3] = 0x80  # NOERROR
+            resp[4] = 0; resp[5] = 1          # QDCOUNT
+            resp[6] = 0; resp[7] = byte(txts.len)  # ANCOUNT
+            resp[8] = 0; resp[9] = 0
+            resp[10] = 0; resp[11] = 0
+            # question section
+            for label in name.split('.'):
+              if label.len > 0:
+                resp.add(label.len.uint8)
+                for ch in label:
+                  resp.add(ch.uint8)
+            resp.add(0)
+            resp.add(0); resp.add(16)  # QTYPE = TXT
+            resp.add(0); resp.add(1)   # QCLASS = IN
+            # answer section
+            for txt in txts:
+              resp.add(0xC0); resp.add(0x0C)  # pointer to question name
+              resp.add(0); resp.add(16)       # TYPE = TXT
+              resp.add(0); resp.add(1)        # CLASS = IN
+              resp.add(0); resp.add(0); resp.add(0); resp.add(60)  # TTL 60
+              # Each character-string is length-prefixed (max 255 bytes)
+              let rdataLen = 1 + txt.len  # 1 byte for the length prefix
+              resp.add(byte((rdataLen shr 8) and 0xFF))
+              resp.add(byte(rdataLen and 0xFF))
+              resp.add(byte(txt.len and 0xFF))  # character-string length
+              for ch in txt:
+                resp.add(ch.uint8)
+            discard fake.sock.sendTo(resp, sender)
+          else:
+            # NOERROR with no TXT records
+            discard fake.sock.sendTo(
+              dnsResponse(id, name, 0, qtype, @[]), sender)
+      elif key in fake.answers:
+        let ips = fake.answers[key]
+        if ips == @["nx"]:
+          discard fake.sock.sendTo(
+            dnsResponse(id, name, 3, qtype, @[]), sender)
+        elif ips.len > 0 and qtype == 1:
+          # AAAA queries return an empty answer so the resolver falls back to A.
+          discard fake.sock.sendTo(
+            dnsResponse(id, name, 0, qtype, ips), sender)
+        else:
+          discard fake.sock.sendTo(
+            dnsResponse(id, name, 0, qtype, @[]), sender)
       else:
         discard fake.sock.sendTo(
           dnsResponse(id, name, 0, qtype, @[]), sender)
@@ -343,6 +403,170 @@ test "test_dns_multi_record":
   let eb = cast[ptr Sockaddr_in](unsafeAddr e2)
   assert cmpMem(addr a.sin_addr, addr ea.sin_addr, 4) == 0, "first IP mismatch"
   assert cmpMem(addr b.sin_addr, addr eb.sin_addr, 4) == 0, "second IP mismatch"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_txt_single_record":
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29989)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29989)
+  fake.txtAnswers["_dmarc.example.com"] = @["v=DMARC1; p=reject; rua=mailto:d@example.com"]
+
+  var got: seq[TxtRecord] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveTxtAsync("_dmarc.example.com") do (records: seq[TxtRecord]; err: string):
+    got = records
+    errMsg = err
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "TXT callback should fire"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected 1 TXT record, got " & $got.len
+  assert got[0].data == "v=DMARC1; p=reject; rua=mailto:d@example.com",
+    "TXT data mismatch: " & got[0].data
+  assert got[0].name == "_dmarc.example.com",
+    "TXT owner name mismatch: " & got[0].name
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_txt_multiple_strings_concatenated":
+  # RFC 7208 §3.3: TXT records may contain multiple character-strings that
+  # should be concatenated (whitespace and all) to form the full SPF record.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29990)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29990)
+  fake.txtAnswers["example.com"] = @["v=spf1 include:_spf.google.com ~all"]
+
+  var got: seq[TxtRecord] = @[]
+  var called = false
+  loop.resolveTxtAsync("example.com") do (records: seq[TxtRecord]; err: string):
+    got = records
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "TXT callback should fire"
+  assert got.len == 1, "expected 1 TXT record"
+  assert got[0].data == "v=spf1 include:_spf.google.com ~all",
+    "SPF TXT data mismatch: " & got[0].data
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_txt_no_records":
+  # NOERROR but no TXT records published (NODATA for type 16)
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29991)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29991)
+  # don't set any txtAnswers for "notxt.example"
+
+  var got: seq[TxtRecord] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveTxtAsync("notxt.example") do (records: seq[TxtRecord]; err: string):
+    got = records
+    errMsg = err
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "TXT callback should fire"
+  assert errMsg.len == 0, "no error for NODATA, got: " & errMsg
+  assert got.len == 0, "expected 0 TXT records"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_txt_nxdomain":
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29992)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29992)
+  fake.answers["dead.example"] = @["nx"]
+
+  var errMsg = ""
+  var called = false
+  loop.resolveTxtAsync("dead.example") do (records: seq[TxtRecord]; err: string):
+    errMsg = err
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "TXT callback should fire"
+  assert errMsg.len > 0, "expected NXDOMAIN error"
+  assert errMsg.contains("not found"), "unexpected error: " & errMsg
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_txt_cache":
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29993)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29993)
+  fake.txtAnswers["cached.example"] = @["v=spf1 +all"]
+
+  var called = false
+  loop.resolveTxtAsync("cached.example") do (records: seq[TxtRecord]; err: string):
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "first TXT resolve should complete"
+  let queriesAfterFirst = fake.queries
+  assert queriesAfterFirst >= 1, "expected at least one query"
+
+  called = false
+  loop.resolveTxtAsync("cached.example") do (records: seq[TxtRecord]; err: string):
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "cached TXT resolve should complete"
+  assert fake.queries == queriesAfterFirst,
+    "cached TXT resolve must not re-query (was " & $fake.queries & ", before " & $queriesAfterFirst & ")"
+
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_txt_empty_string":
+  # An empty TXT record (0-length character-string) is valid per RFC 1035
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29994)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29994)
+  fake.txtAnswers["empty.example"] = @[""]
+
+  var got: seq[TxtRecord] = @[]
+  var called = false
+  loop.resolveTxtAsync("empty.example") do (records: seq[TxtRecord]; err: string):
+    got = records
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "TXT callback should fire"
+  assert got.len == 1, "expected 1 TXT record"
+  assert got[0].data == "", "expected empty TXT data"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_txt_dmarc_record":
+  # Real-world DMARC record structure
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29995)])
+  loop.configureDns(200, 2)
+  var fake = startFakeDns(loop, 29995)
+  fake.txtAnswers["_dmarc.paypal.com"] = @[
+    "v=DMARC1; p=reject; sp=reject; pct=100; adkim=s; aspf=s; " &
+    "rua=mailto:d@paypal.com,mailto:d@paypal.com; " &
+    "ruf=mailto:f@paypal.com"
+  ]
+
+  var got: seq[TxtRecord] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveTxtAsync("_dmarc.paypal.com") do (records: seq[TxtRecord]; err: string):
+    got = records
+    errMsg = err
+    called = true
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "DMARC TXT callback should fire"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected 1 TXT record"
+  assert got[0].data.startsWith("v=DMARC1"),
+    "DMARC record should start with v=DMARC1, got: " & got[0].data
+  assert got[0].data.contains("p=reject"),
+    "DMARC policy should be reject"
   stopFakeDns(loop, fake)
   loop.close()
 

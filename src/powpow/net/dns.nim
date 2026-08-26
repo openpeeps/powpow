@@ -40,8 +40,12 @@ const
   DnsRecvBufSize      = 2048
   DnsMaxLabelJumps    = 128
   DnsQtypeA           = 1'u16
+  DnsQtypeNS          = 2'u16
+  DnsQtypeCNAME       = 5'u16
   DnsQtypeMX          = 15'u16
+  DnsQtypeTXT         = 16'u16
   DnsQtypeAAAA        = 28'u16
+  DnsQtypeSRV         = 33'u16
 
 when defined(windows):
   const HostsPath = "C:\\Windows\\System32\\drivers\\etc\\hosts"
@@ -58,6 +62,17 @@ type
 
   MxCallback* = proc(records: seq[MxRecord]; err: string) {.closure.}
 
+  TxtRecord* = object
+    ## A single TXT record returned by the DNS resolver.
+    name*: string
+      ## The owner name of the record (e.g. "_dmarc.example.com").
+    data*: string
+      ## The full TXT string (character-strings concatenated per RFC 1035 §3.3.14).
+    ttl*: int
+      ## Time-to-live in seconds.
+
+  TxtCallback* = proc(records: seq[TxtRecord]; err: string) {.closure.}
+
   ResolvedIp* = object
     af: cint
     addr4: array[4, byte]
@@ -66,6 +81,7 @@ type
   DnsCacheEntry* = object
     addrs: seq[ResolvedIp]
     mxs: seq[MxRecord]
+    txts: seq[TxtRecord]
     expiresAt: int64
     negative: bool
 
@@ -77,6 +93,7 @@ type
     qtype: uint16
     cb: DnsCallback
     mcb: MxCallback
+    tcb: TxtCallback
     resolver: DnsResolver
     server: Sockaddr_storage   ## nameserver the query is currently directed at
     serverIdx: int
@@ -226,41 +243,44 @@ proc readName(msg: openArray[byte]; start: int): tuple[name: string, next: int] 
   return ("", -1)
 
 proc parseResponse(msg: openArray[byte]):
-    tuple[rcode: int, addrs: seq[ResolvedIp], mxs: seq[MxRecord], minTtl: int, truncated: bool] =
+    tuple[rcode: int, addrs: seq[ResolvedIp], mxs: seq[MxRecord],
+          txts: seq[TxtRecord], minTtl: int, truncated: bool] =
   ## Parse a DNS response. Returns the rcode (0 = NOERROR), the A/AAAA
-  ## addresses found, any MX records, the smallest answer TTL, and whether the
-  ## TC bit was set.
+  ## addresses found, any MX records, any TXT records, the smallest answer
+  ## TTL, and whether the TC bit was set.
   if msg.len < 12:
-    return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, false)
+    return (1, @[], @[], @[], 0, false)
   let flags = (uint16(msg[2]) shl 8) or msg[3]
   if (flags and 0x8000) == 0:
-    return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, false)   # not a response
+    return (1, @[], @[], @[], 0, false)   # not a response
   let truncated = (flags and 0x0200) != 0
   let rcode = int(flags and 0x0F)
   if rcode != 0:
-    return (rcode, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
+    return (rcode, @[], @[], @[], 0, truncated)
   let qd = int(msg[4]) shl 8 or int(msg[5])
   let an = int(msg[6]) shl 8 or int(msg[7])
   var pos = 12
   for i in 0 ..< qd:
     pos = skipName(msg, pos)
-    if pos < 0: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
+    if pos < 0: return (1, @[], @[], @[], 0, truncated)
     pos += 4
   var addrs: seq[ResolvedIp]
   var mxs: seq[MxRecord]
+  var txts: seq[TxtRecord]
   var minTtl = 60
   var haveTtl = false
   for i in 0 ..< an:
+    let nameStart = pos
     pos = skipName(msg, pos)
-    if pos < 0: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
-    if pos + 10 > msg.len: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
+    if pos < 0: return (1, @[], @[], @[], 0, truncated)
+    if pos + 10 > msg.len: return (1, @[], @[], @[], 0, truncated)
     let qtype = (uint16(msg[pos]) shl 8) or msg[pos + 1]
     let qclass = (uint16(msg[pos + 2]) shl 8) or msg[pos + 3]
     let ttl = (int(msg[pos + 4]) shl 24) or (int(msg[pos + 5]) shl 16) or
               (int(msg[pos + 6]) shl 8) or int(msg[pos + 7])
     let rdlen = (int(msg[pos + 8]) shl 8) or int(msg[pos + 9])
     pos += 10
-    if pos + rdlen > msg.len: return (1, newSeq[ResolvedIp](), newSeq[MxRecord](), 0, truncated)
+    if pos + rdlen > msg.len: return (1, @[], @[], @[], 0, truncated)
     if qclass == 1:
       if not haveTtl or ttl < minTtl:
         minTtl = ttl
@@ -280,8 +300,24 @@ proc parseResponse(msg: openArray[byte]):
         let (name, _) = readName(msg, pos + 2)
         if name.len > 0:
           mxs.add(MxRecord(pref: pref, exchange: name.toLowerAscii()))
+      elif qtype == DnsQtypeTXT and rdlen >= 1:
+        # RFC 1035 §3.3.14: one or more character-strings, each prefixed
+        # with a 1-byte length.  Concatenate them to form the full text.
+        let (ownerName, _) = readName(msg, nameStart)
+        var txtData = ""
+        var rpos = pos
+        let rEnd = pos + rdlen
+        while rpos < rEnd:
+          let slen = int(msg[rpos])
+          inc rpos
+          if rpos + slen > rEnd: break
+          for j in 0 ..< slen:
+            txtData.add(chr(msg[rpos + j]))
+          rpos += slen
+        txts.add(TxtRecord(name: ownerName.toLowerAscii(),
+                           data: txtData, ttl: ttl))
     pos += rdlen
-  result = (0, addrs, mxs, minTtl, truncated)
+  result = (0, addrs, mxs, txts, minTtl, truncated)
 
 # ── System config ─────────────────────────────────────────────────────────────
 
@@ -365,12 +401,13 @@ proc defaultNameservers(): seq[ResolvedIp] =
 # ── Resolver internals ────────────────────────────────────────────────────────
 
 proc cacheKey(hostname: string; qtype: uint16): string =
-  ## Cache entries are keyed by record type so A/AAAA/MX answers for the same
-  ## name never collide.
+  ## Cache entries are keyed by record type so A/AAAA/MX/TXT answers for the
+  ## same name never collide.
   case qtype
   of DnsQtypeA: "a/" & hostname.toLowerAscii()
   of DnsQtypeAAAA: "aaaa/" & hostname.toLowerAscii()
   of DnsQtypeMX: "mx/" & hostname.toLowerAscii()
+  of DnsQtypeTXT: "txt/" & hostname.toLowerAscii()
   else: "q" & $qtype & "/" & hostname.toLowerAscii()
 
 proc nextQueryId(resolver: DnsResolver): uint16 =
@@ -393,14 +430,17 @@ proc sendQuery(q: DnsQuery) =
     discard sendto(resolver.fd, unsafeAddr msg[0], msg.len.cint, 0,
                    cast[ptr Sockaddr](addr server), sLen)
 
-proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; mxs: seq[MxRecord]; err: string) =
+proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; mxs: seq[MxRecord];
+                   txts: seq[TxtRecord]; err: string) =
   if q.done: return
   q.done = true
   q.resolver.queries.del(q.id)
   if q.timer != TimerId(0):
     q.resolver.loop.cancelTimer(q.timer)
     q.timer = TimerId(0)
-  if err.len == 0 and q.mcb != nil:
+  if err.len == 0 and q.tcb != nil:
+    q.tcb(txts, "")
+  elif err.len == 0 and q.mcb != nil:
     # MX query: an empty answer is a valid result (the caller decides whether
     # to fall back to address resolution, e.g. RFC 5321 §5.1).
     q.mcb(mxs, "")
@@ -410,7 +450,10 @@ proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; mxs: seq[MxRecord]; err:
       outAddrs.add(makeSockaddr(ip, q.port))
     q.cb(outAddrs, "")
   else:
-    if q.mcb != nil:
+    if q.tcb != nil:
+      q.tcb(newSeq[TxtRecord](),
+           if err.len > 0: err else: "DNS: no records for " & q.hostname)
+    elif q.mcb != nil:
       q.mcb(newSeq[MxRecord](),
            if err.len > 0: err else: "DNS: no records for " & q.hostname)
     else:
@@ -444,16 +487,16 @@ proc onTimeout(q: DnsQuery) =
   elif q.qtype == DnsQtypeAAAA and q.mcb == nil:
     startAFallback(q)
   else:
-    q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](),
+    q.completeQuery(@[], @[], @[],
                     "DNS: timed out resolving " & q.hostname)
 
 proc onDnsResponse(q: DnsQuery; msg: openArray[byte]) =
   if q.done: return
-  let (rcode, addrs, mxs, minTtl, truncated) = parseResponse(msg)
+  let (rcode, addrs, mxs, txts, minTtl, truncated) = parseResponse(msg)
   let resolver = q.resolver
   let key = cacheKey(q.hostname, q.qtype)
   if truncated:
-    q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](),
+    q.completeQuery(@[], @[], @[],
       "DNS: truncated response for " & q.hostname & " (TCP fallback not implemented)")
     return
   if rcode != 0:
@@ -462,28 +505,36 @@ proc onDnsResponse(q: DnsQuery; msg: openArray[byte]) =
         DnsCacheEntry(addrs: @[], expiresAt: monoMs() + NegativeCacheMs, negative: true)
     let msg = "DNS: " & (if rcode == 3: "host not found: " else: "query failed (rcode " & $rcode & "): ") &
       q.hostname
-    q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](), msg)
-  elif addrs.len > 0 or (q.mcb != nil and mxs.len > 0):
-    if q.mcb != nil:
+    q.completeQuery(@[], @[], @[], msg)
+  elif addrs.len > 0 or (q.mcb != nil and mxs.len > 0) or (q.tcb != nil and txts.len > 0):
+    if q.tcb != nil:
+      resolver.cache[key] =
+        DnsCacheEntry(txts: txts, expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
+      q.completeQuery(@[], @[], txts, "")
+    elif q.mcb != nil:
       resolver.cache[key] =
         DnsCacheEntry(mxs: mxs, expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
-      q.completeQuery(newSeq[ResolvedIp](), mxs, "")
+      q.completeQuery(@[], mxs, @[], "")
     else:
       resolver.cache[key] =
         DnsCacheEntry(addrs: addrs, expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
-      q.completeQuery(addrs, newSeq[MxRecord](), "")
-  elif q.qtype == DnsQtypeAAAA and q.mcb == nil:
+      q.completeQuery(addrs, @[], @[], "")
+  elif q.qtype == DnsQtypeAAAA and q.mcb == nil and q.tcb == nil:
     # Name exists but has no AAAA records — fall back to A.
     startAFallback(q)
   else:
-    # NOERROR with no usable records. For MX this is a valid empty answer;
+    # NOERROR with no usable records. For MX/TXT this is a valid empty answer;
     # for address queries it means the name exists without A records.
-    if q.mcb != nil:
+    if q.tcb != nil:
+      resolver.cache[key] =
+        DnsCacheEntry(txts: @[], expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
+      q.completeQuery(@[], @[], @[], "")
+    elif q.mcb != nil:
       resolver.cache[key] =
         DnsCacheEntry(mxs: @[], expiresAt: monoMs() + int64(minTtl) * 1000, negative: false)
-      q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](), "")
+      q.completeQuery(@[], @[], @[], "")
     else:
-      q.completeQuery(newSeq[ResolvedIp](), newSeq[MxRecord](), "DNS: no addresses for " & q.hostname)
+      q.completeQuery(@[], @[], @[], "DNS: no addresses for " & q.hostname)
 
 proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: cint;
                 qtype: uint16; cb: DnsCallback) =
@@ -510,6 +561,22 @@ proc startMxQuery(resolver: DnsResolver; domain: string; mcb: MxCallback) =
   let q = DnsQuery(
     id: id, hostname: domain, port: 0, sockType: 0,
     qtype: DnsQtypeMX, mcb: mcb, resolver: resolver,
+    serverIdx: 0, attemptsLeft: resolver.attempts, timer: TimerId(0),
+    done: false,
+  )
+  resolver.queries[id] = q
+  q.sendQuery()
+  q.timer = resolver.loop.addTimer(resolver.timeoutMs) do (tid: int):
+    onTimeout(q)
+
+proc startTxtQuery(resolver: DnsResolver; hostname: string; tcb: TxtCallback) =
+  if resolver.queries.len >= MaxOutstandingQueries:
+    tcb(newSeq[TxtRecord](), "DNS: too many outstanding queries")
+    return
+  let id = resolver.nextQueryId()
+  let q = DnsQuery(
+    id: id, hostname: hostname, port: 0, sockType: 0,
+    qtype: DnsQtypeTXT, tcb: tcb, resolver: resolver,
     serverIdx: 0, attemptsLeft: resolver.attempts, timer: TimerId(0),
     done: false,
   )
@@ -711,6 +778,33 @@ proc resolveMxAsync*(loop: Loop; domain: string; mcb: MxCallback) =
     mcb(newSeq[MxRecord](), e.msg)
     return
   startMxQuery(resolver, domain, mcb)
+
+proc resolveTxtAsync*(loop: Loop; hostname: string; tcb: TxtCallback) =
+  ## Resolve TXT records for `hostname` asynchronously on `loop`. `tcb` runs
+  ## on the loop thread with ALL TXT records found (or an empty seq plus an
+  ## empty `err` when the name exists but publishes no TXT records — the
+  ## caller decides what that means). A non-empty `err` signals NXDOMAIN or
+  ## a resolver failure. Never blocks the loop on DNS.
+  let key = cacheKey(hostname, DnsQtypeTXT)
+  if loop.dns != nil:
+    let r = cast[DnsResolver](loop.dns)
+    let cached = r.cache.getOrDefault(key)
+    if cached.expiresAt != 0:
+      if cached.expiresAt > monoMs():
+        if cached.negative:
+          tcb(newSeq[TxtRecord](), "DNS: host not found: " & hostname)
+        else:
+          tcb(cached.txts, "")
+        return
+      r.cache.del(key)
+
+  var resolver: DnsResolver
+  try:
+    resolver = loop.getResolver()
+  except CatchableError as e:
+    tcb(newSeq[TxtRecord](), e.msg)
+    return
+  startTxtQuery(resolver, hostname, tcb)
 
 proc resolveAddrBothAsync*(loop: Loop; address: string; port: int;
                            cb: DnsCallback) =
