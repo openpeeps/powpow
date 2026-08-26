@@ -140,17 +140,21 @@ import powpow/types
 export types
 
 when iouEnabled:
-  import powpow/[loop, net, proto, signal, fswatch]
+  import powpow/[loop, net, proto, signal, fswatch, threadpool, ws]
   export loop  # close is on Loop
   export net
   export proto
   export signal
   export fswatch
+  export threadpool
+  export ws
 else:
-  import powpow/[platform, loop, net, proto, signal, fswatch]
+  import powpow/[platform, loop, net, proto, signal, fswatch, threadpool, ws]
   export platform except close  # close is on Loop
   export loop
   export net
   export proto
   export signal
   export fswatch
+  export threadpool
+  export ws

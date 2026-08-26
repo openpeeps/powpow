@@ -16,9 +16,9 @@
 import ../src/powpow
 import std/[httpcore, strutils, times]
 
-# Pass an explicit thread count, e.g. newMultiThreadHttpServer(4),
+# Pass an explicit thread count, e.g. newHttpServer(4),
 # or omit the argument to default to countProcessors().
-let server = newMultiThreadHttpServer()
+let server = newHttpServer()
 
 # ── Handler ──────────────────────────────────────────────────────────────────
 

@@ -35,6 +35,7 @@ when defined(threads):
 
 import ../net/tcp
 import ../net/common
+import ../net/tls
 import ../loop
 import ../types
 import ../proto/http
@@ -94,6 +95,15 @@ type
     handshakeBuf: seq[byte]       ## Buffered handshake response bytes
     handshakeDone: bool           ## True once the 101 upgrade completed
     handshakeTimer: TimerId
+    # Client-side extras (populated by connectWs / upgradeToWs)
+    offeredProtocols: seq[string] ## Subprotocols offered in our upgrade request
+    negotiatedProtocol: string    ## Subprotocol the server selected ("" = none)
+    pingTimer: TimerId            ## Repeating client keepalive-ping interval
+    pingIntervalMs: int           ## 0 disables client-initiated pings
+    closeNotified: bool           ## onClose fired once per session (either side)
+
+  WsError* = object of CatchableError
+    ## Raised by client-side helpers on invalid input (e.g. parseWsUrl).
 
   WsMessageCb* = proc(ws: WsConnection, kind: WsFrameKind,
                        data: openArray[byte]) {.closure.}
@@ -185,8 +195,14 @@ proc buildHandshakeResponse*(acceptKey: string): string =
            "Sec-WebSocket-Accept: " & acceptKey & "\r\n" &
            "\r\n"
 
-proc sendHandshake*(conn: Connection, clientKey: string) {.inline.} =
-  let response = buildHandshakeResponse(computeAcceptKey(clientKey))
+proc sendHandshake*(conn: Connection, clientKey: string,
+                    protocol: string = "") {.inline.} =
+  ## Send the 101 Switching Protocols response. `protocol`, when non-empty,
+  ## is echoed back as Sec-WebSocket-Protocol.
+  var response = buildHandshakeResponse(computeAcceptKey(clientKey))
+  if protocol.len > 0:
+    response.insert("Sec-WebSocket-Protocol: " & protocol & "\r\n",
+                    response.len - 2)
   discard conn.send(response)
 
 # ── Frame writer ─────────────────────────────────────────────────────────────
@@ -316,11 +332,30 @@ proc sendPong*(ws: WsConnection, data: openArray[byte] = []) {.inline.} =
   else:
     ws.sendSafe(0xA, data)
 
+proc notifyClose(ws: WsConnection, code: int, reason: string) =
+  ## Fire onClose exactly once per session, whether the close originated
+  ## locally (self-initiated closeWs, idle timeout) or remotely.
+  if ws.closeNotified: return
+  ws.closeNotified = true
+  if not ws.onClose.isNil:
+    ws.onClose(ws, code, reason)
+
+proc sendMessage*(ws: WsConnection, data: string) {.inline.} =
+  ## High-level send: strings go out as text frames.
+  ws.sendText(data)
+
+proc sendMessage*(ws: WsConnection, data: seq[byte]) {.inline.} =
+  ## High-level send: byte sequences go out as binary frames.
+  ws.sendBinary(data)
+
 proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
   ## Send a close frame and shut down the connection.
   if ws.idleTimer != TimerId(0):
     ws.conn.loop.cancelTimer(ws.idleTimer)
     ws.idleTimer = TimerId(0)
+  if ws.pingTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.pingTimer)
+    ws.pingTimer = TimerId(0)
   var payload: seq[byte] = @[]
   if code != 0:
     payload.setLen(2 + reason.len)
@@ -329,6 +364,7 @@ proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
     for i, ch in reason:
       payload[2 + i] = uint8(ch.ord and 0xFF)
   ws.writeFrameFor(0x8, payload)
+  notifyClose(ws, code, reason)
   ws.conn.close()
 
 # ── Frame parser (incremental, state-machine) ────────────────────────────────
@@ -403,8 +439,7 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
       ws.writeFrameFor(0x8, p.payload.toOpenArray(0, plen - 1))
     else:
       ws.writeFrameFor(0x8, [])
-    if not ws.onClose.isNil:
-      ws.onClose(ws, closeCode, reason)
+    notifyClose(ws, closeCode, reason)
     ws.conn.close()
     return
   of 0x9:
@@ -607,6 +642,7 @@ proc newWsConnection*(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize)
     handshakeBuf: @[],
     handshakeDone: false,
     handshakeTimer: TimerId(0),
+    closeNotified: false,
   )
 
 proc resetWs(ws: WsConnection; conn: Connection; maxFrameSize: int) =
@@ -631,6 +667,11 @@ proc resetWs(ws: WsConnection; conn: Connection; maxFrameSize: int) =
   ws.handshakeBuf.setLen(0)
   ws.handshakeDone = false
   ws.handshakeTimer = TimerId(0)
+  ws.closeNotified = false
+  ws.offeredProtocols = @[]
+  ws.negotiatedProtocol = ""
+  ws.pingTimer = TimerId(0)
+  ws.pingIntervalMs = 0
 
 proc acquireWsConnection(wss: WsServer, conn: Connection): WsConnection =
   ## Get a WsConnection for `conn`, recycling one from the pool when available.
@@ -849,8 +890,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
           callback = proc(efd: int, ev: set[EventType]) =
             if ws.conn == nil: return
             if Error in ev and Read notin ev:
-              if not ws.onClose.isNil:
-                ws.onClose(ws, 1006, "Connection lost")
+              notifyClose(ws, 1006, "Connection lost")
               ws.conn.close()
               if efd in wss.conns:
                 wss.conns.del(efd)
@@ -922,8 +962,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
               # Hup was reported but the drain neither parsed a close frame nor
               # hit EOF — the connection was lost without a close handshake.
               if (Hup in ev or Error in ev) and ws.conn.state == Connected:
-                if not ws.onClose.isNil:
-                  ws.onClose(ws, 1006, "Connection lost")
+                notifyClose(ws, 1006, "Connection lost")
                 ws.conn.close()
                 if efd in wss.conns:
                   wss.conns.del(efd)
@@ -985,12 +1024,18 @@ proc websocketUpgrade*(
     onMessage: WsMessageCb = nil,
     onClose: WsCloseCb = nil,
     onError: WsErrorCb = nil,
-    maxFrameSize: int = DefaultMaxFrameSize
+    maxFrameSize: int = DefaultMaxFrameSize,
+    protocols: openArray[string] = []
 ): WsConnection {.gcsafe, discardable.} =
   ## Upgrade an HTTP connection to WebSocket. Call this from an HTTP route handler.
   ##
   ## After the upgrade, the connection is no longer managed by the HttpServer —
   ## all future data goes directly to the WebSocket callbacks.
+  ##
+  ## `protocols` are the subprotocols this endpoint supports. When the client
+  ## offers any of them, the first match (in client preference order) is
+  ## selected and echoed back as Sec-WebSocket-Protocol; otherwise the header
+  ## is omitted and the handshake still succeeds.
   ##
   ## The `server` argument is optional: it is derived from the response when
   ## omitted, so the connection is always detached from the HTTP session
@@ -1031,8 +1076,22 @@ proc websocketUpgrade*(
     if owner != nil:
       owner.removeSession(conn)
 
+    # Subprotocol selection: first protocol the client offered that we
+    # support, in the client's preference order (RFC 6455 §4.1).
+    var chosenProto = ""
+    let requested = headerValue(headers, "Sec-WebSocket-Protocol")
+    if requested.len > 0 and protocols.len > 0:
+      for candidate in requested.split(','):
+        let c = candidate.strip()
+        if c.len == 0: continue
+        for offered in protocols:
+          if cmpIgnoreCase(c, offered) == 0:
+            chosenProto = c
+            break
+        if chosenProto.len > 0: break
+
     # Send the 101 Switching Protocols response
-    conn.sendHandshake(clientKey)
+    conn.sendHandshake(clientKey, chosenProto)
 
     # Create WebSocket connection
     let ws = owner.acquireWs(conn, maxFrameSize)
@@ -1053,8 +1112,7 @@ proc websocketUpgrade*(
         # through — never dereference a nil connection.
         if ws.conn == nil: return
         if Error in ev and Read notin ev:
-          if not ws.onClose.isNil:
-            ws.onClose(ws, 1006, "Connection lost")
+          notifyClose(ws, 1006, "Connection lost")
           ws.conn.close()
           owner.releaseWs(ws)
           return
@@ -1079,7 +1137,14 @@ proc websocketUpgrade*(
               else:
                 break
             else:
-              let n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
+              var n: int
+              if ws.conn.tlsState == TlsActive:
+                # TLS connection (wss upgrade): read decrypted plaintext.
+                n = ws.conn.tlsRead(addr buf[0], buf.len)
+                if n == -2:
+                  break
+              else:
+                n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
               if n > 0:
                 ws.parseWsFrames(buf.toOpenArray(0, n - 1))
                 if ws.conn.state != Connected:
@@ -1104,8 +1169,7 @@ proc websocketUpgrade*(
           # Hup was reported but the drain neither parsed a close frame nor hit
           # EOF — the connection was lost without a close handshake.
           if Hup in ev and ws.conn.state == Connected:
-            if not ws.onClose.isNil:
-              ws.onClose(ws, 1006, "Connection lost")
+            notifyClose(ws, 1006, "Connection lost")
             ws.conn.close()
             owner.releaseWs(ws)
     )
@@ -1117,6 +1181,111 @@ proc websocketUpgrade*(
     return ws
 
 # ── WebSocket client ─────────────────────────────────────────────────────────
+
+proc parseWsUrl*(url: string): tuple[host: string, port: int,
+                                     path: string, tls: bool] =
+  ## Parse a ws:// or wss:// URL into its components. Scheme case is
+  ## insignificant; default ports are 80 (ws) and 443 (wss); a missing path
+  ## defaults to "/". IPv6 hosts use bracket notation ([::1]:8080).
+  ## Raises `WsError` on anything else.
+  var u = url.strip()
+  var rest: string
+  if u.len > 5 and cmpIgnoreCase(u[0 .. 4], "ws://") == 0:
+    rest = u[5 .. ^1]
+  elif u.len > 6 and cmpIgnoreCase(u[0 .. 5], "wss://") == 0:
+    rest = u[6 .. ^1]
+    result.tls = true
+  else:
+    raise newException(WsError, "URL must start with ws:// or wss://")
+
+  let slash = rest.find('/')
+  if slash >= 0:
+    result.path = rest[slash .. ^1]
+    rest = rest[0 ..< slash]
+  else:
+    result.path = "/"
+
+  # Strip userinfo if present (user:pass@host) — credentials are ignored.
+  let at = rest.rfind('@')
+  if at >= 0:
+    rest = rest[(at + 1) .. ^1]
+
+  if rest.len == 0:
+    raise newException(WsError, "URL has no host")
+
+  if rest[0] == '[':
+    # [v6addr] or [v6addr]:port
+    let close = rest.find(']')
+    if close < 2:
+      raise newException(WsError, "malformed IPv6 host")
+    result.host = rest[1 ..< close]
+    if close + 1 < rest.len:
+      if rest[close + 1] != ':' or close + 2 >= rest.len:
+        raise newException(WsError, "malformed port after IPv6 host")
+      try:
+        result.port = parseInt(rest[(close + 2) .. ^1])
+      except ValueError:
+        raise newException(WsError, "invalid port")
+    else:
+      result.port = if result.tls: 443 else: 80
+  else:
+    let colon = rest.rfind(':')
+    if colon > 0:
+      result.host = rest[0 ..< colon]
+      try:
+        result.port = parseInt(rest[(colon + 1) .. ^1])
+      except ValueError:
+        raise newException(WsError, "invalid port")
+    else:
+      result.host = rest
+      result.port = if result.tls: 443 else: 80
+
+  if result.port <= 0 or result.port > 65535:
+    raise newException(WsError, "port out of range")
+  if result.host.len == 0:
+    raise newException(WsError, "URL has no host")
+
+proc getProtocol*(ws: WsConnection): string {.inline.} =
+  ## The subprotocol the server selected during the handshake ("" when none).
+  ws.negotiatedProtocol
+
+proc armClientIdleTimeout(ws: WsConnection) =
+  ## Client-side idle timeout. Unlike the server sweep, the application's
+  ## `onClose` fires with 1001 before the local teardown, because a
+  ## self-initiated close never produces an inbound close frame.
+  let timeout = ws.idleTimeoutMs
+  if timeout <= 0: return
+  if ws.idleTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.idleTimer)
+  let elapsed = int(min(int64(timeout), monoMs() - ws.lastActive))
+  ws.idleTimer = ws.conn.loop.addTimer(max(timeout - elapsed, 1)) do (id: int):
+    ws.idleTimer = TimerId(0)
+    if ws.conn.state != Connected: return
+    if monoMs() - ws.lastActive >= ws.idleTimeoutMs:
+      if not ws.onClose.isNil:
+        ws.onClose(ws, 1001, "Idle timeout")
+      ws.closeWs(1001, "Idle timeout")
+    else:
+      ws.armClientIdleTimeout()
+
+proc isEstablished*(ws: WsConnection): bool {.inline.} =
+  ## True once the client handshake completed and the transport is still open.
+  ws.handshakeDone and ws.conn != nil and ws.conn.state == Connected
+
+proc armClientPings(ws: WsConnection) =
+  ## Start the repeating client keepalive ping interval. Self-cancels once the
+  ## session is no longer connected, so no explicit teardown is needed on
+  ## abnormal drops.
+  let interval = ws.pingIntervalMs
+  if interval <= 0: return
+  let loop = ws.conn.loop
+  ws.pingTimer = loop.addInterval(interval) do (id: int):
+    if ws.conn != nil and ws.conn.state == Connected and ws.handshakeDone:
+      ws.sendPing()
+    else:
+      if ws.pingTimer != TimerId(0):
+        loop.cancelTimer(TimerId(id))
+        ws.pingTimer = TimerId(0)
 
 proc prepareClientWs(maxFrameSize: int): WsConnection =
   ## Create a client-mode WsConnection with a fresh Sec-WebSocket-Key and
@@ -1132,16 +1301,27 @@ proc prepareClientWs(maxFrameSize: int): WsConnection =
   for i in 0 ..< 4:
     result.sendMask[i] = uint8(rng.rand(255))
 
-proc sendHandshakeRequest(ws: WsConnection, path, host: string) =
+proc sendHandshakeRequest*(ws: WsConnection, path, host: string,
+                           extraHeaders: openArray[(string, string)] = [],
+                           protocols: openArray[string] = []) =
   ## Send the RFC 6455 client upgrade request over the connected TCP socket.
+  ## `extraHeaders` are appended verbatim as `name: value` lines; `protocols`
+  ## go out as one Sec-WebSocket-Protocol header and are remembered for
+  ## validating the server's selection in `finishHandshake`.
   let p = if path.len > 0: path else: "/"
   let h = if host.len > 0: host else: "localhost"
-  let req = "GET " & p & " HTTP/1.1\r\n" &
+  ws.offeredProtocols = @protocols
+  var req = "GET " & p & " HTTP/1.1\r\n" &
             "Host: " & h & "\r\n" &
             "Upgrade: websocket\r\n" &
             "Connection: Upgrade\r\n" &
             "Sec-WebSocket-Key: " & ws.clientKey & "\r\n" &
-            "Sec-WebSocket-Version: 13\r\n\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+  if protocols.len > 0:
+    req.add("Sec-WebSocket-Protocol: " & join(protocols, ", ") & "\r\n")
+  for (name, value) in extraHeaders:
+    req.add(name & ": " & value & "\r\n")
+  req.add("\r\n")
   discard ws.conn.send(req)
 
 proc armClientHandshakeTimeout(ws: WsConnection, timeoutMs: int) =
@@ -1178,6 +1358,7 @@ proc finishHandshake(ws: WsConnection): bool =
   var statusOk = false
   var acceptOk = false
   var statusLine = ""
+  var serverProto = ""
   for i, line in lines:
     if i == 0:
       statusLine = line
@@ -1190,6 +1371,8 @@ proc finishHandshake(ws: WsConnection): bool =
         let value = line[colon + 1 .. ^1].strip()
         if name == "sec-websocket-accept":
           acceptOk = value == ws.expectedAccept
+        elif name == "sec-websocket-protocol":
+          serverProto = value
   if not statusOk:
     if not ws.onError.isNil:
       ws.onError(ws, "WebSocket handshake rejected (expected 101, got: " & statusLine & ")")
@@ -1200,8 +1383,26 @@ proc finishHandshake(ws: WsConnection): bool =
       ws.onError(ws, "WebSocket handshake failed: Sec-WebSocket-Accept mismatch")
     ws.conn.close()
     return true
+  if ws.offeredProtocols.len > 0 and serverProto.len > 0:
+    var protoOk = false
+    for offered in ws.offeredProtocols:
+      if cmpIgnoreCase(offered, serverProto) == 0:
+        protoOk = true
+        break
+    if not protoOk:
+      if not ws.onError.isNil:
+        ws.onError(ws, "WebSocket handshake failed: server selected unoffered subprotocol \"" &
+                   serverProto & "\"")
+      ws.conn.close()
+      return true
+  ws.negotiatedProtocol = serverProto
   ws.handshakeBuf.setLen(0)
   ws.handshakeDone = true
+  # Client keepalive: periodic pings plus the post-upgrade idle timeout
+  # (shared with the server side). Both self-cancel on teardown.
+  armClientPings(ws)
+  if ws.idleTimeoutMs > 0:
+    ws.armClientIdleTimeout()
   if not ws.onOpen.isNil:
     ws.onOpen(ws)
   let leftoverStart = headerEnd + 4
@@ -1221,8 +1422,8 @@ proc registerClientFd(ws: WsConnection) =
         if not ws.handshakeDone:
           if not ws.onError.isNil:
             ws.onError(ws, "Connection lost during WebSocket handshake")
-        elif not ws.onClose.isNil:
-          ws.onClose(ws, 1006, "Connection lost")
+        else:
+          notifyClose(ws, 1006, "Connection lost")
         ws.conn.close()
         return
       if Write in ev:
@@ -1282,8 +1483,8 @@ proc registerClientFd(ws: WsConnection) =
               if not ws.handshakeDone:
                 if not ws.onError.isNil:
                   ws.onError(ws, "Connection closed during WebSocket handshake")
-              elif not ws.onClose.isNil:
-                ws.onClose(ws, 1006, "")
+              else:
+                notifyClose(ws, 1006, "")
               ws.conn.close()
               return
             else:
@@ -1301,8 +1502,8 @@ proc registerClientFd(ws: WsConnection) =
           if not ws.handshakeDone:
             if not ws.onError.isNil:
               ws.onError(ws, "Connection lost during WebSocket handshake")
-          elif not ws.onClose.isNil:
-            ws.onClose(ws, 1006, "Connection lost")
+          else:
+            notifyClose(ws, 1006, "Connection lost")
           ws.conn.close()
   )
 
@@ -1316,19 +1517,32 @@ proc upgradeToWs*(
     onError: WsErrorCb = nil,
     maxFrameSize: int = DefaultMaxFrameSize,
     handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs,
+    extraHeaders: openArray[(string, string)] = [],
+    protocols: openArray[string] = [],
+    pingIntervalMs: int = 0,
+    idleTimeoutMs: int = 0,
 ): WsConnection =
   ## Upgrade an already-connected TCP `conn` to a WebSocket client. Sends the
   ## RFC 6455 handshake and takes over the fd for frame handling. `onOpen`
   ## fires once the server accepts the upgrade; `onError` fires (and the
   ## connection is closed) if the server rejects it or the handshake stalls.
   ## Returns the WsConnection so it can be stored for later sends.
+  ##
+  ## `extraHeaders` are sent verbatim in the upgrade request; `protocols` are
+  ## offered as Sec-WebSocket-Protocol (the server's pick is validated and
+  ## readable via `getProtocol`). `pingIntervalMs` enables client keepalive
+  ## pings; `idleTimeoutMs` closes sessions that receive no frames for that
+  ## long. The connection must NOT already be TLS-wrapped by this proc — pass
+  ## a wrapped conn only if your transport set it up beforehand.
   let ws = prepareClientWs(maxFrameSize)
   ws.conn = conn
   ws.onOpen = onOpen
   ws.onMessage = onMessage
   ws.onClose = onClose
   ws.onError = onError
-  ws.sendHandshakeRequest(path, host)
+  ws.pingIntervalMs = pingIntervalMs
+  ws.idleTimeoutMs = idleTimeoutMs
+  ws.sendHandshakeRequest(path, host, extraHeaders, protocols)
   ws.armClientHandshakeTimeout(handshakeTimeoutMs)
   ws.registerClientFd()
   ws
@@ -1345,26 +1559,62 @@ proc connectWs*(
     onError: WsErrorCb = nil,
     maxFrameSize: int = DefaultMaxFrameSize,
     handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs,
+    tlsCtx: SslContext = nil,
+    extraHeaders: openArray[(string, string)] = [],
+    protocols: openArray[string] = [],
+    pingIntervalMs: int = 0,
+    idleTimeoutMs: int = 0,
 ): WsConnection =
   ## Non-blocking WebSocket client connect. DNS is resolved on the loop (see
   ## `connect`), then the TCP connection is upgraded to WebSocket via
   ## `upgradeToWs`. Returns the WsConnection immediately; the handshake runs
   ## asynchronously and `onOpen` fires when the upgrade completes.
+  ##
+  ## Pass a client `tlsCtx` (e.g. from `newClientTlsContext`) for wss://:
+  ## TLS wraps the fresh TCP connection before the handshake goes out, with
+  ## SNI taken from `host` (or the address). All other parameters forward to
+  ## `upgradeToWs`.
   let ws = prepareClientWs(maxFrameSize)
   ws.onOpen = onOpen
   ws.onMessage = onMessage
   ws.onClose = onClose
   ws.onError = onError
   let effHost = if host.len > 0: host else: address
+  # Copies for the closures (openArray params cannot be captured).
+  let hdrs = @extraHeaders
+  let protos = @protocols
+
+  # TLS mode: the connection's built-in readiness watcher drives the OpenSSL
+  # handshake and delivers plaintext through `onData`; a raw fd takeover would
+  # read ciphertext. Plain mode keeps the edge-triggered takeover below.
+  proc pump(conn: Connection, data: openArray[byte]) =
+    if not ws.handshakeDone:
+      ws.handshakeBuf.add(data)
+      discard ws.finishHandshake()
+    else:
+      ws.parseWsFrames(data)
+
   loop.connect(address, port,
     onConnect = proc(conn: Connection) =
       ws.conn = conn
-      ws.sendHandshakeRequest(path, effHost)
+      if tlsCtx != nil:
+        try:
+          conn.wrapTls(tlsCtx, effHost)
+        except CatchableError as e:
+          if not ws.onError.isNil:
+            ws.onError(ws, "TLS handshake failed: " & e.msg)
+          conn.close()
+          return
+      ws.pingIntervalMs = pingIntervalMs
+      ws.idleTimeoutMs = idleTimeoutMs
+      ws.sendHandshakeRequest(path, effHost, hdrs, protos)
       ws.armClientHandshakeTimeout(handshakeTimeoutMs)
-      ws.registerClientFd()
+      if tlsCtx == nil:
+        ws.registerClientFd()
     ,
     onData = proc(conn: Connection, data: openArray[byte]) =
-      discard  # upgradeToWs re-registers the fd; reads bypass loop.connect
+      if tlsCtx != nil:
+        pump(conn, data)
     ,
     onClose = proc(conn: Connection) =
       if not ws.handshakeDone and not ws.onError.isNil:

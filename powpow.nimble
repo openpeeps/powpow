@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.10"
+version       = "0.1.11"
 author        = "OpenPeeps"
 description   = "High-performance event notification library for Nim"
 license       = "MIT"
@@ -40,6 +40,7 @@ task test, "Run the unit test suite":
     "test_security", "test_signal", "test_sse2", "test_sse2_225",
     "test_sse2_chunk", "test_sse2_direct", "test_sse2_raw",     "test_stream",
     "test_tls", "test_dtls", "test_httpclient", "test_httpclient_security",
+    "test_threadpool",
     "test_ws_client", "test_ws_pool", "test_ws_threads",
     "test_io_uring",
   ]
@@ -55,3 +56,4 @@ task testSmuggler, "Fuzz powpow with the smuggler package (requires smuggler ins
 task testThreads, "Thread-safety smoke tests (--threads:on)":
   exec "nim c -r --threads:on tests/test_ratelimit_threads.nim"
   exec "nim c -r --threads:on tests/test_ws_threads.nim"
+  exec "nim c -r --threads:on tests/test_threadpool.nim"
