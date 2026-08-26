@@ -31,20 +31,26 @@ when iouEnabled:
 export loop.acquireBuf, loop.releaseBuf
 
 const
-  MaxBufPoolSize* = 1024
-  MaxConnPoolSize* = 1024
-  ConnectTimeoutMs = 3000
+  maxWriteBufferSize* {.intdefine.} = 32
+  maxBufPoolSize* {.intdefine.} = 1024
+  maxConnPoolSize* {.intdefine.} = 1024
+  connectTimeoutMs {.intdefine.} = 3000
+  maxRetainedBufferCap {.intdefine.} = 65536
+
+  MaxBufPoolSize* = maxBufPoolSize
+  MaxConnPoolSize* = maxConnPoolSize
+  ConnectTimeoutMs = connectTimeoutMs
     ## How long a non-blocking connect may stay in progress before it is treated
     ## as failed and the next resolved address is tried. On some platforms a
     ## connect to an unreachable/refused address can hang without producing a
     ## writable event (e.g. Windows loopback to an unused 127.0.0.x), so the
     ## multi-address fallback must not depend on the OS refusing promptly.
-  MaxWriteBufferSize = 32 * 1024 * 1024
+  MaxWriteBufferSize = maxWriteBufferSize * 1024 * 1024
     ## Per-connection cap on the queued write buffer. A client that stops
     ## reading while the server writes a large response (e.g. a TLS file
     ## download) must not make the server accumulate the whole payload in RAM
     ## per connection (slow-read memory DoS).
-  MaxRetainedBufferCap = 65536
+  MaxRetainedBufferCap = maxRetainedBufferCap
     ## Pooled connections keep their writeBuf/tlsCoalesce capacity so the pool
     ## does not re-allocate per request. Above this cap the capacity is dropped
     ## on release — an idle pooled connection must not pin a huge buffer it
@@ -66,25 +72,42 @@ proc setLinger0(fd: SocketHandle) {.inline.} =
     lin.l_linger = 0.cint
   discard setsockopt(fd, SOL_SOCKET, SO_LINGER, addr lin, sizeof(lin).SockLen)
 
-when not defined(windows):
-  const NI_MAXHOST = 1025
-  const NI_NUMERICHOST = 1
+from std/net import IpAddress, IpAddressFamily, `$`
 
-proc formatIp(saAddr: Sockaddr_storage): string =
-  var host: array[NI_MAXHOST, char]
-  let sa = cast[ptr Sockaddr](unsafeAddr saAddr)
-  let salen = getSockLen(unsafeAddr saAddr)
-  when defined(windows):
-    if getnameinfo(sa, salen, cast[cstring](addr host[0]), NI_MAXHOST.DWORD, nil, 0, NI_NUMERICHOST) == 0:
-      result = $cast[cstring](addr host[0])
+proc formatIp*(saAddr: Sockaddr_storage): string =
+  ## Format a socket address as a numeric IP literal ("127.0.0.1", "::1").
+  ##
+  ## Reads the address bytes directly out of the sockaddr instead of calling
+  ## getnameinfo(): macOS resolves 127.0.0.1 to "localhost" even with
+  ## NI_NUMERICHOST, which silently breaks consumers that need the literal
+  ## address (SPF evaluation, per-IP rate limiting, logs). IPv4-mapped IPv6
+  ## addresses are presented as plain dotted quads. Returns "" for address
+  ## families other than IPv4/IPv6.
+  let family = saAddr.ss_family
+  let raw = cast[ptr UncheckedArray[byte]](unsafeAddr saAddr)
+  if family == AF_INET.TSa_Family:
+    var a4: array[4, uint8]
+    for i in 0 ..< 4:
+      a4[i] = raw[i + 4]   # sockaddr_in: family(2) + port(2) -> sin_addr @4
+    result = $IpAddress(family: IpAddressFamily.IPv4, address_v4: a4)
+  elif family == AF_INET6.TSa_Family:
+    # RFC 4291 v4-mapped (::ffff:a.b.c.d): present as a plain IPv4 literal
+    # addr bytes are raw[8..23]; mapped form = 10 zero octets + ff ff + 4 octets
+    if raw[8] == 0 and raw[9] == 0 and raw[10] == 0 and raw[11] == 0 and
+       raw[12] == 0 and raw[13] == 0 and raw[14] == 0 and raw[15] == 0 and
+       raw[16] == 0 and raw[17] == 0 and
+       raw[18] == 0xff'u8 and raw[19] == 0xff'u8:
+      var a4: array[4, uint8]
+      for i in 0 ..< 4:
+        a4[i] = raw[i + 20]  # mapped v4 octets sit at byte offset 20
+      result = $IpAddress(family: IpAddressFamily.IPv4, address_v4: a4)
     else:
-      result = "unknown"
+      var a6: array[16, uint8]
+      for i in 0 ..< 16:
+        a6[i] = raw[i + 8]   # sockaddr_in6: ...flowinfo(4) -> addr @8
+      result = $IpAddress(family: IpAddressFamily.IPv6, address_v6: a6)
   else:
-    if getnameinfo(sa, salen, cast[cstring](addr host[0]), host.len.SockLen,
-                   nil, 0, NI_NUMERICHOST) == 0:
-      result = $cast[cstring](addr host[0])
-    else:
-      result = "unknown"
+    result = ""
 
 # ── Types ────────────────────────────────────────────────────────────────────
 
