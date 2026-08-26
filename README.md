@@ -16,7 +16,8 @@
 - High-performance, event-driven networking library for Nim
 - Support for low-level **UDP, TCP sockets**
 - Built-in HTTP/1.1 server implementation
-- Built-in **WebSocket** Client and Server: standalone + HTTP-upgrade modes
+- Built-in **WebSocket** client and server: standalone + HTTP-upgrade modes, `wss://` on both ends, subprotocol negotiation, custom handshake headers, keepalive pings/idle timeouts, and a self-managed client (`newWsClient`) with auto-reconnect and a `sendMessage` API
+- **Threadpool** (`import powpow/threadpool`): a self-managed worker pool on raw threads with a private event loop for result delivery; submit CPU-bound or blocking work off a live event loop without blocking any single thread
 - **TLS/SSL** support (implicit + STARTTLS-style upgrades)
 - **DTLS 1.2** over UDP — one socket, per-peer sessions, stateless cookie exchange
 - **Signal/Relay** system for in-process event dispatch
@@ -60,6 +61,7 @@ The full documentation lives in [`docs/`](docs/contents/index.md):
 - [Getting started](docs/contents/getting-started.md) — install and your first server
 - [Event loop](docs/contents/core/event-loop.md), [TCP](docs/contents/net/tcp.md),
   [HTTP server](docs/contents/http/server.md), [WebSocket](docs/contents/websocket.md) and more — per-feature guides
+- [Threadpool](docs/contents/concurrency.md#threadpool): offloading CPU-bound work off a live event loop
 - [io_uring](docs/contents/io_uring.md) — the opt-in Linux submission-based backend
 - [Examples index](docs/contents/examples.md) — every runnable example, its port and commands
 - [API reference](docs/contents/api/README.md) — per-module signatures (plus the [generated reference](https://openpeeps.github.io/powpow))
@@ -99,6 +101,36 @@ HTTP/1.x request-smuggling fuzzer built for this library: it generates and
 mutates requests from a context-free grammar, detects CL/TE desyncs with an
 in-process oracle, and drives live servers with the two-request
 response-pairing technique.
+
+### Threadpool
+
+Use the threadpool when you have **CPU-bound or blocking work that must not
+stall an event loop**. It creates N persistent worker threads plus one
+dispatch thread running a private event loop. Job results are delivered as
+callbacks serialized on that dispatch thread, so no user-side locking is
+needed.
+
+```nim
+import powpow/threadpool
+
+let tp = newThreadPool(size = 4)
+
+discard tp.submitWork(
+  job = proc(): string = readFile("big.bin"),
+  cb  = proc(data: string) = echo "read ", data.len, " bytes")
+
+closeThreadPool(tp)   # drain queued jobs, then tear down
+```
+
+`shutdownThreadPool(tp)` discards queued-but-unstarted jobs for fast teardown;
+in-flight jobs still finish and deliver. Both are idempotent.
+
+Unlike `std/threadpool` (deprecated), `taskpools` or `malebolgia`, powpow's
+threadpool never blocks the calling thread, making it safe inside
+event-driven services. Work-stealing forks like `weave` or `taskpools` still
+win for numeric crunching; powpow's pool optimizes for service workloads
+where results must flow back into an event loop. See the
+[concurrency guide](docs/contents/concurrency.md) for the full comparison.
 
 ## Examples (the fun part)
 Most web servers out there are all rainbows and flowers, until you upload or stream a file, and it transforms into a nightmare at runtime. PowPow is slowly moving toward a production-ready server. Everything below is runnable and lives in the `examples/` directory.
