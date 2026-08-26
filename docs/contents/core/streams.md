@@ -50,8 +50,6 @@ var a, b: IoStream
 ```
 
 > Note: `cast[string](data)` on an `openArray[byte]` is **not** valid — it reads
-> the length header from inside the buffer. Copy via `toStr` (above) instead.
-```
 
 ## Writing
 

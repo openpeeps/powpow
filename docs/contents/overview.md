@@ -82,7 +82,7 @@ The aggregate module `src/powpow.nim` re-exports:
 | Raw-fd streaming (`stream.nim`) | Done — `IoStream` for pipes/socketpair/UDS/IPC; edge-triggered drain, write buffering, read backpressure; Windows not yet implemented |
 | HTTP/1.1 parser (`proto/http.nim`) | Done — incremental zero-copy, chunked, streaming, multipart |
 | HTTP server (`proto/httpserver.nim`) | Done — own-router design, static files, Range/conditional requests, pipelining |
-| WebSocket (`proto/ws.nim`) | Done — RFC 6455, standalone + upgrade, deflate |
+| WebSocket (`proto/ws.nim`) | Done: RFC 6455 with standalone and HTTP-upgrade servers, `wss://` on both ends, subprotocols, custom headers, keepalive timers, a self-managed client (`newWsClient`) with auto-reconnect, and deflate |
 | Multi-threaded HTTP server (`proto/multithread.nim`) | Done — `SO_REUSEPORT`, one loop per worker |
 | Thread pool (`threadpool.nim`) | Done — N workers + dispatch thread owning a private loop; generic `submitWork[T]` results delivered as serialized callbacks; graceful drain close + discard shutdown |
 | TLS (`net/tls.nim`) | Done — OpenSSL, implicit + upgrade (not on Windows) |
@@ -225,4 +225,4 @@ The aggregate module `src/powpow.nim` re-exports:
 
 - [Getting started](getting-started.md)
 - [Examples index](examples.md) — 19 runnable programs covering every feature
-- [API reference](api/README.md)
+- [API reference](https://openpeeps.github.io/powpow)

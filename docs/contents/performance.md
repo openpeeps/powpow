@@ -191,6 +191,6 @@ There is also a dedicated loop benchmark: `tests/test_bench_event_loop.nim`.
 
 ## API reference
 
-- [SIMD scanning API](api/simdscan.md)
+- [SIMD scanning API reference](https://openpeeps.github.io/powpow)
 - [event loop](core/event-loop.md), [static files](http/static-files.md),
   [concurrency](concurrency.md)

@@ -161,5 +161,5 @@ services, not scheduling throughput:
 
 ## API reference
 
-Full signatures: [multithread API](api/multithread.md). Related:
+Full signatures: [generated API reference](https://openpeeps.github.io/powpow). Related:
 [server](http/server.md), [event loop](core/event-loop.md).

@@ -16,7 +16,7 @@
 - High-performance, event-driven networking library for Nim
 - Support for low-level **UDP, TCP sockets**
 - Built-in HTTP/1.1 server implementation
-- Built-in **WebSocket support** with standalone and upgrade modes
+- Built-in **WebSocket** Client and Server: standalone + HTTP-upgrade modes
 - **TLS/SSL** support (implicit + STARTTLS-style upgrades)
 - **DTLS 1.2** over UDP — one socket, per-peer sessions, stateless cookie exchange
 - **Signal/Relay** system for in-process event dispatch
@@ -121,6 +121,8 @@ Most web servers out there are all rainbows and flowers, until you upload or str
   - `/resume` full `serveFile` with `If-None-Match`, `If-Modified-Since`, `If-Range` and Range handling, `304`/`206` and all. Resume support built in, because your users *will* close the laptop lid mid-download
 
 - `wsserver.nim` a standalone WebSocket server. The upgrade handshake is handled internally; there are no HTTP routes at all
+
+- `wsclient.nim` the other side of the socket: `newWsClient` connects to `ws://127.0.0.1:9001`, sends text and binary via one `sendMessage` API, and auto-reconnects with exponential backoff if the server dies mid-session. Kill `wsserver.nim` while it runs and watch it claw its way back
 
 - `wsupgrade.nim` HTTP **and** WebSocket on the same port. `curl localhost:9000/` for HTML, `websocat ws://localhost:9000/ws` for real-time. One process, one port, two protocols. The browser test page (`wsclient.html`) is included so you can watch it work live
 
