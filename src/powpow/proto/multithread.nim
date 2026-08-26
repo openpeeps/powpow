@@ -13,7 +13,7 @@
 ##
 ## Usage:
 ##   ```nim
-##   let server = newMultiThreadHttpServer()
+##   let server = newHttpServer()
 ##   server.start do (req: HttpRequest, res: HttpResponse):
 ##     if req.getPath() == "/":
 ##       res.status(Http200).send("Hello!")
@@ -47,6 +47,7 @@ when not defined(windows):
     MultiThreadHttpServer* = ref object
       numThreads*: int
       handler:     OnRequestCallback
+      onStartCb:   proc(numThreads: int) {.gcsafe.}
       threads:     seq[Thread[WorkerArg]]
       contexts:    seq[WorkerCtx]
       running:     bool
@@ -92,14 +93,12 @@ when not defined(windows):
             loop.stop()
             break
           if n < 0: break
-
-      echo "  worker #", idx, " ready"
       server.listen(address, port)
       loop.run()
       server.close()
       loop.close()
 
-  proc newMultiThreadHttpServer*(numThreads: int = 0): MultiThreadHttpServer =
+  proc newHttpServer*(numThreads: int): MultiThreadHttpServer =
     let n = if numThreads > 0: numThreads else: countProcessors()
     MultiThreadHttpServer(
       numThreads: n,
@@ -122,8 +121,9 @@ when not defined(windows):
         arg.address = address
         arg.port    = port
         createThread(srv.threads[i], workerMain, arg)
-      echo "💥 powpow accepting on ", address, ":", port,
-           " with ", srv.numThreads, " workers (SO_REUSEPORT)"
+      
+      if srv.onStartCb != nil: srv.onStartCb(srv.numThreads)
+
       for i in 0 ..< srv.numThreads:
         joinThread(srv.threads[i])
       for ctx in srv.contexts:
