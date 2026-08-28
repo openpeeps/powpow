@@ -1,0 +1,10 @@
+nimTitle	threadpool	powpow/threadpool.html	module powpow/threadpool		0
+nim	HeartbeatMs	powpow/threadpool.html#HeartbeatMs	const HeartbeatMs		77
+nim	ThreadPoolError	powpow/threadpool.html#ThreadPoolError	object ThreadPoolError		82
+nim	ThreadPool	powpow/threadpool.html#ThreadPool	type ThreadPool		119
+nim	newThreadPool	powpow/threadpool.html#newThreadPool,int	proc newThreadPool(size: int = 4): ThreadPool		318
+nim	getLoop	powpow/threadpool.html#getLoop,ThreadPool	proc getLoop(pool: ThreadPool): Loop		364
+nim	closeThreadPool	powpow/threadpool.html#closeThreadPool,ThreadPool	proc closeThreadPool(pool: ThreadPool)		431
+nim	shutdownThreadPool	powpow/threadpool.html#shutdownThreadPool,ThreadPool	proc shutdownThreadPool(pool: ThreadPool)		440
+nim	submitWork	powpow/threadpool.html#submitWork,ThreadPool,proc),proc(T),proc(ref.CatchableError)	proc submitWork[T](pool: ThreadPool; job: proc (): T {.closure.};\n              cb: proc (res: T) {.closure.};\n              onError: proc (err: ref CatchableError) {.closure.} = nil): bool		452
+heading	Memory-management notes (why the plumbing looks the way it does)	powpow/threadpool.html#memoryminusmanagement-notes-why-the-plumbing-looks-the-way-it-does	  Memory-management notes (why the plumbing looks the way it does)		0

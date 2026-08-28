@@ -1,6 +1,8 @@
 nimTitle	ratelimit	powpow/proto/ratelimit.html	module powpow/proto/ratelimit		0
-nim	RateLimiter	powpow/proto/ratelimit.html#RateLimiter	type RateLimiter		31
-nim	newRateLimiter	powpow/proto/ratelimit.html#newRateLimiter,Loop,int,int	proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter		39
-nim	close	powpow/proto/ratelimit.html#close,RateLimiter	proc close(rl: RateLimiter)		65
-nim	allow	powpow/proto/ratelimit.html#allow,RateLimiter,string	proc allow(rl: RateLimiter; ip: string): bool		72
-nim	check	powpow/proto/ratelimit.html#check,RateLimiter,HttpRequest,HttpResponse	proc check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool		86
+nim	WindowLimit	powpow/proto/ratelimit.html#WindowLimit	tuple WindowLimit		32
+nim	RateLimiter	powpow/proto/ratelimit.html#RateLimiter	type RateLimiter		38
+nim	newMultiRateLimiter	powpow/proto/ratelimit.html#newMultiRateLimiter,Loop,openArray[WindowLimit]	proc newMultiRateLimiter(loop: Loop; limits: openArray[WindowLimit];\n                    enableCleanup = true): RateLimiter		47
+nim	newRateLimiter	powpow/proto/ratelimit.html#newRateLimiter,Loop,int,int	proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter		78
+nim	close	powpow/proto/ratelimit.html#close,RateLimiter	proc close(rl: RateLimiter)		83
+nim	allow	powpow/proto/ratelimit.html#allow,RateLimiter,string	proc allow(rl: RateLimiter; key: string): bool		92
+nim	check	powpow/proto/ratelimit.html#check,RateLimiter,HttpRequest,HttpResponse	proc check(rl: RateLimiter; req: HttpRequest; res: HttpResponse): bool		141

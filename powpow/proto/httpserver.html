@@ -74,6 +74,12 @@
   maxStreamBodySize*: int64 ## Operator-configurable hard cap for streamed/chunked/multipart bodies
                             ## when maxBodySize == 0 (0 = use MaxStreamBodySize). Lets an operator
                             ## lower the 512 MB per-connection backstop without changing code.
+  minStreamBodySize*: int64 ## Bodies at or above this size are auto-streamed to a temp file when
+                            ## they arrive split across reads; smaller bodies are buffered so
+                            ## `req.getBodyString()`/`getBody()` work (0 = use MinStreamBodySize,
+                            ## the 64 KB default). Streaming exists to keep memory bounded for large
+                            ## uploads; buffering small bodies avoids breaking getBodyString when the
+                            ## headers and body arrive in separate TCP segments (common on Windows).
   maxFileSize*: int64 ## Per-file upload cap for multipart bodies (0 = fall back to
                       ## maxBodySize's effective cap). Bounds disk usage of a single part
                       ## independently of the total body size.
@@ -307,6 +313,12 @@
   <span class="Identifier">maxStreamBodySize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span> <span class="Comment">## Operator-configurable hard cap for streamed/chunked/multipart bodies</span>
                             <span class="Comment">## when maxBodySize == 0 (0 = use MaxStreamBodySize). Lets an operator</span>
                             <span class="Comment">## lower the 512 MB per-connection backstop without changing code.</span>
+  <span class="Identifier">minStreamBodySize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span> <span class="Comment">## Bodies at or above this size are auto-streamed to a temp file when</span>
+                            <span class="Comment">## they arrive split across reads; smaller bodies are buffered so</span>
+                            <span class="Comment">## `req.getBodyString()`/`getBody()` work (0 = use MinStreamBodySize,</span>
+                            <span class="Comment">## the 64 KB default). Streaming exists to keep memory bounded for large</span>
+                            <span class="Comment">## uploads; buffering small bodies avoids breaking getBodyString when the</span>
+                            <span class="Comment">## headers and body arrive in separate TCP segments (common on Windows).</span>
   <span class="Identifier">maxFileSize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span> <span class="Comment">## Per-file upload cap for multipart bodies (0 = fall back to</span>
                       <span class="Comment">## maxBodySize's effective cap). Bounds disk usage of a single part</span>
                       <span class="Comment">## independently of the total body size.</span>
@@ -786,7 +798,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-28 10:54:25 UTC</small>
       </div>
     </div>
   </div>

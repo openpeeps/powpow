@@ -79,8 +79,8 @@
   <li><a class="reference" href="#listen%2CMultiThreadHttpServer%2Cstring%2Cint" title="listen(srv: MultiThreadHttpServer; address: string; port: int)">listen(srv: MultiThreadHttpServer; address: string; port: int)</a></li>
 
 </ul>
-<ul class="simple nested-toc-section">newMultiThreadHttpServer
-  <li><a class="reference" href="#newMultiThreadHttpServer%2Cint" title="newMultiThreadHttpServer(numThreads: int = 0): MultiThreadHttpServer">newMultiThreadHttpServer(numThreads: int = 0): MultiThreadHttpServer</a></li>
+<ul class="simple nested-toc-section">newHttpServer
+  <li><a class="reference" href="#newHttpServer%2Cint" title="newHttpServer(numThreads: int): MultiThreadHttpServer">newHttpServer(numThreads: int): MultiThreadHttpServer</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">start
@@ -104,7 +104,7 @@
     <p class="module-desc"><p>powpow/proto/multithread.nim — Multi-threaded HTTP server.</p>
 <p>Each worker thread creates its own event loop + HTTP server + TCP server with a SO_REUSEPORT listen socket bound to the same address:port. The kernel distributes incoming connections across the workers. No single-threaded acceptor bottleneck, no cross-thread communication.</p>
 <p>Usage:</p>
-<p><pre class="listing"><span class="Keyword">let</span> <span class="Identifier">server</span> <span class="Operator">=</span> <span class="Identifier">newMultiThreadHttpServer</span><span class="Punctuation">(</span><span class="Punctuation">)</span>
+<p><pre class="listing"><span class="Keyword">let</span> <span class="Identifier">server</span> <span class="Operator">=</span> <span class="Identifier">newHttpServer</span><span class="Punctuation">(</span><span class="Punctuation">)</span>
 <span class="Identifier">server</span><span class="Operator">.</span><span class="Identifier">start</span> <span class="Keyword">do</span> <span class="Punctuation">(</span><span class="Identifier">req</span><span class="Punctuation">:</span> <span class="Identifier">HttpRequest</span><span class="Punctuation">,</span> <span class="Identifier">res</span><span class="Punctuation">:</span> <span class="Identifier">HttpResponse</span><span class="Punctuation">)</span><span class="Punctuation">:</span>
   <span class="Keyword">if</span> <span class="Identifier">req</span><span class="Operator">.</span><span class="Identifier">getPath</span><span class="Punctuation">(</span><span class="Punctuation">)</span> <span class="Operator">==</span> <span class="StringLit">&quot;/&quot;</span><span class="Punctuation">:</span>
     <span class="Identifier">res</span><span class="Operator">.</span><span class="Identifier">status</span><span class="Punctuation">(</span><span class="Identifier">Http200</span><span class="Punctuation">)</span><span class="Operator">.</span><span class="Identifier">send</span><span class="Punctuation">(</span><span class="StringLit">&quot;Hello!&quot;</span><span class="Punctuation">)</span>
@@ -148,7 +148,8 @@
 <div id="listen-procs-all">
   <div id="listen,MultiThreadHttpServer,string,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#listen%2CMultiThreadHttpServer%2Cstring%2Cint"><span class="Identifier">listen</span></a><span class="Other">(</span><span class="Identifier">srv</span><span class="Other">:</span> <a href="#MultiThreadHttpServer"><span class="Identifier">MultiThreadHttpServer</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">ResourceExhaustedError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">ResourceExhaustedError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -157,10 +158,10 @@
 </div>
 
 </div>
-<div id="newMultiThreadHttpServer-procs-all">
-  <div id="newMultiThreadHttpServer,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#newMultiThreadHttpServer%2Cint"><span class="Identifier">newMultiThreadHttpServer</span></a><span class="Other">(</span><span class="Identifier">numThreads</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">)</span><span class="Other">:</span> <a href="#MultiThreadHttpServer"><span class="Identifier">MultiThreadHttpServer</span></a> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+<div id="newHttpServer-procs-all">
+  <div id="newHttpServer,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newHttpServer%2Cint"><span class="Identifier">newHttpServer</span></a><span class="Other">(</span><span class="Identifier">numThreads</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <a href="#MultiThreadHttpServer"><span class="Identifier">MultiThreadHttpServer</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -172,8 +173,8 @@
 <div id="start-procs-all">
   <div id="start,MultiThreadHttpServer,OnRequestCallback,string,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#start%2CMultiThreadHttpServer%2COnRequestCallback%2Cstring%2Cint"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">srv</span><span class="Other">:</span> <a href="#MultiThreadHttpServer"><span class="Identifier">MultiThreadHttpServer</span></a><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="httpserver.html#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
-           <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">ResourceExhaustedError</span><span class="Other">]</span><span class="Other">,</span>
-                        <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+           <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">ResourceExhaustedError</span><span class="Other">,</span>
+                                 <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -192,7 +193,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-28 10:54:25 UTC</small>
       </div>
     </div>
   </div>

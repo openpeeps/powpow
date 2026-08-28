@@ -73,6 +73,7 @@
   headerEnd*: int            ## Byte offset past \r\n\r\n
   contentLength*: int        ## From Content-Length header (-1 if absent)
   connectionClose*: bool     ## Connection: close seen
+  trailers*: seq[(string, string)] ## Parsed trailer key/value pairs
   expectContinue*: bool      ## Client sent Expect: 100-continue
   onBodyData*: HttpBodyCallback ## Called as body bytes arrive (nil = buffered mode)
   bodyStreamed*: int64       ## Bytes streamed via callback so far
@@ -111,6 +112,7 @@
 <li><a class="reference" href="#MaxHeaderSize" title="MaxHeaderSize = 8192">MaxHeaderSize</a></li>
 <li><a class="reference" href="#MaxRequestLine" title="MaxRequestLine = 8192">MaxRequestLine</a></li>
 <li><a class="reference" href="#MaxStreamBodySize" title="MaxStreamBodySize = 536870912">MaxStreamBodySize</a></li>
+<li><a class="reference" href="#MinStreamBodySize" title="MinStreamBodySize = 65536">MinStreamBodySize</a></li>
 
     </ul>
   </details>
@@ -212,8 +214,23 @@
   <li><a class="reference" href="#getStatusText%2CHttpParser" title="getStatusText(p: HttpParser): lent string">getStatusText(p: HttpParser): lent string</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">getTrailer
+  <li><a class="reference" href="#getTrailer%2CHttpParser%2Cstring" title="getTrailer(p: HttpParser; name: string): string">getTrailer(p: HttpParser; name: string): string</a></li>
+<li><a class="reference" href="#getTrailer%2CHttpRequest%2Cstring" title="getTrailer(req: HttpRequest; name: string): string">getTrailer(req: HttpRequest; name: string): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">getTrailers
+  <li><a class="reference" href="#getTrailers%2CHttpParser" title="getTrailers(p: HttpParser): lent seq[(string, string)]">getTrailers(p: HttpParser): lent seq[(string, string)]</a></li>
+<li><a class="reference" href="#getTrailers%2CHttpRequest" title="getTrailers(req: HttpRequest): lent seq[(string, string)]">getTrailers(req: HttpRequest): lent seq[(string, string)]</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">getUrl
   <li><a class="reference" href="#getUrl%2CHttpRequest" title="getUrl(req: HttpRequest): lent string">getUrl(req: HttpRequest): lent string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">hasTrailers
+  <li><a class="reference" href="#hasTrailers%2CHttpParser" title="hasTrailers(p: HttpParser): bool">hasTrailers(p: HttpParser): bool</a></li>
+<li><a class="reference" href="#hasTrailers%2CHttpRequest" title="hasTrailers(req: HttpRequest): bool">hasTrailers(req: HttpRequest): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">headerBytes
@@ -355,6 +372,7 @@
   <span class="Identifier">headerEnd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>            <span class="Comment">## Byte offset past \r\n\r\n</span>
   <span class="Identifier">contentLength</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>        <span class="Comment">## From Content-Length header (-1 if absent)</span>
   <span class="Identifier">connectionClose</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>     <span class="Comment">## Connection: close seen</span>
+  <span class="Identifier">trailers</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Other">(</span><span class="Identifier">string</span><span class="Other">,</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">]</span> <span class="Comment">## Parsed trailer key/value pairs</span>
   <span class="Identifier">expectContinue</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>      <span class="Comment">## Client sent Expect: 100-continue</span>
   <span class="Identifier">onBodyData</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HttpBodyCallback"><span class="Identifier">HttpBodyCallback</span></a> <span class="Comment">## Called as body bytes arrive (nil = buffered mode)</span>
   <span class="Identifier">bodyStreamed</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>       <span class="Comment">## Bytes streamed via callback so far</span>
@@ -443,6 +461,14 @@
   <dd>
     
     Absolute cap for streamed bodies (onBodyData) when maxBodySize == 0: a hostile client can't drive unbounded disk/RAM via a streaming upload.
+    
+  </dd>
+</div>
+<div id="MinStreamBodySize">
+  <dt><pre><a href="#MinStreamBodySize"><span class="Identifier">MinStreamBodySize</span></a> <span class="Other">=</span> <span class="DecNumber">65536</span></pre></dt>
+  <dd>
+    
+    Bodies smaller than this are always buffered in the parser so <tt class="docutils literal"><span class="pre"><span class="Identifier">getBodyString</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">getBody</span></span></tt> work; larger bodies may be auto-streamed to a temp file when they arrive split across reads.
     
   </dd>
 </div>
@@ -764,9 +790,72 @@
 </div>
 
 </div>
+<div id="getTrailer-procs-all">
+  <div id="getTrailer,HttpParser,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getTrailer%2CHttpParser%2Cstring"><span class="Identifier">getTrailer</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">;</span> <span class="Identifier">name</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    First trailer value matching <tt class="docutils literal"><span class="pre"><span class="Identifier">name</span></span></tt> (case-insensitive), or &quot;&quot;.
+    
+  </dd>
+</div>
+<div id="getTrailer,HttpRequest,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getTrailer%2CHttpRequest%2Cstring"><span class="Identifier">getTrailer</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">name</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="getTrailers-procs-all">
+  <div id="getTrailers,HttpParser">
+  <dt><pre><span class="Keyword">func</span> <a href="#getTrailers%2CHttpParser"><span class="Identifier">getTrailers</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Other">(</span><span class="Identifier">string</span><span class="Other">,</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">]</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="getTrailers,HttpRequest">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getTrailers%2CHttpRequest"><span class="Identifier">getTrailers</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Other">(</span><span class="Identifier">string</span><span class="Other">,</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">]</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="getUrl-procs-all">
   <div id="getUrl,HttpRequest">
   <dt><pre><span class="Keyword">proc</span> <a href="#getUrl%2CHttpRequest"><span class="Identifier">getUrl</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">lent</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="hasTrailers-procs-all">
+  <div id="hasTrailers,HttpParser">
+  <dt><pre><span class="Keyword">proc</span> <a href="#hasTrailers%2CHttpParser"><span class="Identifier">hasTrailers</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                        <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the chunked message carried a non-empty trailer section.
+    
+  </dd>
+</div>
+<div id="hasTrailers,HttpRequest">
+  <dt><pre><span class="Keyword">proc</span> <a href="#hasTrailers%2CHttpRequest"><span class="Identifier">hasTrailers</span></a><span class="Other">(</span><span class="Identifier">req</span><span class="Other">:</span> <a href="#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -1028,7 +1117,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-28 10:54:25 UTC</small>
       </div>
     </div>
   </div>

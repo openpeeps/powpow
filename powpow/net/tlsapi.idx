@@ -1,37 +1,74 @@
 nimTitle	tlsapi	powpow/net/tlsapi.html	module powpow/net/tlsapi		0
 nim	SslCtx	powpow/net/tlsapi.html#SslCtx	type SslCtx		21
 nim	SslPtr	powpow/net/tlsapi.html#SslPtr	type SslPtr		22
-nim	SSL_FILETYPE_PEM	powpow/net/tlsapi.html#SSL_FILETYPE_PEM	const SSL_FILETYPE_PEM		25
-nim	SSL_VERIFY_NONE	powpow/net/tlsapi.html#SSL_VERIFY_NONE	const SSL_VERIFY_NONE		26
-nim	SSL_VERIFY_PEER	powpow/net/tlsapi.html#SSL_VERIFY_PEER	const SSL_VERIFY_PEER		27
-nim	SSL_ERROR_NONE	powpow/net/tlsapi.html#SSL_ERROR_NONE	const SSL_ERROR_NONE		29
-nim	SSL_ERROR_SSL	powpow/net/tlsapi.html#SSL_ERROR_SSL	const SSL_ERROR_SSL		30
-nim	SSL_ERROR_WANT_READ	powpow/net/tlsapi.html#SSL_ERROR_WANT_READ	const SSL_ERROR_WANT_READ		31
-nim	SSL_ERROR_WANT_WRITE	powpow/net/tlsapi.html#SSL_ERROR_WANT_WRITE	const SSL_ERROR_WANT_WRITE		32
-nim	SSL_ERROR_SYSCALL	powpow/net/tlsapi.html#SSL_ERROR_SYSCALL	const SSL_ERROR_SYSCALL		33
-nim	SSL_ERROR_ZERO_RETURN	powpow/net/tlsapi.html#SSL_ERROR_ZERO_RETURN	const SSL_ERROR_ZERO_RETURN		34
-nim	TLS_server_method	powpow/net/tlsapi.html#TLS_server_method	proc TLS_server_method(): pointer		36
-nim	TLS_client_method	powpow/net/tlsapi.html#TLS_client_method	proc TLS_client_method(): pointer		37
-nim	SSL_CTX_new	powpow/net/tlsapi.html#SSL_CTX_new,pointer	proc SSL_CTX_new(m: pointer): SslCtx		39
-nim	SSL_CTX_free	powpow/net/tlsapi.html#SSL_CTX_free,SslCtx	proc SSL_CTX_free(c: SslCtx)		40
-nim	SSL_CTX_use_certificate_file	powpow/net/tlsapi.html#SSL_CTX_use_certificate_file,SslCtx,cstring,cint	proc SSL_CTX_use_certificate_file(c: SslCtx; file: cstring; typ: cint): cint		41
-nim	SSL_CTX_use_PrivateKey_file	powpow/net/tlsapi.html#SSL_CTX_use_PrivateKey_file,SslCtx,cstring,cint	proc SSL_CTX_use_PrivateKey_file(c: SslCtx; file: cstring; typ: cint): cint		43
-nim	SSL_CTX_check_private_key	powpow/net/tlsapi.html#SSL_CTX_check_private_key,SslCtx	proc SSL_CTX_check_private_key(c: SslCtx): cint		45
-nim	SSL_CTX_set_verify	powpow/net/tlsapi.html#SSL_CTX_set_verify,SslCtx,cint,pointer	proc SSL_CTX_set_verify(c: SslCtx; mode: cint; cb: pointer)		47
-nim	SSL_CTX_set_default_verify_paths	powpow/net/tlsapi.html#SSL_CTX_set_default_verify_paths,SslCtx	proc SSL_CTX_set_default_verify_paths(c: SslCtx): cint		49
-nim	SSL_new	powpow/net/tlsapi.html#SSL_new,SslCtx	proc SSL_new(c: SslCtx): SslPtr		52
-nim	SSL_free	powpow/net/tlsapi.html#SSL_free,SslPtr	proc SSL_free(s: SslPtr)		53
-nim	SSL_set_fd	powpow/net/tlsapi.html#SSL_set_fd,SslPtr,cint	proc SSL_set_fd(s: SslPtr; fd: cint): cint		54
-nim	SSL_set_accept_state	powpow/net/tlsapi.html#SSL_set_accept_state,SslPtr	proc SSL_set_accept_state(s: SslPtr)		55
-nim	SSL_set_connect_state	powpow/net/tlsapi.html#SSL_set_connect_state,SslPtr	proc SSL_set_connect_state(s: SslPtr)		56
-nim	SSL_do_handshake	powpow/net/tlsapi.html#SSL_do_handshake,SslPtr	proc SSL_do_handshake(s: SslPtr): cint		57
-nim	SSL_read	powpow/net/tlsapi.html#SSL_read,SslPtr,pointer,cint	proc SSL_read(s: SslPtr; buf: pointer; num: cint): cint		58
-nim	SSL_write	powpow/net/tlsapi.html#SSL_write,SslPtr,pointer,cint	proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint		59
-nim	SSL_shutdown	powpow/net/tlsapi.html#SSL_shutdown,SslPtr	proc SSL_shutdown(s: SslPtr): cint		60
-nim	SSL_get_error	powpow/net/tlsapi.html#SSL_get_error,SslPtr,cint	proc SSL_get_error(s: SslPtr; ret: cint): cint		61
-nim	SSL_ctrl	powpow/net/tlsapi.html#SSL_ctrl,SslPtr,cint,cint,pointer	proc SSL_ctrl(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint		62
-nim	SSL_set1_host	powpow/net/tlsapi.html#SSL_set1_host,SslPtr,cstring	proc SSL_set1_host(s: SslPtr; hostname: cstring): cint		64
-nim	SSL_CTRL_SET_TLSEXT_HOSTNAME	powpow/net/tlsapi.html#SSL_CTRL_SET_TLSEXT_HOSTNAME	const SSL_CTRL_SET_TLSEXT_HOSTNAME		67
-nim	ERR_get_error	powpow/net/tlsapi.html#ERR_get_error	proc ERR_get_error(): culong		71
-nim	ERR_error_string_n	powpow/net/tlsapi.html#ERR_error_string_n,culong,cstring,csize_t	proc ERR_error_string_n(e: culong; buf: cstring; len: csize_t)		72
-nim	opensslError	powpow/net/tlsapi.html#opensslError	proc opensslError(): string		75
+nim	BioPtr	powpow/net/tlsapi.html#BioPtr	type BioPtr		23
+nim	SSL_FILETYPE_PEM	powpow/net/tlsapi.html#SSL_FILETYPE_PEM	const SSL_FILETYPE_PEM		26
+nim	SSL_VERIFY_NONE	powpow/net/tlsapi.html#SSL_VERIFY_NONE	const SSL_VERIFY_NONE		27
+nim	SSL_VERIFY_PEER	powpow/net/tlsapi.html#SSL_VERIFY_PEER	const SSL_VERIFY_PEER		28
+nim	SSL_ERROR_NONE	powpow/net/tlsapi.html#SSL_ERROR_NONE	const SSL_ERROR_NONE		30
+nim	SSL_ERROR_SSL	powpow/net/tlsapi.html#SSL_ERROR_SSL	const SSL_ERROR_SSL		31
+nim	SSL_ERROR_WANT_READ	powpow/net/tlsapi.html#SSL_ERROR_WANT_READ	const SSL_ERROR_WANT_READ		32
+nim	SSL_ERROR_WANT_WRITE	powpow/net/tlsapi.html#SSL_ERROR_WANT_WRITE	const SSL_ERROR_WANT_WRITE		33
+nim	SSL_ERROR_SYSCALL	powpow/net/tlsapi.html#SSL_ERROR_SYSCALL	const SSL_ERROR_SYSCALL		34
+nim	SSL_ERROR_ZERO_RETURN	powpow/net/tlsapi.html#SSL_ERROR_ZERO_RETURN	const SSL_ERROR_ZERO_RETURN		35
+nim	TLS_server_method	powpow/net/tlsapi.html#TLS_server_method	proc TLS_server_method(): pointer		37
+nim	TLS_client_method	powpow/net/tlsapi.html#TLS_client_method	proc TLS_client_method(): pointer		38
+nim	SSL_CTX_new	powpow/net/tlsapi.html#SSL_CTX_new,pointer	proc SSL_CTX_new(m: pointer): SslCtx		40
+nim	SSL_CTX_free	powpow/net/tlsapi.html#SSL_CTX_free,SslCtx	proc SSL_CTX_free(c: SslCtx)		41
+nim	SSL_CTX_use_certificate_file	powpow/net/tlsapi.html#SSL_CTX_use_certificate_file,SslCtx,cstring,cint	proc SSL_CTX_use_certificate_file(c: SslCtx; file: cstring; typ: cint): cint		42
+nim	SSL_CTX_use_PrivateKey_file	powpow/net/tlsapi.html#SSL_CTX_use_PrivateKey_file,SslCtx,cstring,cint	proc SSL_CTX_use_PrivateKey_file(c: SslCtx; file: cstring; typ: cint): cint		44
+nim	SSL_CTX_check_private_key	powpow/net/tlsapi.html#SSL_CTX_check_private_key,SslCtx	proc SSL_CTX_check_private_key(c: SslCtx): cint		46
+nim	SSL_CTX_set_verify	powpow/net/tlsapi.html#SSL_CTX_set_verify,SslCtx,cint,pointer	proc SSL_CTX_set_verify(c: SslCtx; mode: cint; cb: pointer)		48
+nim	SSL_CTX_set_default_verify_paths	powpow/net/tlsapi.html#SSL_CTX_set_default_verify_paths,SslCtx	proc SSL_CTX_set_default_verify_paths(c: SslCtx): cint		50
+nim	SSL_new	powpow/net/tlsapi.html#SSL_new,SslCtx	proc SSL_new(c: SslCtx): SslPtr		53
+nim	SSL_free	powpow/net/tlsapi.html#SSL_free,SslPtr	proc SSL_free(s: SslPtr)		54
+nim	SSL_set_fd	powpow/net/tlsapi.html#SSL_set_fd,SslPtr,cint	proc SSL_set_fd(s: SslPtr; fd: cint): cint		55
+nim	SSL_set_bio	powpow/net/tlsapi.html#SSL_set_bio,SslPtr,BioPtr,BioPtr	proc SSL_set_bio(s: SslPtr; rbio, wbio: BioPtr)		56
+nim	SSL_get_rbio	powpow/net/tlsapi.html#SSL_get_rbio,SslPtr	proc SSL_get_rbio(s: SslPtr): BioPtr		57
+nim	SSL_get_wbio	powpow/net/tlsapi.html#SSL_get_wbio,SslPtr	proc SSL_get_wbio(s: SslPtr): BioPtr		58
+nim	SSL_get_pending_write	powpow/net/tlsapi.html#SSL_get_pending_write,SslPtr	proc SSL_get_pending_write(s: SslPtr): cint		59
+nim	BIO_new	powpow/net/tlsapi.html#BIO_new,BioPtr	proc BIO_new(b: BioPtr): BioPtr		60
+nim	BIO_s_mem	powpow/net/tlsapi.html#BIO_s_mem	proc BIO_s_mem(): BioPtr		61
+nim	BIO_write	powpow/net/tlsapi.html#BIO_write,BioPtr,pointer,cint	proc BIO_write(b: BioPtr; buf: pointer; len: cint): cint		62
+nim	BIO_read	powpow/net/tlsapi.html#BIO_read,BioPtr,pointer,cint	proc BIO_read(b: BioPtr; buf: pointer; len: cint): cint		63
+nim	SSL_set_accept_state	powpow/net/tlsapi.html#SSL_set_accept_state,SslPtr	proc SSL_set_accept_state(s: SslPtr)		64
+nim	SSL_set_connect_state	powpow/net/tlsapi.html#SSL_set_connect_state,SslPtr	proc SSL_set_connect_state(s: SslPtr)		65
+nim	SSL_do_handshake	powpow/net/tlsapi.html#SSL_do_handshake,SslPtr	proc SSL_do_handshake(s: SslPtr): cint		66
+nim	SSL_read	powpow/net/tlsapi.html#SSL_read,SslPtr,pointer,cint	proc SSL_read(s: SslPtr; buf: pointer; num: cint): cint		67
+nim	SSL_write	powpow/net/tlsapi.html#SSL_write,SslPtr,pointer,cint	proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint		68
+nim	SSL_shutdown	powpow/net/tlsapi.html#SSL_shutdown,SslPtr	proc SSL_shutdown(s: SslPtr): cint		69
+nim	SSL_get_error	powpow/net/tlsapi.html#SSL_get_error,SslPtr,cint	proc SSL_get_error(s: SslPtr; ret: cint): cint		70
+nim	SSL_ctrl	powpow/net/tlsapi.html#SSL_ctrl,SslPtr,cint,cint,pointer	proc SSL_ctrl(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint		71
+nim	SSL_set1_host	powpow/net/tlsapi.html#SSL_set1_host,SslPtr,cstring	proc SSL_set1_host(s: SslPtr; hostname: cstring): cint		73
+nim	SSL_CTRL_SET_TLSEXT_HOSTNAME	powpow/net/tlsapi.html#SSL_CTRL_SET_TLSEXT_HOSTNAME	const SSL_CTRL_SET_TLSEXT_HOSTNAME		76
+nim	ERR_get_error	powpow/net/tlsapi.html#ERR_get_error	proc ERR_get_error(): culong		80
+nim	ERR_error_string_n	powpow/net/tlsapi.html#ERR_error_string_n,culong,cstring,csize_t	proc ERR_error_string_n(e: culong; buf: cstring; len: csize_t)		81
+nim	opensslError	powpow/net/tlsapi.html#opensslError	proc opensslError(): string		84
+nim	DTLS1_2_VERSION	powpow/net/tlsapi.html#DTLS1_2_VERSION	const DTLS1_2_VERSION		105
+nim	SSL_CTRL_SET_MIN_PROTO_VERSION	powpow/net/tlsapi.html#SSL_CTRL_SET_MIN_PROTO_VERSION	const SSL_CTRL_SET_MIN_PROTO_VERSION		108
+nim	SSL_CTRL_SET_MAX_PROTO_VERSION	powpow/net/tlsapi.html#SSL_CTRL_SET_MAX_PROTO_VERSION	const SSL_CTRL_SET_MAX_PROTO_VERSION		109
+nim	SSL_CTRL_SET_MTU	powpow/net/tlsapi.html#SSL_CTRL_SET_MTU	const SSL_CTRL_SET_MTU		110
+nim	DTLS_CTRL_GET_TIMEOUT	powpow/net/tlsapi.html#DTLS_CTRL_GET_TIMEOUT	const DTLS_CTRL_GET_TIMEOUT		112
+nim	DTLS_CTRL_HANDLE_TIMEOUT	powpow/net/tlsapi.html#DTLS_CTRL_HANDLE_TIMEOUT	const DTLS_CTRL_HANDLE_TIMEOUT		113
+nim	DTLS_CTRL_SET_LINK_MTU	powpow/net/tlsapi.html#DTLS_CTRL_SET_LINK_MTU	const DTLS_CTRL_SET_LINK_MTU		114
+nim	SSL_OP_COOKIE_EXCHANGE	powpow/net/tlsapi.html#SSL_OP_COOKIE_EXCHANGE	const SSL_OP_COOKIE_EXCHANGE		116
+nim	DTLS_server_method	powpow/net/tlsapi.html#DTLS_server_method	proc DTLS_server_method(): pointer		121
+nim	DTLS_client_method	powpow/net/tlsapi.html#DTLS_client_method	proc DTLS_client_method(): pointer		122
+nim	SSL_CTX_set_options	powpow/net/tlsapi.html#SSL_CTX_set_options,SslCtx,uint64	proc SSL_CTX_set_options(ctx: SslCtx; options: uint64): uint64		124
+nim	SSL_set_options	powpow/net/tlsapi.html#SSL_set_options,SslPtr,uint64	proc SSL_set_options(ssl: SslPtr; options: uint64): uint64		126
+nim	SSL_CTX_ctrl	powpow/net/tlsapi.html#SSL_CTX_ctrl,SslCtx,cint,cint,pointer	proc SSL_CTX_ctrl(ctx: SslCtx; cmd: cint; larg: cint; parg: pointer): cint		129
+nim	RAND_bytes	powpow/net/tlsapi.html#RAND_bytes,pointer,cint	proc RAND_bytes(buf: pointer; num: cint): cint		132
+nim	DtlsCookieGenerateCb	powpow/net/tlsapi.html#DtlsCookieGenerateCb	type DtlsCookieGenerateCb		135
+nim	DtlsCookieVerifyCb	powpow/net/tlsapi.html#DtlsCookieVerifyCb	type DtlsCookieVerifyCb		137
+nim	SSL_CTX_set_cookie_generate_cb	powpow/net/tlsapi.html#SSL_CTX_set_cookie_generate_cb,SslCtx,DtlsCookieGenerateCb	proc SSL_CTX_set_cookie_generate_cb(ctx: SslCtx; cb: DtlsCookieGenerateCb)		140
+nim	SSL_CTX_set_cookie_verify_cb	powpow/net/tlsapi.html#SSL_CTX_set_cookie_verify_cb,SslCtx,DtlsCookieVerifyCb	proc SSL_CTX_set_cookie_verify_cb(ctx: SslCtx; cb: DtlsCookieVerifyCb)		142
+nim	EvpMdPtr	powpow/net/tlsapi.html#EvpMdPtr	type EvpMdPtr		147
+nim	EVP_sha256	powpow/net/tlsapi.html#EVP_sha256	proc EVP_sha256(): EvpMdPtr		149
+nim	HMAC	powpow/net/tlsapi.html#HMAC,EvpMdPtr,pointer,cint,pointer,cint,ptr.UncheckedArray[byte],ptr.cuint	proc HMAC(evp_md: EvpMdPtr; key: pointer; key_len: cint; data: pointer;\n     data_len: cint; md: ptr UncheckedArray[byte]; md_len: ptr cuint): pointer		151
+nim	CookieSecretLen	powpow/net/tlsapi.html#CookieSecretLen	const CookieSecretLen		157
+nim	CookieMacLen	powpow/net/tlsapi.html#CookieMacLen	const CookieMacLen		158
+nim	CRYPTO_EX_INDEX_SSL	powpow/net/tlsapi.html#CRYPTO_EX_INDEX_SSL	const CRYPTO_EX_INDEX_SSL		165
+nim	CRYPTO_get_ex_new_index	powpow/net/tlsapi.html#CRYPTO_get_ex_new_index,cint,clong,pointer,pointer,pointer,pointer	proc CRYPTO_get_ex_new_index(cls: cint; argl: clong; argp: pointer;\n                        newCb, dupCb, freeCb: pointer): cint		167
+nim	SSL_set_ex_data	powpow/net/tlsapi.html#SSL_set_ex_data,SslPtr,cint,pointer	proc SSL_set_ex_data(ssl: SslPtr; idx: cint; arg: pointer): cint		170
+nim	SSL_get_ex_data	powpow/net/tlsapi.html#SSL_get_ex_data,SslPtr,cint	proc SSL_get_ex_data(ssl: SslPtr; idx: cint): pointer		172
+nim	SSL_OP_NO_QUERY_MTU	powpow/net/tlsapi.html#SSL_OP_NO_QUERY_MTU	const SSL_OP_NO_QUERY_MTU		175

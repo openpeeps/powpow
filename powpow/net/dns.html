@@ -64,8 +64,19 @@
       <li><a class="reference" href="#DnsCacheEntry" title="DnsCacheEntry = object">DnsCacheEntry</a></li>
 <li><a class="reference" href="#DnsCallback" title="DnsCallback = proc (addrs: seq[Sockaddr_storage]; err: string) {.closure.}">DnsCallback</a></li>
 <li><a class="reference" href="#DnsQuery" title="DnsQuery = ref object">DnsQuery</a></li>
-<li><a class="reference" href="#DnsResolver" title="DnsResolver = ref object of RootObj">DnsResolver</a></li>
+<li><a class="reference" href="#DnsResolver" title="DnsResolver = ref object of RootObj
+  when iouEnabled:
+  else:">DnsResolver</a></li>
+<li><a class="reference" href="#MxCallback" title="MxCallback = proc (records: seq[MxRecord]; err: string) {.closure.}">MxCallback</a></li>
+<li><a class="reference" href="#MxRecord" title="MxRecord = object
+  pref*: int
+  exchange*: string">MxRecord</a></li>
 <li><a class="reference" href="#ResolvedIp" title="ResolvedIp = object">ResolvedIp</a></li>
+<li><a class="reference" href="#TxtCallback" title="TxtCallback = proc (records: seq[TxtRecord]; err: string) {.closure.}">TxtCallback</a></li>
+<li><a class="reference" href="#TxtRecord" title="TxtRecord = object
+  name*: string              ## The owner name of the record (e.g. &quot;_dmarc.example.com&quot;).
+  data*: string              ## The full TXT string (character-strings concatenated per RFC 1035 §3.3.14).
+  ttl*: int                  ## Time-to-live in seconds.">TxtRecord</a></li>
 
     </ul>
   </details>
@@ -88,6 +99,18 @@
     addrs: seq[Sockaddr_storage]; err: string) {.closure.})</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">resolveAddrBothAsync
+  <li><a class="reference" href="#resolveAddrBothAsync%2CLoop%2Cstring%2Cint%2CDnsCallback" title="resolveAddrBothAsync(loop: Loop; address: string; port: int; cb: DnsCallback)">resolveAddrBothAsync(loop: Loop; address: string; port: int; cb: DnsCallback)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">resolveMxAsync
+  <li><a class="reference" href="#resolveMxAsync%2CLoop%2Cstring%2CMxCallback" title="resolveMxAsync(loop: Loop; domain: string; mcb: MxCallback)">resolveMxAsync(loop: Loop; domain: string; mcb: MxCallback)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">resolveTxtAsync
+  <li><a class="reference" href="#resolveTxtAsync%2CLoop%2Cstring%2CTxtCallback" title="resolveTxtAsync(loop: Loop; hostname: string; tcb: TxtCallback)">resolveTxtAsync(loop: Loop; hostname: string; tcb: TxtCallback)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">setDnsServers
   <li><a class="reference" href="#setDnsServers%2CLoop%2CopenArray%5B%5D" title="setDnsServers(loop: Loop; servers: openArray[(string, int)])">setDnsServers(loop: Loop; servers: openArray[(string, int)])</a></li>
 
@@ -107,11 +130,15 @@
     <p class="module-desc"><p>powpow/net/dns.nim — In-loop DNS resolver (RFC 1035).</p>
 <p>Resolves hostnames to socket addresses entirely on the event loop, without blocking <tt class="docutils literal"><span class="pre"><span class="Identifier">getaddrinfo</span></span></tt>. It reads the system resolver config (<tt class="docutils literal"><span class="pre"><span class="Operator">/</span><span class="Identifier">etc</span><span class="Operator">/</span><span class="Identifier">hosts</span></span></tt> and <tt class="docutils literal"><span class="pre"><span class="Operator">/</span><span class="Identifier">etc</span><span class="Operator">/</span><span class="Identifier">resolv</span><span class="Operator">.</span><span class="Identifier">conf</span></span></tt> on POSIX), sends A/AAAA queries over a UDP socket owned by the loop, retries with the configured timeout/attempts, and caches results by their TTL.</p>
 <p><tt class="docutils literal"><span class="pre"><span class="Identifier">tcp</span><span class="Operator">.</span><span class="Identifier">connect</span></span></tt> uses this resolver, so outbound TCP connections no longer block the loop on DNS. The resolver runs with no worker threads and no <tt class="docutils literal"><span class="pre"><span class="Operator">--</span><span class="Identifier">threads</span><span class="Punctuation">:</span><span class="Identifier">on</span></span></tt> requirement.</p>
+<p>The wire codec, query state machine, cache and public API are shared by both backends; only the UDP I/O differs:</p>
+<ul class="simple"><li>readiness (default): a raw socket registered for {Read}, <tt class="docutils literal"><span class="pre"><span class="Identifier">sendto</span></span></tt>/ <tt class="docutils literal"><span class="pre"><span class="Identifier">recvfrom</span></span></tt> in the event callback.</li>
+<li>io_uring (<tt class="docutils literal"><span class="pre"><span class="Keyword">when</span> <span class="Identifier">iouEnabled</span></span></tt>): an op-driven <tt class="docutils literal"><span class="pre"><span class="Identifier">UdpSocket</span></span></tt> (<tt class="docutils literal"><span class="pre"><span class="Identifier">RECVMSG</span></span></tt>/ <tt class="docutils literal"><span class="pre"><span class="Identifier">SENDMSG</span></span></tt> — with <tt class="docutils literal"><span class="pre"><span class="Identifier">IORING_FEAT_FAST_POLL</span></span></tt> the kernel arms an internal poll when the socket is not ready, so no readiness watcher is needed).</li>
+</ul>
 </p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
   <dl class="item">
-    <a class="reference external" href="../loop.html">../loop</a>, <a class="reference external" href="../types.html">../types</a>, <a class="reference external" href="common.html">common</a>
+    <a class="reference external" href="../types.html">../types</a>, <a class="reference external" href="../loop.html">../loop</a>, <a class="reference external" href="common.html">common</a>
   </dl>
 </div>
 <div class="section" id="7">
@@ -142,7 +169,27 @@
   </dd>
 </div>
 <div id="DnsResolver">
-  <dt><pre><a href="#DnsResolver"><span class="Identifier">DnsResolver</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span> <span class="Keyword">of</span> <span class="Identifier">RootObj</span></pre></dt>
+  <dt><pre><a href="#DnsResolver"><span class="Identifier">DnsResolver</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span> <span class="Keyword">of</span> <span class="Identifier">RootObj</span>
+  <span class="Keyword">when</span> <span class="Identifier">iouEnabled</span><span class="Other">:</span>
+  <span class="Keyword">else</span><span class="Other">:</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="MxCallback">
+  <dt><pre><a href="#MxCallback"><span class="Identifier">MxCallback</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">records</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><a href="#MxRecord"><span class="Identifier">MxRecord</span></a><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">err</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="MxRecord">
+  <dt><pre><a href="#MxRecord"><span class="Identifier">MxRecord</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
+  <span class="Identifier">pref</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
+  <span class="Identifier">exchange</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span></pre></dt>
   <dd>
     
     
@@ -154,6 +201,25 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+<div id="TxtCallback">
+  <dt><pre><a href="#TxtCallback"><span class="Identifier">TxtCallback</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">records</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><a href="#TxtRecord"><span class="Identifier">TxtRecord</span></a><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">err</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="TxtRecord">
+  <dt><pre><a href="#TxtRecord"><span class="Identifier">TxtRecord</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
+  <span class="Identifier">name</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>              <span class="Comment">## The owner name of the record (e.g. &quot;_dmarc.example.com&quot;).</span>
+  <span class="Identifier">data</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>              <span class="Comment">## The full TXT string (character-strings concatenated per RFC 1035 §3.3.14).</span>
+  <span class="Identifier">ttl</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>                  <span class="Comment">## Time-to-live in seconds.</span></pre></dt>
+  <dd>
+    
+    A single TXT record returned by the DNS resolver.
     
   </dd>
 </div>
@@ -203,6 +269,46 @@
 </div>
 
 </div>
+<div id="resolveAddrBothAsync-procs-all">
+  <div id="resolveAddrBothAsync,Loop,string,int,DnsCallback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrBothAsync%2CLoop%2Cstring%2Cint%2CDnsCallback"><span class="Identifier">resolveAddrBothAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span>
+                          <span class="Identifier">cb</span><span class="Other">:</span> <a href="#DnsCallback"><span class="Identifier">DnsCallback</span></a><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Resolve both address families for <tt class="docutils literal"><span class="pre"><span class="Identifier">address</span></span></tt> and deliver all socket addresses ordered IPv6-first (RFC 8305 family-block order) — the input for Happy Eyeballs connection attempts. If one family fails or is empty, the other is still delivered; only when both yield nothing does <tt class="docutils literal"><span class="pre"><span class="Identifier">cb</span></span></tt> fire with an error. Never blocks the loop on DNS.
+    
+  </dd>
+</div>
+
+</div>
+<div id="resolveMxAsync-procs-all">
+  <div id="resolveMxAsync,Loop,string,MxCallback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveMxAsync%2CLoop%2Cstring%2CMxCallback"><span class="Identifier">resolveMxAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">domain</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">mcb</span><span class="Other">:</span> <a href="#MxCallback"><span class="Identifier">MxCallback</span></a><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Resolve MX records for <tt class="docutils literal"><span class="pre"><span class="Identifier">domain</span></span></tt> asynchronously on <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt>. <tt class="docutils literal"><span class="pre"><span class="Identifier">mcb</span></span></tt> runs on the loop thread with the records sorted by ascending preference (or an empty seq when the name exists but publishes no MX — callers decide whether to fall back to address resolution, e.g. RFC 5321 §5.1). A non-empty <tt class="docutils literal"><span class="pre"><span class="Identifier">err</span></span></tt> signals NXDOMAIN or a resolver failure. Never blocks the loop on DNS.
+    
+  </dd>
+</div>
+
+</div>
+<div id="resolveTxtAsync-procs-all">
+  <div id="resolveTxtAsync,Loop,string,TxtCallback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveTxtAsync%2CLoop%2Cstring%2CTxtCallback"><span class="Identifier">resolveTxtAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">hostname</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">tcb</span><span class="Other">:</span> <a href="#TxtCallback"><span class="Identifier">TxtCallback</span></a><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Resolve TXT records for <tt class="docutils literal"><span class="pre"><span class="Identifier">hostname</span></span></tt> asynchronously on <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt>. <tt class="docutils literal"><span class="pre"><span class="Identifier">tcb</span></span></tt> runs on the loop thread with ALL TXT records found (or an empty seq plus an empty <tt class="docutils literal"><span class="pre"><span class="Identifier">err</span></span></tt> when the name exists but publishes no TXT records — the caller decides what that means). A non-empty <tt class="docutils literal"><span class="pre"><span class="Identifier">err</span></span></tt> signals NXDOMAIN or a resolver failure. Never blocks the loop on DNS.
+    
+  </dd>
+</div>
+
+</div>
 <div id="setDnsServers-procs-all">
   <div id="setDnsServers,Loop,openArray[]">
   <dt><pre><span class="Keyword">proc</span> <a href="#setDnsServers%2CLoop%2CopenArray%5B%5D"><span class="Identifier">setDnsServers</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">servers</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Other">(</span><span class="Identifier">string</span><span class="Other">,</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">]</span><span class="Other">)</span> {.
@@ -226,7 +332,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:19 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-28 10:54:24 UTC</small>
       </div>
     </div>
   </div>

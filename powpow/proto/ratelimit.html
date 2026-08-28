@@ -63,6 +63,7 @@
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#RateLimiter" title="RateLimiter = ref object
   loop*: Loop">RateLimiter</a></li>
+<li><a class="reference" href="#WindowLimit" title="WindowLimit = tuple[maxRequests: int, windowMs: int]">WindowLimit</a></li>
 
     </ul>
   </details>
@@ -72,7 +73,7 @@
     <summary><a class="reference reference-toplevel" href="#12" id="62">Procs</a></summary>
     <ul class="simple simple-toc-section">
       <ul class="simple nested-toc-section">allow
-  <li><a class="reference" href="#allow%2CRateLimiter%2Cstring" title="allow(rl: RateLimiter; ip: string): bool">allow(rl: RateLimiter; ip: string): bool</a></li>
+  <li><a class="reference" href="#allow%2CRateLimiter%2Cstring" title="allow(rl: RateLimiter; key: string): bool">allow(rl: RateLimiter; key: string): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">check
@@ -81,6 +82,12 @@
 </ul>
 <ul class="simple nested-toc-section">close
   <li><a class="reference" href="#close%2CRateLimiter" title="close(rl: RateLimiter)">close(rl: RateLimiter)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">newMultiRateLimiter
+  <li><a class="reference" href="#newMultiRateLimiter%2CLoop%2CopenArray%5BWindowLimit%5D" title="newMultiRateLimiter(loop: Loop; limits: openArray[WindowLimit];
+                    enableCleanup = true): RateLimiter">newMultiRateLimiter(loop: Loop; limits: openArray[WindowLimit];
+                    enableCleanup = true): RateLimiter</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">newRateLimiter
@@ -100,7 +107,9 @@
     <div id="tocRoot"></div>
     
     <p class="module-desc"><p>Sliding-window rate limiter built on powpow's event loop.</p>
-<p>Usage: let server = newHttpServer() let rl = newRateLimiter(server.getLoop(), maxRequests = 100, windowMs = 60_000) server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} = if not rl.check(req, res): return res.status(Http200).send(&quot;Hello!&quot;) </p>
+<p>Supports multiple time windows per limiter — e.g. per-IP hourly + daily quotas checked atomically. The two-phase <tt class="docutils literal"><span class="pre"><span class="Identifier">allow</span></span></tt> verifies every window before incrementing any, so a message rejected by the daily quota is not overcounted against the hourly.</p>
+<p>Single-window (backward-compatible): let rl = newRateLimiter(loop, maxRequests = 100, windowMs = 60_000)</p>
+<p>Multi-window: let rl = newMultiRateLimiter(loop, <a class="reference internal" href="#(100, 3_600_000), (1_000, 86_400_000)">(100, 3_600_000), (1_000, 86_400_000)</a>)</p>
 </p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
@@ -120,6 +129,14 @@
     
   </dd>
 </div>
+<div id="WindowLimit">
+  <dt><pre><a href="#WindowLimit"><span class="Identifier">WindowLimit</span></a> <span class="Other">=</span> <span class="Keyword">tuple</span><span class="Other">[</span><span class="Identifier">maxRequests</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">,</span> <span class="Identifier">windowMs</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">]</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
 
   </dl>
 </div>
@@ -128,11 +145,11 @@
   <dl class="item">
     <div id="allow-procs-all">
   <div id="allow,RateLimiter,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#allow%2CRateLimiter%2Cstring"><span class="Identifier">allow</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">;</span> <span class="Identifier">ip</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#allow%2CRateLimiter%2Cstring"><span class="Identifier">allow</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">;</span> <span class="Identifier">key</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    
+    Check whether <tt class="docutils literal"><span class="pre"><span class="Identifier">key</span></span></tt> is allowed across ALL configured windows.  Returns true only when every non-unlimited window still has capacity; increments the count atomically on success.  Returns true immediately for empty keys or when every rule is unlimited (<tt class="docutils literal"><span class="pre"><span class="Identifier">maxRequests</span> <span class="Operator">&lt;=</span> <span class="DecNumber">0</span></span></tt>).
     
   </dd>
 </div>
@@ -162,6 +179,19 @@
 </div>
 
 </div>
+<div id="newMultiRateLimiter-procs-all">
+  <div id="newMultiRateLimiter,Loop,openArray[WindowLimit]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newMultiRateLimiter%2CLoop%2CopenArray%5BWindowLimit%5D"><span class="Identifier">newMultiRateLimiter</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">limits</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><a href="#WindowLimit"><span class="Identifier">WindowLimit</span></a><span class="Other">]</span><span class="Other">;</span>
+                         <span class="Identifier">enableCleanup</span> <span class="Other">=</span> <span class="Identifier">true</span><span class="Other">)</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create a sliding-window rate limiter with one or more time windows. Each <tt class="docutils literal"><span class="pre"><span class="Identifier">limit</span></span></tt> is <tt class="docutils literal"><span class="pre"><span class="Punctuation">(</span><span class="Identifier">maxRequests</span><span class="Punctuation">,</span> <span class="Identifier">windowMs</span><span class="Punctuation">)</span></span></tt> — entries with <tt class="docutils literal"><span class="pre"><span class="Identifier">maxRequests</span></span></tt> &lt;= 0 are treated as unlimited (always allowed, never counted).
+    
+  </dd>
+</div>
+
+</div>
 <div id="newRateLimiter-procs-all">
   <div id="newRateLimiter,Loop,int,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#newRateLimiter%2CLoop%2Cint%2Cint"><span class="Identifier">newRateLimiter</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">maxRequests</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">windowMs</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span>
@@ -169,7 +199,7 @@
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Create a sliding-window rate limiter. <tt class="docutils literal"><span class="pre"><span class="Identifier">maxRequests</span></span></tt> per <tt class="docutils literal"><span class="pre"><span class="Identifier">windowMs</span></span></tt> per unique client IP. When <tt class="docutils literal"><span class="pre"><span class="Identifier">enableCleanup</span></span></tt> is true (default), a periodic timer sweeps stale buckets from memory.
+    Single-window convenience constructor (backward-compatible).
     
   </dd>
 </div>
@@ -185,7 +215,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-13 11:47:20 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-28 10:54:25 UTC</small>
       </div>
     </div>
   </div>

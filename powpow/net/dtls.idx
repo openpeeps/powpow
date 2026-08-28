@@ -1,0 +1,33 @@
+nimTitle	dtls	powpow/net/dtls.html	module powpow/net/dtls		0
+nim	DtlsServerRole	powpow/net/dtls.html#DtlsServerRole	DtlsRole.DtlsServerRole		47
+nim	DtlsClientRole	powpow/net/dtls.html#DtlsClientRole	DtlsRole.DtlsClientRole		47
+nim	DtlsRole	powpow/net/dtls.html#DtlsRole	enum DtlsRole		47
+nim	DtlsHandshaking	powpow/net/dtls.html#DtlsHandshaking	DtlsSessionState.DtlsHandshaking		51
+nim	DtlsActive	powpow/net/dtls.html#DtlsActive	DtlsSessionState.DtlsActive		51
+nim	DtlsClosed	powpow/net/dtls.html#DtlsClosed	DtlsSessionState.DtlsClosed		51
+nim	DtlsSessionState	powpow/net/dtls.html#DtlsSessionState	enum DtlsSessionState		51
+nim	DtlsConfig	powpow/net/dtls.html#DtlsConfig	object DtlsConfig		59
+nim	DtlsContext	powpow/net/dtls.html#DtlsContext	type DtlsContext		67
+nim	DtlsSession	powpow/net/dtls.html#DtlsSession	type DtlsSession		72
+nim	DtlsServer	powpow/net/dtls.html#DtlsServer	type DtlsServer		87
+nim	DtlsError	powpow/net/dtls.html#DtlsError	object DtlsError		101
+nim	DtlsMtuDefault	powpow/net/dtls.html#DtlsMtuDefault	const DtlsMtuDefault		106
+nim	DtlsMaxChunk	powpow/net/dtls.html#DtlsMaxChunk	const DtlsMaxChunk		107
+nim	DtlsMaxSessionsDefault	powpow/net/dtls.html#DtlsMaxSessionsDefault	const DtlsMaxSessionsDefault		108
+nim	DtlsHandshakeTimeoutDefaultMs	powpow/net/dtls.html#DtlsHandshakeTimeoutDefaultMs	const DtlsHandshakeTimeoutDefaultMs		109
+nim	DtlsIdleTimeoutDefaultMs	powpow/net/dtls.html#DtlsIdleTimeoutDefaultMs	const DtlsIdleTimeoutDefaultMs		110
+nim	DtlsSweepIntervalDefaultMs	powpow/net/dtls.html#DtlsSweepIntervalDefaultMs	const DtlsSweepIntervalDefaultMs		111
+nim	defaultDtlsConfig	powpow/net/dtls.html#defaultDtlsConfig	proc defaultDtlsConfig(cookieExchange = true): DtlsConfig		113
+nim	peerAddrStr	powpow/net/dtls.html#peerAddrStr,DtlsSession	proc peerAddrStr(sess: DtlsSession): string		157
+nim	close	powpow/net/dtls.html#close,DtlsSession	proc close(sess: DtlsSession)		294
+nim	send	powpow/net/dtls.html#send,DtlsSession,openArray[byte]	proc send(sess: DtlsSession; data: openArray[byte]): int		349
+nim	send	powpow/net/dtls.html#send,DtlsSession,string	proc send(sess: DtlsSession; data: string): int		381
+nim	newServerDtlsContext	powpow/net/dtls.html#newServerDtlsContext,string,string	proc newServerDtlsContext(certFile, keyFile: string; cookieExchange = true): DtlsContext		546
+nim	newClientDtlsContext	powpow/net/dtls.html#newClientDtlsContext	proc newClientDtlsContext(verifyPeer = false): DtlsContext		586
+nim	newDtlsServer	powpow/net/dtls.html#newDtlsServer,Loop,string,int,DtlsContext,proc(DtlsSession,openArray[byte]),proc(DtlsSession),proc(DtlsSession),proc(DtlsSession,string)	proc newDtlsServer(loop: Loop; address: string; port: int; ctx: DtlsContext; onData: proc (\n    sess: DtlsSession; data: openArray[byte]) {.closure.};\n              onHandshakeDone: proc (sess: DtlsSession) {.closure.} = nil;\n              onClose: proc (sess: DtlsSession) {.closure.} = nil;\n              onError: proc (sess: DtlsSession; msg: string) {.closure.} = nil;\n              config = defaultDtlsConfig()): DtlsServer		610
+nim	sessionCount	powpow/net/dtls.html#sessionCount,DtlsServer	proc sessionCount(srv: DtlsServer): int		643
+nim	close	powpow/net/dtls.html#close,DtlsServer	proc close(srv: DtlsServer)		647
+nim	sendTo	powpow/net/dtls.html#sendTo,DtlsServer,string,openArray[byte]	proc sendTo(srv: DtlsServer; peerKey: string; data: openArray[byte]): int		659
+nim	connectDtls	powpow/net/dtls.html#connectDtls,Loop,string,int,DtlsContext,proc(DtlsSession,openArray[byte]),proc(DtlsSession),proc(DtlsSession),proc(DtlsSession,string)	proc connectDtls(loop: Loop; address: string; port: int; ctx: DtlsContext; onData: proc (\n    sess: DtlsSession; data: openArray[byte]) {.closure.} = nil;\n            onHandshakeDone: proc (sess: DtlsSession) {.closure.} = nil;\n            onClose: proc (sess: DtlsSession) {.closure.} = nil;\n            onError: proc (sess: DtlsSession; msg: string) {.closure.} = nil;\n            config = defaultDtlsConfig()): DtlsSession		668
+nimgrp	close	powpow/net/dtls.html#close-procs-all	proc		294
+nimgrp	send	powpow/net/dtls.html#send-procs-all	proc		349

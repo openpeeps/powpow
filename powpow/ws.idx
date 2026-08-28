@@ -1,0 +1,25 @@
+nimTitle	ws	powpow/ws.html	module powpow/ws		0
+nim	WsReconnectPolicy	powpow/ws.html#WsReconnectPolicy	object WsReconnectPolicy		39
+nim	WsRetryCb	powpow/ws.html#WsRetryCb	type WsRetryCb		49
+nim	WsGiveUpCb	powpow/ws.html#WsGiveUpCb	type WsGiveUpCb		53
+nim	WsClient	powpow/ws.html#WsClient	type WsClient		57
+nim	DefaultWsReconnectPolicy	powpow/ws.html#DefaultWsReconnectPolicy	const DefaultWsReconnectPolicy		90
+nim	newWsClient	powpow/ws.html#newWsClient,WsReconnectPolicy,int,int	proc newWsClient(policy: WsReconnectPolicy = DefaultWsReconnectPolicy;\n            maxFrameSize: int = DefaultMaxFrameSize;\n            handshakeTimeoutMs: int = 10000): WsClient		93
+nim	onOpen	powpow/ws.html#onOpen,WsClient,WsOpenCb	proc onOpen(c: WsClient; cb: WsOpenCb)		109
+nim	onMessage	powpow/ws.html#onMessage,WsClient,WsMessageCb	proc onMessage(c: WsClient; cb: WsMessageCb)		113
+nim	onClose	powpow/ws.html#onClose,WsClient,WsCloseCb	proc onClose(c: WsClient; cb: WsCloseCb)		116
+nim	onError	powpow/ws.html#onError,WsClient,WsErrorCb	proc onError(c: WsClient; cb: WsErrorCb)		120
+nim	onRetry	powpow/ws.html#onRetry,WsClient,WsRetryCb	proc onRetry(c: WsClient; cb: WsRetryCb)		123
+nim	onGiveUp	powpow/ws.html#onGiveUp,WsClient,WsGiveUpCb	proc onGiveUp(c: WsClient; cb: WsGiveUpCb)		126
+nim	isConnected	powpow/ws.html#isConnected,WsClient	proc isConnected(c: WsClient): bool		133
+nim	session	powpow/ws.html#session,WsClient	proc session(c: WsClient): WsConnection		138
+nim	attemptCount	powpow/ws.html#attemptCount,WsClient	proc attemptCount(c: WsClient): int		143
+nim	connect	powpow/ws.html#connect,WsClient,string,openArray[],openArray[string],int,int	proc connect(c: WsClient; url: string; headers: openArray[(string, string)] = [];\n        protocols: openArray[string] = []; pingIntervalMs: int = 0;\n        idleTimeoutMs: int = 0): bool		210
+nim	connect	powpow/ws.html#connect,WsClient,string,int,string,openArray[],openArray[string],int,int	proc connect(c: WsClient; host: string; port: int; path: string = "/";\n        headers: openArray[(string, string)] = [];\n        protocols: openArray[string] = []; pingIntervalMs: int = 0;\n        idleTimeoutMs: int = 0): bool		238
+nim	setTlsContext	powpow/ws.html#setTlsContext,WsClient,SslContext	proc setTlsContext(c: WsClient; ctx: SslContext)		259
+nim	close	powpow/ws.html#close,WsClient,int,string	proc close(c: WsClient; code: int = 1000; reason: string = "")		264
+nim	run	powpow/ws.html#run,WsClient	proc run(c: WsClient)		282
+nim	sendMessage	powpow/ws.html#sendMessage,WsClient,string	proc sendMessage(c: WsClient; data: string)		289
+nim	sendMessage	powpow/ws.html#sendMessage,WsClient,seq[byte]	proc sendMessage(c: WsClient; data: seq[byte])		294
+nimgrp	connect	powpow/ws.html#connect-procs-all	proc		210
+nimgrp	sendmessage	powpow/ws.html#sendMessage-procs-all	proc		289
