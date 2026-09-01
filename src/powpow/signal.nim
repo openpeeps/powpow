@@ -345,7 +345,7 @@ proc watchOsSignal*(relay: SignalRelay, signal: OsSignal) =
   ## `newOsSignalRelay` covers all signals.
   let sig = signal.signalNumber
   let src = relay.loop.getSigSource()
-  let relays = addr src.subscribers.mgetOrPut(sig, @[])
+  let relays = addr src.subscribers.mgetOrPut(sig, default(seq[SignalRelay]))
   if relays[].find(relay) < 0:
     relays[].add(relay)
   if sig notin src.armedSigs:

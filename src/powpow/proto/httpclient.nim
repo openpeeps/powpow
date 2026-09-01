@@ -179,7 +179,7 @@ proc push*(pool: HttpConnPool, key: PoolKey, conn: Connection,
   inc pool.orderCounter
   let pc = PooledConn(conn: conn, parser: parser,
                       idleSinceMs: monoMs(), order: pool.orderCounter)
-  pool.conns.mgetOrPut(key, @[]).add(pc)
+  pool.conns.mgetOrPut(key, default(seq[PooledConn])).add(pc)
   inc pool.totalIdle
   while pool.totalIdle > max(pool.maxTotal, 1):
     pool.evictOldest()
@@ -189,7 +189,7 @@ proc pop*(pool: HttpConnPool, loop: Loop, key: PoolKey): PooledConn =
   ## have expired (lazy idle timeout) or died. Returns default(PooledConn)
   ## (conn == nil) when none is usable.
   while true:
-    var list: ptr seq[PooledConn] = addr pool.conns.mgetOrPut(key, @[])
+    var list: ptr seq[PooledConn] = addr pool.conns.mgetOrPut(key, default(seq[PooledConn]))
     if list[].len == 0:
       pool.conns.del(key)
       return
