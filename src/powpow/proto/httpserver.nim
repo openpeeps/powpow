@@ -62,7 +62,7 @@ type
     idleAfter: int64             ## monoMs when the last request completed (idle)
 
   HttpServer* = ref object
-    tcpServer: TcpServer
+    tcpServers*: seq[TcpServer]
     loop:      Loop
     handler*:  OnRequestCallback
     sslCtx*:   tls.SslContext
@@ -833,7 +833,7 @@ proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
   ## request hot path performs no allocations; pass `populate = false` to
   ## defer ~1 MB of startup allocations.
   let srv = HttpServer(
-    tcpServer: nil,
+    tcpServers: @[],
     loop:      loop,
     handler:   nil,
     connRoots: initTable[int, ConnHttp](64),
@@ -867,6 +867,26 @@ proc newHttpServer*(populate: bool = true): HttpServer =
 proc start*(server: HttpServer, handler: OnRequestCallback, port: Port) =
   server.handler = handler
   server.listen("0.0.0.0", port.int)
+  server.loop.run()
+
+proc start*(server: HttpServer, handler: OnRequestCallback, ports: varargs[Port]) =
+  ## Start the server on multiple ports on 0.0.0.0 with the same handler.
+  ## `listen` is additive, so this is equivalent to calling `listen` for each
+  ## port before `loop.run()`. At least one port is required.
+  if ports.len == 0:
+    raise newException(ValueError, "start: at least one Port is required")
+  server.handler = handler
+  for p in ports:
+    server.listen("0.0.0.0", p.int)
+  server.loop.run()
+
+proc start*(server: HttpServer, handler: OnRequestCallback, address: string, ports: varargs[Port]) =
+  ## Start on multiple ports bound to `address` (same address for all ports).
+  if ports.len == 0:
+    raise newException(ValueError, "start: at least one Port is required")
+  server.handler = handler
+  for p in ports:
+    server.listen(address, p.int)
   server.loop.run()
 
 proc stop*(server: HttpServer) =
@@ -1146,36 +1166,79 @@ proc buildTcpServer(server: HttpServer): TcpServer =
   result.maxConnections = server.maxConnections
 
 proc listen*(server: HttpServer, address: string, port: int) =
-  server.tcpServer = server.buildTcpServer()
+  ## Bind an additional TCP listen socket. Additive — call repeatedly before
+  ## `loop.run()` to serve the same handler on multiple ports (same address
+  ## per call; use multiple calls with different addresses if needed, or
+  ## `start(handler, Port(...), Port(...))` for the `0.0.0.0` shorthand).
+  ## Each call creates a new `TcpServer` sharing the same `Loop` and timeout
+  ## sweep. The sweep is started once. If `populatePools` pre-created an
+  ## unbound TcpServer (fd == -1), the first `listen` reuses it instead of
+  ## leaking an idle server.
+  if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
+    # `populatePools` pre-created an unbound TcpServer (fd == -1) solely to
+    # hold the pre-warmed connPool. Discard it and replace with a fresh
+    # server that has up-to-date sslCtx/maxConnections closures. The old
+    # pool's Connections are freed with the old server (same as the old
+    # single-port `server.tcpServer = buildTcpServer()` overwrite did) —
+    # the loop's bufPool retains the pre-warmed read buffers.
+    server.tcpServers.setLen(0)
+    let ts = server.buildTcpServer()
+    ts.listen(address, port)
+    server.tcpServers.add(ts)
+  else:
+    let ts = server.buildTcpServer()
+    ts.listen(address, port)
+    # Only add after a successful bind, so a failed bind does not leak a
+    # half-initialized server into the list.
+    server.tcpServers.add(ts)
   server.startTimeoutSweep()
-  server.tcpServer.listen(address, port)
 
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =
     ## Listen on a Unix domain socket. `mode` is the file permission bits for the socket.
-    server.tcpServer = server.buildTcpServer()
+    if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
+      server.tcpServers.setLen(0)
+      let ts = server.buildTcpServer()
+      ts.listenUnix(path, mode)
+      server.tcpServers.add(ts)
+    else:
+      let ts = server.buildTcpServer()
+      ts.listenUnix(path, mode)
+      server.tcpServers.add(ts)
     server.startTimeoutSweep()
-    server.tcpServer.listenUnix(path, mode)
 
 proc close*(server: HttpServer) =
   ## Close the server and all active connections
   if server.sweepTimer != TimerId(0):
     server.loop.cancelTimer(server.sweepTimer)
     server.sweepTimer = TimerId(0)
-  if server.tcpServer != nil:
-    server.tcpServer.close()
+  for ts in server.tcpServers:
+    ts.close()
+  server.tcpServers.setLen(0)
   server.connRoots.clear()
   server.parserPool.setLen(0)
 
 proc ensureTcpServer*(server: HttpServer) =
-  ## Ensure the server has a TCP server instance
-  if server.tcpServer != nil: return
-  server.tcpServer = server.buildTcpServer()
+  ## Ensure the server has at least one TCP server instance
+  if server.tcpServers.len > 0: return
+  server.tcpServers.add(server.buildTcpServer())
+
+proc tcpServer*(server: HttpServer): TcpServer {.inline.} =
+  ## Backwards-compat accessor: the first (primary) TcpServer, or nil.
+  ## Prefer `tcpServers` for multi-port cases.
+  if server.tcpServers.len > 0: server.tcpServers[0] else: nil
+
+proc `tcpServer=`*(server: HttpServer, ts: TcpServer) {.inline.} =
+  ## Backwards-compat setter. Replaces the primary server.
+  if server.tcpServers.len > 0:
+    server.tcpServers[0] = ts
+  elif ts != nil:
+    server.tcpServers.add(ts)
 
 proc populatePools*(server: HttpServer; poolSize = 256) =
   ## Pre-allocate parsers, responses, connections, and buffers to
   ## eliminate all allocations on the request hot path.
-  if server.tcpServer == nil:
+  if server.tcpServers.len == 0:
     server.ensureTcpServer()
   for i in 0 ..< poolSize:
     if server.parserPool.len < MaxParserPoolSize:
@@ -1184,17 +1247,20 @@ proc populatePools*(server: HttpServer; poolSize = 256) =
       server.resPool.add(HttpResponse(
         conn: nil, statusCode: uint16(Http200), sent: false, closeConn: false,
         headers: @[], bodyBytes: @[]))
-    if server.tcpServer.connPool.len < MaxConnPoolSize:
+    # Pre-warm the connection pool on the primary TcpServer. Additional
+    # listeners share the loop's bufPool; they allocate connections on demand.
+    let primary = server.tcpServers[0]
+    if primary.connPool.len < MaxConnPoolSize:
       var buf = cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
       if server.loop.bufPool.len < MaxBufPoolSize:
         server.loop.bufPool.add(buf)
-      server.tcpServer.connPool.add(newConnection(
-        SocketHandle(-1), server.loop, server.tcpServer, buf, DefaultBufSize))
+      primary.connPool.add(newConnection(
+        SocketHandle(-1), server.loop, primary, buf, DefaultBufSize))
 
 proc addConnection*(server: HttpServer, fd: SocketHandle) {.inline.} =
   ## Add an existing TCP connection to the server
   server.ensureTcpServer()
-  server.tcpServer.injectFd(fd)
+  server.tcpServers[0].injectFd(fd)
 
 proc getLoop*(server: HttpServer): Loop {.inline.} =
   ## Get the event loop associated with this server.

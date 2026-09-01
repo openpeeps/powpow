@@ -40,7 +40,7 @@ when not defined(windows):
       handler: OnRequestCallback
       idx:     int
       address: string
-      port:    int
+      ports:   seq[int]
 
     WorkerArg = ptr WorkerArgObj
 
@@ -77,13 +77,12 @@ when not defined(windows):
       let handler = arg.handler
       let idx     = arg.idx
       let address = arg.address
-      let port    = arg.port
+      let ports   = arg.ports
       freeWorkerArg(arg)
 
       let loop = newLoop()
-      let server = newHttpServer(loop)
+      let server = newHttpServer(loop, populate = false)
       server.handler = handler
-      server.ensureTcpServer()
 
       loop.register(ctx.wakeRd.int, {Read}) do (fd: int, ev: set[EventType]):
         var buf: array[256, byte]
@@ -93,7 +92,8 @@ when not defined(windows):
             loop.stop()
             break
           if n < 0: break
-      server.listen(address, port)
+      for p in ports:
+        server.listen(address, p)
       loop.run()
       server.close()
       loop.close()
@@ -108,7 +108,12 @@ when not defined(windows):
       running:    false,
     )
 
-  proc listen*(srv: MultiThreadHttpServer, address: string, port: int) =
+  proc listenMulti(srv: MultiThreadHttpServer, address: string, ports: openArray[int]) =
+    ## Internal helper shared by single- and multi-port overloads.
+    ## Listen on multiple ports (same address). Additive: each worker binds
+    ## all `ports` with SO_REUSEPORT, sharing the same handler.
+    if ports.len == 0:
+      raise newException(ValueError, "listen: at least one port is required")
     {.gcsafe.}:
       srv.running = true
       for i in 0 ..< srv.numThreads:
@@ -119,9 +124,9 @@ when not defined(windows):
         arg.handler = srv.handler
         arg.idx     = i
         arg.address = address
-        arg.port    = port
+        arg.ports   = @ports
         createThread(srv.threads[i], workerMain, arg)
-      
+
       if srv.onStartCb != nil: srv.onStartCb(srv.numThreads)
 
       for i in 0 ..< srv.numThreads:
@@ -130,10 +135,24 @@ when not defined(windows):
         freeWorkerCtx(ctx)
       srv.contexts.setLen(0)
 
+  proc listen*(srv: MultiThreadHttpServer, address: string, port: int) =
+    srv.listenMulti(address, [port])
+
+  proc listen*(srv: MultiThreadHttpServer, address: string, ports: openArray[int]) =
+    srv.listenMulti(address, ports)
+
   proc start*(srv: MultiThreadHttpServer, cb: OnRequestCallback,
               address: string, port: int) =
     srv.handler = cb
     srv.listen(address, port)
+
+  proc start*(srv: MultiThreadHttpServer, cb: OnRequestCallback,
+              address: string, ports: varargs[int]) =
+    ## Multi-port variant: `srv.start(handler, "0.0.0.0", 9000, 9001)`
+    if ports.len == 0:
+      raise newException(ValueError, "start: at least one port is required")
+    srv.handler = cb
+    srv.listen(address, ports)
 
   proc close*(srv: MultiThreadHttpServer) =
     srv.running = false
