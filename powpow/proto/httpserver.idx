@@ -26,20 +26,25 @@ nim	populatePools	powpow/proto/httpserver.html#populatePools,HttpServer,int	proc
 nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,Loop,bool	proc newHttpServer(loop: Loop; populate: bool = true): HttpServer		830
 nim	newHttpServer	powpow/proto/httpserver.html#newHttpServer,bool	proc newHttpServer(populate: bool = true): HttpServer		863
 nim	start	powpow/proto/httpserver.html#start,HttpServer,OnRequestCallback,Port	proc start(server: HttpServer; handler: OnRequestCallback; port: Port)		867
-nim	stop	powpow/proto/httpserver.html#stop,HttpServer	proc stop(server: HttpServer)		872
-nim	wsPoolPop	powpow/proto/httpserver.html#wsPoolPop,HttpServer	proc wsPoolPop(server: HttpServer): ref RootObj		891
-nim	wsPoolAdd	powpow/proto/httpserver.html#wsPoolAdd,HttpServer,ref.RootObj	proc wsPoolAdd(server: HttpServer; ws: ref RootObj)		896
-nim	setKeepAliveTimeout	powpow/proto/httpserver.html#setKeepAliveTimeout,HttpServer,int	proc setKeepAliveTimeout(server: HttpServer; ms: int)		901
-nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,Connection	proc removeSession(server: HttpServer; conn: Connection)		905
-nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		1154
-nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		1170
-nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		1194
-nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		1199
-nim	resolveReal	powpow/proto/httpserver.html#resolveReal,string	proc resolveReal(path: string): string		1207
-nim	withinRoot	powpow/proto/httpserver.html#withinRoot,string,string	proc withinRoot(root, path: string): bool		1222
-nim	serveStatic	powpow/proto/httpserver.html#serveStatic,HttpResponse,HttpRequest,string,string,openArray[string]	proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;\n            fsRoot: string;\n            indexFiles: openArray[string] = ["index.html", "index.htm"]): bool		1226
-nim	serveFile	powpow/proto/httpserver.html#serveFile,HttpResponse,HttpRequest,string,string,string,bool,string,string,int64	proc serveFile(res: HttpResponse; req: HttpRequest; path: string;\n          fsRoot: string = ""; contentType: string = ""; attach: bool = false;\n          etag: string = ""; lastModified: string = ""; chunkSize: int64 = 0): bool		1284
+nim	start	powpow/proto/httpserver.html#start,HttpServer,OnRequestCallback,varargs[Port]	proc start(server: HttpServer; handler: OnRequestCallback; ports: varargs[Port])		872
+nim	start	powpow/proto/httpserver.html#start,HttpServer,OnRequestCallback,string,varargs[Port]	proc start(server: HttpServer; handler: OnRequestCallback; address: string;\n      ports: varargs[Port])		883
+nim	stop	powpow/proto/httpserver.html#stop,HttpServer	proc stop(server: HttpServer)		892
+nim	wsPoolPop	powpow/proto/httpserver.html#wsPoolPop,HttpServer	proc wsPoolPop(server: HttpServer): ref RootObj		911
+nim	wsPoolAdd	powpow/proto/httpserver.html#wsPoolAdd,HttpServer,ref.RootObj	proc wsPoolAdd(server: HttpServer; ws: ref RootObj)		916
+nim	setKeepAliveTimeout	powpow/proto/httpserver.html#setKeepAliveTimeout,HttpServer,int	proc setKeepAliveTimeout(server: HttpServer; ms: int)		921
+nim	removeSession	powpow/proto/httpserver.html#removeSession,HttpServer,Connection	proc removeSession(server: HttpServer; conn: Connection)		925
+nim	listenUnix	powpow/proto/httpserver.html#listenUnix,HttpServer,string,int	proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)		1197
+nim	ensureTcpServer	powpow/proto/httpserver.html#ensureTcpServer,HttpServer	proc ensureTcpServer(server: HttpServer)		1221
+nim	tcpServer	powpow/proto/httpserver.html#tcpServer,HttpServer	proc tcpServer(server: HttpServer): TcpServer		1226
+nim	tcpServer=	powpow/proto/httpserver.html#tcpServer=,HttpServer,TcpServer	proc tcpServer=(server: HttpServer; ts: TcpServer)		1231
+nim	addConnection	powpow/proto/httpserver.html#addConnection,HttpServer,SocketHandle	proc addConnection(server: HttpServer; fd: SocketHandle)		1260
+nim	getLoop	powpow/proto/httpserver.html#getLoop,HttpServer	proc getLoop(server: HttpServer): Loop		1265
+nim	resolveReal	powpow/proto/httpserver.html#resolveReal,string	proc resolveReal(path: string): string		1273
+nim	withinRoot	powpow/proto/httpserver.html#withinRoot,string,string	proc withinRoot(root, path: string): bool		1288
+nim	serveStatic	powpow/proto/httpserver.html#serveStatic,HttpResponse,HttpRequest,string,string,openArray[string]	proc serveStatic(res: HttpResponse; req: HttpRequest; urlPrefix: string;\n            fsRoot: string;\n            indexFiles: openArray[string] = ["index.html", "index.htm"]): bool		1292
+nim	serveFile	powpow/proto/httpserver.html#serveFile,HttpResponse,HttpRequest,string,string,string,bool,string,string,int64	proc serveFile(res: HttpResponse; req: HttpRequest; path: string;\n          fsRoot: string = ""; contentType: string = ""; attach: bool = false;\n          etag: string = ""; lastModified: string = ""; chunkSize: int64 = 0): bool		1350
 nimgrp	close	powpow/proto/httpserver.html#close-procs-all	proc		237
 nimgrp	newhttpserver	powpow/proto/httpserver.html#newHttpServer-procs-all	proc		830
 nimgrp	send	powpow/proto/httpserver.html#send-procs-all	proc		296
+nimgrp	start	powpow/proto/httpserver.html#start-procs-all	proc		867
 heading	Usage:	powpow/proto/httpserver.html#usagecolon	   Usage:		0

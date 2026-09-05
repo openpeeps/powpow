@@ -68,6 +68,7 @@
                       ## `websocketUpgrade` to detach the connection from the HTTP session
                       ## tracking / timeout sweep when the caller omits the `server` argument">HttpResponse</a></li>
 <li><a class="reference" href="#HttpServer" title="HttpServer = ref object
+  tcpServers*: seq[TcpServer]
   handler*: OnRequestCallback
   sslCtx*: tls.SslContext
   maxBodySize*: int64
@@ -221,7 +222,11 @@
 
 </ul>
 <ul class="simple nested-toc-section">start
-  <li><a class="reference" href="#start%2CHttpServer%2COnRequestCallback%2CPort" title="start(server: HttpServer; handler: OnRequestCallback; port: Port)">start(server: HttpServer; handler: OnRequestCallback; port: Port)</a></li>
+  <li><a class="reference" href="#start%2CHttpServer%2COnRequestCallback%2Cstring%2Cvarargs%5BPort%5D" title="start(server: HttpServer; handler: OnRequestCallback; address: string;
+      ports: varargs[Port])">start(server: HttpServer; handler: OnRequestCallback; address: string;
+      ports: varargs[Port])</a></li>
+<li><a class="reference" href="#start%2CHttpServer%2COnRequestCallback%2CPort" title="start(server: HttpServer; handler: OnRequestCallback; port: Port)">start(server: HttpServer; handler: OnRequestCallback; port: Port)</a></li>
+<li><a class="reference" href="#start%2CHttpServer%2COnRequestCallback%2Cvarargs%5BPort%5D" title="start(server: HttpServer; handler: OnRequestCallback; ports: varargs[Port])">start(server: HttpServer; handler: OnRequestCallback; ports: varargs[Port])</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">status
@@ -236,6 +241,14 @@
   <li><a class="reference" href="#streamFile%2CHttpResponse%2Cstring%2CHttpRequest" title="streamFile(res: HttpResponse; path: string; req: HttpRequest;
            chunkSize = DefaultChunkSize)">streamFile(res: HttpResponse; path: string; req: HttpRequest;
            chunkSize = DefaultChunkSize)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">tcpServer
+  <li><a class="reference" href="#tcpServer%2CHttpServer" title="tcpServer(server: HttpServer): TcpServer">tcpServer(server: HttpServer): TcpServer</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">tcpServer=
+  <li><a class="reference" href="#tcpServer%3D%2CHttpServer%2CTcpServer" title="tcpServer=(server: HttpServer; ts: TcpServer)">tcpServer=(server: HttpServer; ts: TcpServer)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">withinRoot
@@ -307,6 +320,7 @@
 </div>
 <div id="HttpServer">
   <dt><pre><a href="#HttpServer"><span class="Identifier">HttpServer</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
+  <span class="Identifier">tcpServers</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><a href="../net/tcp.html#TcpServer"><span class="Identifier">TcpServer</span></a><span class="Other">]</span>
   <span class="Identifier">handler</span><span class="Operator">*</span><span class="Other">:</span> <a href="#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a>
   <span class="Identifier">sslCtx</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">tls</span><span class="Other">.</span><span class="Identifier">SslContext</span>
   <span class="Identifier">maxBodySize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
@@ -421,7 +435,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#ensureTcpServer%2CHttpServer"><span class="Identifier">ensureTcpServer</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Ensure the server has a TCP server instance
+    Ensure the server has at least one TCP server instance
     
   </dd>
 </div>
@@ -690,12 +704,31 @@
 
 </div>
 <div id="start-procs-all">
-  <div id="start,HttpServer,OnRequestCallback,Port">
+  <div id="start,HttpServer,OnRequestCallback,string,varargs[Port]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#start%2CHttpServer%2COnRequestCallback%2Cstring%2Cvarargs%5BPort%5D"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
+           <span class="Identifier">ports</span><span class="Other">:</span> <span class="Identifier">varargs</span><span class="Other">[</span><span class="Identifier">Port</span><span class="Other">]</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ValueError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+                                   <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Start on multiple ports bound to <tt class="docutils literal"><span class="pre"><span class="Identifier">address</span></span></tt> (same address for all ports).
+    
+  </dd>
+</div>
+<div id="start,HttpServer,OnRequestCallback,Port">
   <dt><pre><span class="Keyword">proc</span> <a href="#start%2CHttpServer%2COnRequestCallback%2CPort"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">Port</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
+    
+  </dd>
+</div>
+<div id="start,HttpServer,OnRequestCallback,varargs[Port]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#start%2CHttpServer%2COnRequestCallback%2Cvarargs%5BPort%5D"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#OnRequestCallback"><span class="Identifier">OnRequestCallback</span></a><span class="Other">;</span> <span class="Identifier">ports</span><span class="Other">:</span> <span class="Identifier">varargs</span><span class="Other">[</span><span class="Identifier">Port</span><span class="Other">]</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ValueError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Start the server on multiple ports on 0.0.0.0 with the same handler. <tt class="docutils literal"><span class="pre"><span class="Identifier">listen</span></span></tt> is additive, so this is equivalent to calling <tt class="docutils literal"><span class="pre"><span class="Identifier">listen</span></span></tt> for each port before <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span><span class="Operator">.</span><span class="Identifier">run</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt>. At least one port is required.
     
   </dd>
 </div>
@@ -736,6 +769,30 @@
     <p>Stream a file for media playback with per-response byte limiting. Always process Range requests. Caps each response body to <tt class="docutils literal"><span class="pre"><span class="Identifier">chunkSize</span></span></tt> bytes (default 1 MB) so a seek only transfers one chunk, not the entire remaining file. Always uses keep-alive.</p>
 <p>No initial (no-Range) request sends 206 with <tt class="docutils literal"><span class="pre"><span class="Identifier">Content</span><span class="Operator">-</span><span class="Identifier">Range</span><span class="Punctuation">:</span> <span class="Identifier">bytes</span> <span class="DecNumber">0</span><span class="Operator">-</span><span class="Punctuation">(</span><span class="Identifier">chunkSize</span><span class="Operator">-</span><span class="DecNumber">1</span><span class="Punctuation">)</span><span class="Operator">/</span><span class="Identifier">fileSize</span></span></tt> — the browser learns the total file size from the suffix but only receives one chunk.</p>
 
+    
+  </dd>
+</div>
+
+</div>
+<div id="tcpServer-procs-all">
+  <div id="tcpServer,HttpServer">
+  <dt><pre><span class="Keyword">proc</span> <a href="#tcpServer%2CHttpServer"><span class="Identifier">tcpServer</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">)</span><span class="Other">:</span> <a href="../net/tcp.html#TcpServer"><span class="Identifier">TcpServer</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Backwards-compat accessor: the first (primary) TcpServer, or nil. Prefer <tt class="docutils literal"><span class="pre"><span class="Identifier">tcpServers</span></span></tt> for multi-port cases.
+    
+  </dd>
+</div>
+
+</div>
+<div id="tcpServer=-procs-all">
+  <div id="tcpServer=,HttpServer,TcpServer">
+  <dt><pre><span class="Keyword">proc</span> <a href="#tcpServer%3D%2CHttpServer%2CTcpServer"><span class="Identifier">tcpServer=</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#HttpServer"><span class="Identifier">HttpServer</span></a><span class="Other">;</span> <span class="Identifier">ts</span><span class="Other">:</span> <a href="../net/tcp.html#TcpServer"><span class="Identifier">TcpServer</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Backwards-compat setter. Replaces the primary server.
     
   </dd>
 </div>
@@ -798,7 +855,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-28 10:54:25 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-05 18:14:36 UTC</small>
       </div>
     </div>
   </div>

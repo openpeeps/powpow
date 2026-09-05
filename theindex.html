@@ -28,7 +28,7 @@
     <label for="nav-toggle" id="nav-overlay"></label>
     <div class="container">
       <h1 class="title">Index</h1>
-      Modules: <a href="index.html">powpow</a>, <a href="powpow/fswatch.html">powpow/fswatch</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/dns.html">powpow/net/dns</a>, <a href="powpow/net/dtls.html">powpow/net/dtls</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/tls.html">powpow/net/tls</a>, <a href="powpow/net/tlsapi.html">powpow/net/tlsapi</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpclient.html">powpow/proto/httpclient</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/ratelimit.html">powpow/proto/ratelimit</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/winpath.html">powpow/proto/winpath</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/signal.html">powpow/signal</a>, <a href="powpow/stream.html">powpow/stream</a>, <a href="powpow/threadpool.html">powpow/threadpool</a>, <a href="powpow/types.html">powpow/types</a>, <a href="powpow/ws.html">powpow/ws</a>.<br/><p /><h2>API symbols</h2>
+      Modules: <a href="index.html">powpow</a>, <a href="powpow/fswatch.html">powpow/fswatch</a>, <a href="powpow/loop.html">powpow/loop</a>, <a href="powpow/net.html">powpow/net</a>, <a href="powpow/net/common.html">powpow/net/common</a>, <a href="powpow/net/dns.html">powpow/net/dns</a>, <a href="powpow/net/dtls.html">powpow/net/dtls</a>, <a href="powpow/net/tcp.html">powpow/net/tcp</a>, <a href="powpow/net/tls.html">powpow/net/tls</a>, <a href="powpow/net/tlsapi.html">powpow/net/tlsapi</a>, <a href="powpow/net/udp.html">powpow/net/udp</a>, <a href="powpow/platform.html">powpow/platform</a>, <a href="powpow/platform/epoll.html">powpow/platform/epoll</a>, <a href="powpow/proto.html">powpow/proto</a>, <a href="powpow/proto/http.html">powpow/proto/http</a>, <a href="powpow/proto/httpclient.html">powpow/proto/httpclient</a>, <a href="powpow/proto/httpserver.html">powpow/proto/httpserver</a>, <a href="powpow/proto/multithread.html">powpow/proto/multithread</a>, <a href="powpow/proto/proxyserver.html">powpow/proto/proxyserver</a>, <a href="powpow/proto/ratelimit.html">powpow/proto/ratelimit</a>, <a href="powpow/proto/simdscan.html">powpow/proto/simdscan</a>, <a href="powpow/proto/winpath.html">powpow/proto/winpath</a>, <a href="powpow/proto/ws.html">powpow/proto/ws</a>, <a href="powpow/signal.html">powpow/signal</a>, <a href="powpow/stream.html">powpow/stream</a>, <a href="powpow/threadpool.html">powpow/threadpool</a>, <a href="powpow/types.html">powpow/types</a>, <a href="powpow/ws.html">powpow/ws</a>.<br/><p /><h2>API symbols</h2>
 <dl><dt><a name="%60%3D%3D%60" href="#%60%3D%3D%60"><span>`==`:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="types: proc `==`(a, b: TimerId): bool" href="powpow/types.html#%3D%3D%2CTimerId%2CTimerId">types: proc `==`(a, b: TimerId): bool</a></li>
@@ -158,6 +158,8 @@
           data-doc-search-tag="httpserver: proc close(server: HttpServer)" href="powpow/proto/httpserver.html#close%2CHttpServer">httpserver: proc close(server: HttpServer)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="multithread: proc close(srv: MultiThreadHttpServer)" href="powpow/proto/multithread.html#close%2CMultiThreadHttpServer">multithread: proc close(srv: MultiThreadHttpServer)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc close(server: ProxyServer)" href="powpow/proto/proxyserver.html#close%2CProxyServer">proxyserver: proc close(server: ProxyServer)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="ratelimit: proc close(rl: RateLimiter)" href="powpow/proto/ratelimit.html#close%2CRateLimiter">ratelimit: proc close(rl: RateLimiter)</a></li>
           <li><a class="reference external"
@@ -368,6 +370,10 @@
 <dt><a name="DefaultMaxIdleTotal" href="#DefaultMaxIdleTotal"><span>DefaultMaxIdleTotal:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpclient: const DefaultMaxIdleTotal" href="powpow/proto/httpclient.html#DefaultMaxIdleTotal">httpclient: const DefaultMaxIdleTotal</a></li>
+          </ul></dd>
+<dt><a name="DefaultMaxPending" href="#DefaultMaxPending"><span>DefaultMaxPending:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: const DefaultMaxPending" href="powpow/proto/proxyserver.html#DefaultMaxPending">proxyserver: const DefaultMaxPending</a></li>
           </ul></dd>
 <dt><a name="DefaultMaxResponseBody" href="#DefaultMaxResponseBody"><span>DefaultMaxResponseBody:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -649,6 +655,14 @@
 <li><a class="reference external"
           data-doc-search-tag="tcp: proc formatIp(saAddr: Sockaddr_storage): string" href="powpow/net/tcp.html#formatIp%2CSockaddr_storage">tcp: proc formatIp(saAddr: Sockaddr_storage): string</a></li>
           </ul></dd>
+<dt><a name="FromClient" href="#FromClient"><span>FromClient:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: ProxyDir.FromClient" href="powpow/proto/proxyserver.html#FromClient">proxyserver: ProxyDir.FromClient</a></li>
+          </ul></dd>
+<dt><a name="FromUpstream" href="#FromUpstream"><span>FromUpstream:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: ProxyDir.FromUpstream" href="powpow/proto/proxyserver.html#FromUpstream">proxyserver: ProxyDir.FromUpstream</a></li>
+          </ul></dd>
 <dt><a name="fseAttrib" href="#fseAttrib"><span>fseAttrib:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="fswatch: FileSystemEvent.fseAttrib" href="powpow/fswatch.html#fseAttrib">fswatch: FileSystemEvent.fseAttrib</a></li>
@@ -788,6 +802,8 @@
           data-doc-search-tag="httpclient: proc getLoop(client: HttpClient): Loop" href="powpow/proto/httpclient.html#getLoop%2CHttpClient">httpclient: proc getLoop(client: HttpClient): Loop</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc getLoop(server: HttpServer): Loop" href="powpow/proto/httpserver.html#getLoop%2CHttpServer">httpserver: proc getLoop(server: HttpServer): Loop</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc getLoop(server: ProxyServer): Loop" href="powpow/proto/proxyserver.html#getLoop%2CProxyServer">proxyserver: proc getLoop(server: ProxyServer): Loop</a></li>
           <li><a class="reference external"
           data-doc-search-tag="threadpool: proc getLoop(pool: ThreadPool): Loop" href="powpow/threadpool.html#getLoop%2CThreadPool">threadpool: proc getLoop(pool: ThreadPool): Loop</a></li>
           </ul></dd>
@@ -1047,6 +1063,10 @@
           <li><a class="reference external"
           data-doc-search-tag="multithread: proc listen(srv: MultiThreadHttpServer; address: string; port: int)" href="powpow/proto/multithread.html#listen%2CMultiThreadHttpServer%2Cstring%2Cint">multithread: proc listen(srv: MultiThreadHttpServer; address: string; port: int)</a></li>
           <li><a class="reference external"
+          data-doc-search-tag="multithread: proc listen(srv: MultiThreadHttpServer; address: string; ports: openArray[int])" href="powpow/proto/multithread.html#listen%2CMultiThreadHttpServer%2Cstring%2CopenArray%5Bint%5D">multithread: proc listen(srv: MultiThreadHttpServer; address: string; ports: openArray[int])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc listen(server: ProxyServer; address: string; port: int)" href="powpow/proto/proxyserver.html#listen%2CProxyServer%2Cstring%2Cint">proxyserver: proc listen(server: ProxyServer; address: string; port: int)</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="ws: proc listen(wss: WsServer; address: string; port: int)" href="powpow/proto/ws.html#listen%2CWsServer%2Cstring%2Cint">ws: proc listen(wss: WsServer; address: string; port: int)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="signal: proc listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle" href="powpow/signal.html#listen%2CSignalRelay%2Cint%2CCallback">signal: proc listen(relay: SignalRelay; signalId: int; cb: Callback): ListenerHandle</a></li>
@@ -1068,6 +1088,8 @@
           data-doc-search-tag="tcp: proc listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)" href="powpow/net/tcp.html#listenUnix%2CTcpServer%2Cstring%2Cint">tcp: proc listenUnix(server: TcpServer; path: string; mode: int = 0o000000000660)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)" href="powpow/proto/httpserver.html#listenUnix%2CHttpServer%2Cstring%2Cint">httpserver: proc listenUnix(server: HttpServer; path: string; mode: int = 0o000000000660)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc listenUnix(server: ProxyServer; path: string; mode: int = 0o000000000660)" href="powpow/proto/proxyserver.html#listenUnix%2CProxyServer%2Cstring%2Cint">proxyserver: proc listenUnix(server: ProxyServer; path: string; mode: int = 0o000000000660)</a></li>
           </ul></dd>
 <dt><a name="Loop" href="#Loop"><span>Loop:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1247,6 +1269,14 @@
 <li><a class="reference external"
           data-doc-search-tag="signal: proc newOsSignalRelay(loop: Loop): SignalRelay" href="powpow/signal.html#newOsSignalRelay%2CLoop">signal: proc newOsSignalRelay(loop: Loop): SignalRelay</a></li>
           </ul></dd>
+<dt><a name="newProxyServer" href="#newProxyServer"><span>newProxyServer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc newProxyServer(): ProxyServer" href="powpow/proto/proxyserver.html#newProxyServer">proxyserver: proc newProxyServer(): ProxyServer</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc newProxyServer(loop: Loop): ProxyServer" href="powpow/proto/proxyserver.html#newProxyServer%2CLoop">proxyserver: proc newProxyServer(loop: Loop): ProxyServer</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc newProxyServer(upstreamHost: string; upstreamPort: int; loop: Loop = nil): ProxyServer" href="powpow/proto/proxyserver.html#newProxyServer%2Cstring%2Cint%2CLoop">proxyserver: proc newProxyServer(upstreamHost: string; upstreamPort: int; loop: Loop = nil): ProxyServer</a></li>
+          </ul></dd>
 <dt><a name="newRateLimiter" href="#newRateLimiter"><span>newRateLimiter:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ratelimit: proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter" href="powpow/proto/ratelimit.html#newRateLimiter%2CLoop%2Cint%2Cint">ratelimit: proc newRateLimiter(loop: Loop; maxRequests: int; windowMs: int; enableCleanup = true): RateLimiter</a></li>
@@ -1325,19 +1355,33 @@
 <li><a class="reference external"
           data-doc-search-tag="tcp: type OnAccept" href="powpow/net/tcp.html#OnAccept">tcp: type OnAccept</a></li>
           </ul></dd>
+<dt><a name="onClientData" href="#onClientData"><span>onClientData:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc onClientData(server: ProxyServer; cb: OnProxyData): ProxyServer" href="powpow/proto/proxyserver.html#onClientData%2CProxyServer%2COnProxyData">proxyserver: proc onClientData(server: ProxyServer; cb: OnProxyData): ProxyServer</a></li>
+          </ul></dd>
 <dt><a name="OnClose" href="#OnClose"><span>OnClose:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: type OnClose" href="powpow/net/tcp.html#OnClose">tcp: type OnClose</a></li>
           </ul></dd>
 <dt><a name="onClose" href="#onClose"><span>onClose:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc onClose(server: ProxyServer; cb: OnProxyClose): ProxyServer" href="powpow/proto/proxyserver.html#onClose%2CProxyServer%2COnProxyClose">proxyserver: proc onClose(server: ProxyServer; cb: OnProxyClose): ProxyServer</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="ws: proc onClose(wss: WsServer; cb: WsCloseCb)" href="powpow/proto/ws.html#onClose%2CWsServer%2CWsCloseCb">ws: proc onClose(wss: WsServer; cb: WsCloseCb)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="ws: proc onClose(c: WsClient; cb: WsCloseCb)" href="powpow/ws.html#onClose%2CWsClient%2CWsCloseCb">ws: proc onClose(c: WsClient; cb: WsCloseCb)</a></li>
           </ul></dd>
+<dt><a name="onConnect" href="#onConnect"><span>onConnect:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc onConnect(server: ProxyServer; cb: OnProxyConnect): ProxyServer" href="powpow/proto/proxyserver.html#onConnect%2CProxyServer%2COnProxyConnect">proxyserver: proc onConnect(server: ProxyServer; cb: OnProxyConnect): ProxyServer</a></li>
+          </ul></dd>
 <dt><a name="OnData" href="#OnData"><span>OnData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: type OnData" href="powpow/net/tcp.html#OnData">tcp: type OnData</a></li>
+          </ul></dd>
+<dt><a name="onData" href="#onData"><span>onData:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc onData(server: ProxyServer; cb: OnProxyData): ProxyServer" href="powpow/proto/proxyserver.html#onData%2CProxyServer%2COnProxyData">proxyserver: proc onData(server: ProxyServer; cb: OnProxyData): ProxyServer</a></li>
           </ul></dd>
 <dt><a name="OnError" href="#OnError"><span>OnError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1345,6 +1389,8 @@
           </ul></dd>
 <dt><a name="onError" href="#onError"><span>onError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc onError(server: ProxyServer; cb: OnProxyError): ProxyServer" href="powpow/proto/proxyserver.html#onError%2CProxyServer%2COnProxyError">proxyserver: proc onError(server: ProxyServer; cb: OnProxyError): ProxyServer</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="ws: proc onError(wss: WsServer; cb: WsErrorCb)" href="powpow/proto/ws.html#onError%2CWsServer%2CWsErrorCb">ws: proc onError(wss: WsServer; cb: WsErrorCb)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="ws: proc onError(c: WsClient; cb: WsErrorCb)" href="powpow/ws.html#onError%2CWsClient%2CWsErrorCb">ws: proc onError(c: WsClient; cb: WsErrorCb)</a></li>
@@ -1365,6 +1411,26 @@
           <li><a class="reference external"
           data-doc-search-tag="ws: proc onOpen(c: WsClient; cb: WsOpenCb)" href="powpow/ws.html#onOpen%2CWsClient%2CWsOpenCb">ws: proc onOpen(c: WsClient; cb: WsOpenCb)</a></li>
           </ul></dd>
+<dt><a name="OnProxyClose" href="#OnProxyClose"><span>OnProxyClose:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: type OnProxyClose" href="powpow/proto/proxyserver.html#OnProxyClose">proxyserver: type OnProxyClose</a></li>
+          </ul></dd>
+<dt><a name="OnProxyConnect" href="#OnProxyConnect"><span>OnProxyConnect:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: type OnProxyConnect" href="powpow/proto/proxyserver.html#OnProxyConnect">proxyserver: type OnProxyConnect</a></li>
+          </ul></dd>
+<dt><a name="OnProxyData" href="#OnProxyData"><span>OnProxyData:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: type OnProxyData" href="powpow/proto/proxyserver.html#OnProxyData">proxyserver: type OnProxyData</a></li>
+          </ul></dd>
+<dt><a name="OnProxyError" href="#OnProxyError"><span>OnProxyError:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: type OnProxyError" href="powpow/proto/proxyserver.html#OnProxyError">proxyserver: type OnProxyError</a></li>
+          </ul></dd>
+<dt><a name="OnProxyUpstreamConnect" href="#OnProxyUpstreamConnect"><span>OnProxyUpstreamConnect:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: type OnProxyUpstreamConnect" href="powpow/proto/proxyserver.html#OnProxyUpstreamConnect">proxyserver: type OnProxyUpstreamConnect</a></li>
+          </ul></dd>
 <dt><a name="OnRequestCallback" href="#OnRequestCallback"><span>OnRequestCallback:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: type OnRequestCallback" href="powpow/proto/httpserver.html#OnRequestCallback">httpserver: type OnRequestCallback</a></li>
@@ -1376,6 +1442,14 @@
 <dt><a name="OnUdpData" href="#OnUdpData"><span>OnUdpData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="udp: type OnUdpData" href="powpow/net/udp.html#OnUdpData">udp: type OnUdpData</a></li>
+          </ul></dd>
+<dt><a name="onUpstreamConnect" href="#onUpstreamConnect"><span>onUpstreamConnect:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc onUpstreamConnect(server: ProxyServer; cb: OnProxyUpstreamConnect): ProxyServer" href="powpow/proto/proxyserver.html#onUpstreamConnect%2CProxyServer%2COnProxyUpstreamConnect">proxyserver: proc onUpstreamConnect(server: ProxyServer; cb: OnProxyUpstreamConnect): ProxyServer</a></li>
+          </ul></dd>
+<dt><a name="onUpstreamData" href="#onUpstreamData"><span>onUpstreamData:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc onUpstreamData(server: ProxyServer; cb: OnProxyData): ProxyServer" href="powpow/proto/proxyserver.html#onUpstreamData%2CProxyServer%2COnProxyData">proxyserver: proc onUpstreamData(server: ProxyServer; cb: OnProxyData): ProxyServer</a></li>
           </ul></dd>
 <dt><a name="openFileRead" href="#openFileRead"><span>openFileRead:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1613,6 +1687,18 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc postToLoop(loop: Loop; cb: Callback)" href="powpow/loop.html#postToLoop%2CLoop%2CCallback">loop: proc postToLoop(loop: Loop; cb: Callback)</a></li>
           </ul></dd>
+<dt><a name="ProxyDir" href="#ProxyDir"><span>ProxyDir:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: enum ProxyDir" href="powpow/proto/proxyserver.html#ProxyDir">proxyserver: enum ProxyDir</a></li>
+          </ul></dd>
+<dt><a name="ProxyPair" href="#ProxyPair"><span>ProxyPair:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: type ProxyPair" href="powpow/proto/proxyserver.html#ProxyPair">proxyserver: type ProxyPair</a></li>
+          </ul></dd>
+<dt><a name="ProxyServer" href="#ProxyServer"><span>ProxyServer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: type ProxyServer" href="powpow/proto/proxyserver.html#ProxyServer">proxyserver: type ProxyServer</a></li>
+          </ul></dd>
 <dt><a name="push" href="#push"><span>push:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpclient: proc push(pool: HttpConnPool; key: PoolKey; conn: Connection; parser: HttpParser)" href="powpow/proto/httpclient.html#push%2CHttpConnPool%2CPoolKey%2CConnection%2CHttpParser">httpclient: proc push(pool: HttpConnPool; key: PoolKey; conn: Connection; parser: HttpParser)</a></li>
@@ -1787,6 +1873,8 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc run(loop: Loop)" href="powpow/loop.html#run%2CLoop">loop: proc run(loop: Loop)</a></li>
           <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc run(server: ProxyServer)" href="powpow/proto/proxyserver.html#run%2CProxyServer">proxyserver: proc run(server: ProxyServer)</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="ws: proc run(c: WsClient)" href="powpow/ws.html#run%2CWsClient">ws: proc run(c: WsClient)</a></li>
           </ul></dd>
 <dt><a name="runOnce" href="#runOnce"><span>runOnce:</span></a></dt><dd><ul class="simple">
@@ -1955,6 +2043,14 @@
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc setKeepAliveTimeout(server: HttpServer; ms: int)" href="powpow/proto/httpserver.html#setKeepAliveTimeout%2CHttpServer%2Cint">httpserver: proc setKeepAliveTimeout(server: HttpServer; ms: int)</a></li>
           </ul></dd>
+<dt><a name="setMaxConnections" href="#setMaxConnections"><span>setMaxConnections:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc setMaxConnections(server: ProxyServer; n: int)" href="powpow/proto/proxyserver.html#setMaxConnections%2CProxyServer%2Cint">proxyserver: proc setMaxConnections(server: ProxyServer; n: int)</a></li>
+          </ul></dd>
+<dt><a name="setMaxPending" href="#setMaxPending"><span>setMaxPending:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc setMaxPending(server: ProxyServer; bytes: int)" href="powpow/proto/proxyserver.html#setMaxPending%2CProxyServer%2Cint">proxyserver: proc setMaxPending(server: ProxyServer; bytes: int)</a></li>
+          </ul></dd>
 <dt><a name="setNonBlocking" href="#setNonBlocking"><span>setNonBlocking:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc setNonBlocking(fd: SocketHandle)" href="powpow/net/common.html#setNonBlocking%2CSocketHandle">common: proc setNonBlocking(fd: SocketHandle)</a></li>
@@ -1978,6 +2074,14 @@
 <dt><a name="setTlsContext" href="#setTlsContext"><span>setTlsContext:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ws: proc setTlsContext(c: WsClient; ctx: SslContext)" href="powpow/ws.html#setTlsContext%2CWsClient%2CSslContext">ws: proc setTlsContext(c: WsClient; ctx: SslContext)</a></li>
+          </ul></dd>
+<dt><a name="setUpstream" href="#setUpstream"><span>setUpstream:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc setUpstream(server: ProxyServer; host: string; port: int)" href="powpow/proto/proxyserver.html#setUpstream%2CProxyServer%2Cstring%2Cint">proxyserver: proc setUpstream(server: ProxyServer; host: string; port: int)</a></li>
+          </ul></dd>
+<dt><a name="setUpstreamUnix" href="#setUpstreamUnix"><span>setUpstreamUnix:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc setUpstreamUnix(server: ProxyServer; path: string)" href="powpow/proto/proxyserver.html#setUpstreamUnix%2CProxyServer%2Cstring">proxyserver: proc setUpstreamUnix(server: ProxyServer; path: string)</a></li>
           </ul></dd>
 <dt><a name="shutdown" href="#shutdown"><span>shutdown:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2275,9 +2379,25 @@
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc start(server: HttpServer; handler: OnRequestCallback; port: Port)" href="powpow/proto/httpserver.html#start%2CHttpServer%2COnRequestCallback%2CPort">httpserver: proc start(server: HttpServer; handler: OnRequestCallback; port: Port)</a></li>
           <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc start(server: HttpServer; handler: OnRequestCallback; address: string;
+      ports: varargs[Port])" href="powpow/proto/httpserver.html#start%2CHttpServer%2COnRequestCallback%2Cstring%2Cvarargs%5BPort%5D">httpserver: proc start(server: HttpServer; handler: OnRequestCallback; address: string;
+      ports: varargs[Port])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc start(server: HttpServer; handler: OnRequestCallback; ports: varargs[Port])" href="powpow/proto/httpserver.html#start%2CHttpServer%2COnRequestCallback%2Cvarargs%5BPort%5D">httpserver: proc start(server: HttpServer; handler: OnRequestCallback; ports: varargs[Port])</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
       port: int)" href="powpow/proto/multithread.html#start%2CMultiThreadHttpServer%2COnRequestCallback%2Cstring%2Cint">multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
       port: int)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
+      ports: varargs[int])" href="powpow/proto/multithread.html#start%2CMultiThreadHttpServer%2COnRequestCallback%2Cstring%2Cvarargs%5Bint%5D">multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
+      ports: varargs[int])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc start(server: ProxyServer; port: Port)" href="powpow/proto/proxyserver.html#start%2CProxyServer%2CPort">proxyserver: proc start(server: ProxyServer; port: Port)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc start(server: ProxyServer; address: string; ports: varargs[Port])" href="powpow/proto/proxyserver.html#start%2CProxyServer%2Cstring%2Cvarargs%5BPort%5D">proxyserver: proc start(server: ProxyServer; address: string; ports: varargs[Port])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc start(server: ProxyServer; ports: varargs[Port])" href="powpow/proto/proxyserver.html#start%2CProxyServer%2Cvarargs%5BPort%5D">proxyserver: proc start(server: ProxyServer; ports: varargs[Port])</a></li>
           <li><a class="reference external"
           data-doc-search-tag="ws: proc start(wss: WsServer)" href="powpow/proto/ws.html#start%2CWsServer">ws: proc start(wss: WsServer)</a></li>
           </ul></dd>
@@ -2290,6 +2410,8 @@
           data-doc-search-tag="loop: proc stop(loop: Loop)" href="powpow/loop.html#stop%2CLoop">loop: proc stop(loop: Loop)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc stop(server: HttpServer)" href="powpow/proto/httpserver.html#stop%2CHttpServer">httpserver: proc stop(server: HttpServer)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="proxyserver: proc stop(server: ProxyServer)" href="powpow/proto/proxyserver.html#stop%2CProxyServer">proxyserver: proc stop(server: ProxyServer)</a></li>
           </ul></dd>
 <dt><a name="StreamClosed" href="#StreamClosed"><span>StreamClosed:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2320,6 +2442,14 @@
 <dt><a name="TcpServer" href="#TcpServer"><span>TcpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: type TcpServer" href="powpow/net/tcp.html#TcpServer">tcp: type TcpServer</a></li>
+          </ul></dd>
+<dt><a name="tcpServer" href="#tcpServer"><span>tcpServer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc tcpServer(server: HttpServer): TcpServer" href="powpow/proto/httpserver.html#tcpServer%2CHttpServer">httpserver: proc tcpServer(server: HttpServer): TcpServer</a></li>
+          </ul></dd>
+<dt><a name="tcpServer%3D" href="#tcpServer%3D"><span>tcpServer=:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc tcpServer=(server: HttpServer; ts: TcpServer)" href="powpow/proto/httpserver.html#tcpServer%3D%2CHttpServer%2CTcpServer">httpserver: proc tcpServer=(server: HttpServer; ts: TcpServer)</a></li>
           </ul></dd>
 <dt><a name="ThreadPool" href="#ThreadPool"><span>ThreadPool:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2583,7 +2713,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-28 10:54:25 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-05 18:14:37 UTC</small>
       </div>
     </div>
   </div>

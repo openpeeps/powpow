@@ -1,0 +1,38 @@
+nimTitle	proxyserver	powpow/proto/proxyserver.html	module powpow/proto/proxyserver		0
+nim	FromClient	powpow/proto/proxyserver.html#FromClient	ProxyDir.FromClient		66
+nim	FromUpstream	powpow/proto/proxyserver.html#FromUpstream	ProxyDir.FromUpstream		66
+nim	ProxyDir	powpow/proto/proxyserver.html#ProxyDir	enum ProxyDir		66
+nim	ProxyPair	powpow/proto/proxyserver.html#ProxyPair	type ProxyPair		70
+nim	OnProxyConnect	powpow/proto/proxyserver.html#OnProxyConnect	type OnProxyConnect		79
+nim	OnProxyUpstreamConnect	powpow/proto/proxyserver.html#OnProxyUpstreamConnect	type OnProxyUpstreamConnect		82
+nim	OnProxyData	powpow/proto/proxyserver.html#OnProxyData	type OnProxyData		85
+nim	OnProxyClose	powpow/proto/proxyserver.html#OnProxyClose	type OnProxyClose		90
+nim	OnProxyError	powpow/proto/proxyserver.html#OnProxyError	type OnProxyError		93
+nim	ProxyServer	powpow/proto/proxyserver.html#ProxyServer	type ProxyServer		96
+nim	DefaultMaxPending	powpow/proto/proxyserver.html#DefaultMaxPending	const DefaultMaxPending		120
+nim	listen	powpow/proto/proxyserver.html#listen,ProxyServer,string,int	proc listen(server: ProxyServer; address: string; port: int)		124
+nim	close	powpow/proto/proxyserver.html#close,ProxyServer	proc close(server: ProxyServer)		125
+nim	newProxyServer	powpow/proto/proxyserver.html#newProxyServer,Loop	proc newProxyServer(loop: Loop): ProxyServer		349
+nim	newProxyServer	powpow/proto/proxyserver.html#newProxyServer	proc newProxyServer(): ProxyServer		363
+nim	newProxyServer	powpow/proto/proxyserver.html#newProxyServer,string,int,Loop	proc newProxyServer(upstreamHost: string; upstreamPort: int; loop: Loop = nil): ProxyServer		377
+nim	onConnect	powpow/proto/proxyserver.html#onConnect,ProxyServer,OnProxyConnect	proc onConnect(server: ProxyServer; cb: OnProxyConnect): ProxyServer		396
+nim	onUpstreamConnect	powpow/proto/proxyserver.html#onUpstreamConnect,ProxyServer,OnProxyUpstreamConnect	proc onUpstreamConnect(server: ProxyServer; cb: OnProxyUpstreamConnect): ProxyServer		401
+nim	onData	powpow/proto/proxyserver.html#onData,ProxyServer,OnProxyData	proc onData(server: ProxyServer; cb: OnProxyData): ProxyServer		407
+nim	onClientData	powpow/proto/proxyserver.html#onClientData,ProxyServer,OnProxyData	proc onClientData(server: ProxyServer; cb: OnProxyData): ProxyServer		413
+nim	onUpstreamData	powpow/proto/proxyserver.html#onUpstreamData,ProxyServer,OnProxyData	proc onUpstreamData(server: ProxyServer; cb: OnProxyData): ProxyServer		418
+nim	onClose	powpow/proto/proxyserver.html#onClose,ProxyServer,OnProxyClose	proc onClose(server: ProxyServer; cb: OnProxyClose): ProxyServer		423
+nim	onError	powpow/proto/proxyserver.html#onError,ProxyServer,OnProxyError	proc onError(server: ProxyServer; cb: OnProxyError): ProxyServer		428
+nim	setUpstream	powpow/proto/proxyserver.html#setUpstream,ProxyServer,string,int	proc setUpstream(server: ProxyServer; host: string; port: int)		435
+nim	setUpstreamUnix	powpow/proto/proxyserver.html#setUpstreamUnix,ProxyServer,string	proc setUpstreamUnix(server: ProxyServer; path: string)		443
+nim	setMaxPending	powpow/proto/proxyserver.html#setMaxPending,ProxyServer,int	proc setMaxPending(server: ProxyServer; bytes: int)		450
+nim	setMaxConnections	powpow/proto/proxyserver.html#setMaxConnections,ProxyServer,int	proc setMaxConnections(server: ProxyServer; n: int)		454
+nim	getLoop	powpow/proto/proxyserver.html#getLoop,ProxyServer	proc getLoop(server: ProxyServer): Loop		463
+nim	run	powpow/proto/proxyserver.html#run,ProxyServer	proc run(server: ProxyServer)		469
+nim	listenUnix	powpow/proto/proxyserver.html#listenUnix,ProxyServer,string,int	proc listenUnix(server: ProxyServer; path: string; mode: int = 0o000000000660)		483
+nim	stop	powpow/proto/proxyserver.html#stop,ProxyServer	proc stop(server: ProxyServer)		507
+nim	start	powpow/proto/proxyserver.html#start,ProxyServer,Port	proc start(server: ProxyServer; port: Port)		513
+nim	start	powpow/proto/proxyserver.html#start,ProxyServer,varargs[Port]	proc start(server: ProxyServer; ports: varargs[Port])		518
+nim	start	powpow/proto/proxyserver.html#start,ProxyServer,string,varargs[Port]	proc start(server: ProxyServer; address: string; ports: varargs[Port])		526
+nimgrp	newproxyserver	powpow/proto/proxyserver.html#newProxyServer-procs-all	proc		349
+nimgrp	start	powpow/proto/proxyserver.html#start-procs-all	proc		513
+heading	Usage:	powpow/proto/proxyserver.html#usagecolon	   Usage:		0
