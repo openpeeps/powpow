@@ -42,7 +42,9 @@ Responses use `res.status(code).header(name, value).send(body)`; `res.reset()`
 aborts a stream. Oversize header blocks get an automatic `431`.
 
 Runnable version: [`examples/http2server.nim`](../../../examples/http2server.nim)
-— h2c by default, `--tls cert.pem key.pem` for `h2` over TLS.
+— `h2` over TLS by default with an embedded self-signed cert (open
+`https://localhost:9040/` in a browser and accept the warning),
+`--h2c` for cleartext, `--tls cert.pem key.pem` for your own cert.
 
 ## Client
 
