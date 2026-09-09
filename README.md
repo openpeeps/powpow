@@ -50,8 +50,9 @@
 > are serialized per connection, so io_uring doesn't dramatically outpace epoll
 > on a single-connection benchmark — it's a way to reach parity with headroom
 > as concurrency scales and for zero-copy file serving. See the
-> [performance docs](docs/contents/performance.md) for details and where
-> HTTP/2/QUIC will make its parallelism count.
+> [performance docs](docs/contents/performance.md) for details. Experimental
+> HTTP/2 multiplexing (see `docs/contents/http/http2.md`) is where that
+> parallelism counts; QUIC is still future work.
 
 ## 📚 Documentation
 

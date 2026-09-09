@@ -100,7 +100,8 @@ many independent streams over a single connection:
 
 - **HTTP/2** multiplexes requests over one TCP connection, so multiple reads and
   writes for independent streams are in flight at once — a much better fit for
-  io_uring than HTTP/1.x. powpow plans an HTTP/2 implementation soon.
+  io_uring than HTTP/1.x. powpow ships an experimental implementation
+  (see [HTTP/2](http/http2.md)) that reuses the same `SEND`/`SPLICE` pumps.
 - **HTTP/3 (QUIC)** decouples streams from TCP entirely, running over UDP with
   its own framing — the clearest case where io_uring's completion-driven model
   can meaningfully reduce per-stream overhead.
