@@ -291,6 +291,15 @@ Transfer/sec:     26.98MB
       non-`chunked` `Transfer-Encoding` tokens)
 - [x] Response-reflection guards for large attacker-controlled echoes under TLS
 
+### Projects built on top of PowPow
+- [Supranim](https://github.com/supranim/supranim) - A full-featured web framework in Nim
+- [Whiz](https://github.com/openpeeps/whiz) - A message queue library implementing ZMTP 3.0 in Nim
+- [NSSH](https://github.com/nimbase/nssh) - A pure Nim SSH server and client based on PowPow
+- [RTMP](https://github.com/nimbase/rtmp) - A pure Nim RTMP server and client on top of PowPow
+- [GrooveBox](https://github.com/openpeeps/groovebox) - Badass Live Streaming Straight from Your Disk. RTMP Client & Server + Icecast Client & Server
+- [StupidGreen](https://github.com/openpeeps/stupidgreen) - A static site generator with themes support (made with Supranim & PowPow backend)
+- [Booyaka](https://github.com/openpeeps/booyaka) - A documentation generator based on Markdown + Supranim + PowPow
+
 ### ❤ Contributions & Support
 - 🐛 Found a bug? [Create a new Issue](https://github.com/openpeeps/powpow/issues)
 - 👋 Wanna help? [Fork it!](https://github.com/openpeeps/powpow/fork)
