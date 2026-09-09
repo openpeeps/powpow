@@ -94,25 +94,25 @@ const
   SSL_TLSEXT_ERR_NOACK* = 3
 
 type
-  AlpnSelectCb* = proc(ssl: SslPtr; outProto: ptr ptr cuchar;
-                       outlen: ptr cuchar; input: ptr cuchar;
+  AlpnSelectCb* = proc(ssl: SslPtr; outProto: ptr ptr uint8;
+                       outlen: ptr uint8; input: ptr uint8;
                        inlen: cuint; arg: pointer): cint {.cdecl.}
 
-proc SSL_CTX_set_alpn_protos*(ctx: SslCtx; protos: ptr cuchar;
+proc SSL_CTX_set_alpn_protos*(ctx: SslCtx; protos: ptr uint8;
                               protosLen: cuint): cint {.
   importc: "SSL_CTX_set_alpn_protos".}
-proc SSL_set_alpn_protos*(ssl: SslPtr; protos: ptr cuchar;
+proc SSL_set_alpn_protos*(ssl: SslPtr; protos: ptr uint8;
                           protosLen: cuint): cint {.
   importc: "SSL_set_alpn_protos".}
-proc SSL_get0_alpn_selected*(ssl: SslPtr; data: ptr ptr cuchar;
+proc SSL_get0_alpn_selected*(ssl: SslPtr; data: ptr ptr uint8;
                              len: ptr cuint) {.
   importc: "SSL_get0_alpn_selected".}
 proc SSL_CTX_set_alpn_select_cb*(ctx: SslCtx; cb: AlpnSelectCb;
                                  arg: pointer): cint {.
   importc: "SSL_CTX_set_alpn_select_cb".}
-proc SSL_select_next_proto*(outProto: ptr ptr cuchar; outlen: ptr cuchar;
-                            server: ptr cuchar; serverLen: cuint;
-                            client: ptr cuchar; clientLen: cuint): cint {.
+proc SSL_select_next_proto*(outProto: ptr ptr uint8; outlen: ptr uint8;
+                            server: ptr uint8; serverLen: cuint;
+                            client: ptr uint8; clientLen: cuint): cint {.
   importc: "SSL_select_next_proto".}
 proc SSL_get_SSL_CTX*(ssl: SslPtr): SslCtx {.importc: "SSL_get_SSL_CTX".}
 

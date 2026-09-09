@@ -51,8 +51,8 @@ type
 when not defined(windows):
   var alpnProtosByCtx {.global.}: Table[pointer, seq[string]]
 
-  proc alpnSelectCb(ssl: SslPtr; outProto: ptr ptr cuchar;
-                    outlen: ptr cuchar; input: ptr cuchar;
+  proc alpnSelectCb(ssl: SslPtr; outProto: ptr ptr uint8;
+                    outlen: ptr uint8; input: ptr uint8;
                     inlen: cuint; arg: pointer): cint {.cdecl.} =
     ## Server-side ALPN selection: prefer server order, point `out` into the
     ## client's `input` buffer per OpenSSL contract. Returns SSL_TLSEXT_ERR_*
@@ -65,7 +65,7 @@ when not defined(windows):
     let serverProtos = alpnProtosByCtx[ctxPtr]
     if input == nil or inlen == 0:
       return SSL_TLSEXT_ERR_NOACK.cint
-    let clientBuf = cast[ptr UncheckedArray[cuchar]](input)
+    let clientBuf = cast[ptr UncheckedArray[uint8]](input)
     # Walk server preference order; for each, scan the client list.
     for sp in serverProtos:
       var i = 0
@@ -81,8 +81,8 @@ when not defined(windows):
               match = false
               break
           if match:
-            outProto[] = cast[ptr cuchar](addr clientBuf[i])
-            outlen[] = cuchar(n)
+            outProto[] = cast[ptr uint8](addr clientBuf[i])
+            outlen[] = uint8(n)
             return SSL_TLSEXT_ERR_OK.cint
         i += n
     return SSL_TLSEXT_ERR_NOACK.cint
@@ -105,7 +105,7 @@ when not defined(windows):
       raise newException(SslError, "TLS is not supported on Windows")
     else:
       let wire = encodeAlpnWire(protos)
-      if SSL_CTX_set_alpn_protos(ctx.ctx, cast[ptr cuchar](wire[0].addr),
+      if SSL_CTX_set_alpn_protos(ctx.ctx, cast[ptr uint8](wire[0].addr),
                                  cuint(wire.len)) != 0:
         raise newException(SslError, "SSL_CTX_set_alpn_protos() failed: " &
           opensslError())
@@ -120,13 +120,13 @@ when not defined(windows):
     ## Safe to call pre-handshake (returns "").
     if conn.ssl == nil:
       return ""
-    var data: ptr cuchar = nil
+    var data: ptr uint8 = nil
     var dlen: cuint = 0
     SSL_get0_alpn_selected(cast[SslPtr](conn.ssl), addr data, addr dlen)
     if data == nil or dlen == 0:
       return ""
     result = newString(dlen)
-    let src = cast[ptr UncheckedArray[cuchar]](data)
+    let src = cast[ptr UncheckedArray[uint8]](data)
     for i in 0 ..< int(dlen):
       result[i] = char(src[i])
 
@@ -211,7 +211,7 @@ when not defined(windows):
         raise newException(SslError, "SSL_set_fd() failed")
     if ctx.alpnWire.len > 0 and ctx.role == TlsClient:
       # Per-connection ALPN list; servers advertise via the SSL_CTX instead.
-      if SSL_set_alpn_protos(ssl, cast[ptr cuchar](ctx.alpnWire[0].addr),
+      if SSL_set_alpn_protos(ssl, cast[ptr uint8](ctx.alpnWire[0].addr),
                              cuint(ctx.alpnWire.len)) != 0:
         SSL_free(ssl)
         raise newException(SslError, "SSL_set_alpn_protos() failed")
