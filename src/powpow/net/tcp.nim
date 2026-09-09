@@ -18,7 +18,7 @@
 ##     before tearing the socket down.
 ## The public API, pooling, close semantics and connect fallback are shared.
 
-import std/[tables, strutils]
+import std/[tables]
 import ../types
 when not defined(windows):
   import std/posix
@@ -3021,8 +3021,8 @@ else:
                               cast[ptr Sockaddr](addr clientAddr),
                               addr addrLen)
         if clientFd.int >= 0:
-          setNonBlocking(SocketHandle(clientFd))
-          setTcpNoDelay(SocketHandle(clientFd))
+          setNonBlocking(clientFd)
+          setTcpNoDelay(clientFd)
 
         if clientFd.int < 0:
           if sockWouldBlock():

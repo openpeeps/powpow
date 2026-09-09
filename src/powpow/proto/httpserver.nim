@@ -28,7 +28,9 @@ import ../net/common
 import ../loop
 import ../types
 import ./http
-import ./winpath
+
+when defined(windows):
+  import ./winpath
 
 import pkg/[mimedb, multipart]
 export Port
@@ -215,16 +217,6 @@ func parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, l
   result = (true, rangeStart, rangeEnd - rangeStart + 1)
 
 # ── HttpResponse ─────────────────────────────────────────────────────────────────
-
-proc newHttpResponse(conn: Connection): HttpResponse =
-  HttpResponse(
-    conn:       conn,
-    statusCode: uint16(Http200),
-    sent:       false,
-    closeConn:  false,
-    headers:    @[],
-    bodyBytes:  @[],
-  )
 
 proc status*(res: HttpResponse, code: HttpCode): HttpResponse {.inline, discardable.} =
   res.statusCode = uint16(code)
@@ -1434,11 +1426,6 @@ proc serveFile*(res: HttpResponse, req: HttpRequest, path: string;
         discard
       if not matchesEtag and not matchesMtime:
         honorRange = false
-
-    let ext = getFileExt(path)
-    let mimeType = if contentType.len > 0: contentType
-                   elif isExtension(ext): getMimeType(ext).get()
-                   else: "application/octet-stream"
 
     res.header("ETag", fileETag)
     res.header("Last-Modified", fileMTime)

@@ -465,12 +465,6 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
   let frameLimit = if ws.maxFrameSize > 0: uint64(ws.maxFrameSize)
                    else: uint64(WsHardMaxFrameSize)
 
-  template readByte(): uint8 =
-    if i >= dataLen: return
-    let b = data[i]
-    inc i
-    b
-
   while i < dataLen:
     let p = ws.parser
 
@@ -847,7 +841,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
         wss.armHandshakeTimeout(conn)
 
       let parser = addr wss.handshakeSessions[fd]
-      let phase = parser[].feed(data)
+      parser[].feed(data)
 
       if parser[].isComplete():
         let req = parser[].getRequest()
@@ -979,7 +973,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
 
       elif parser[].isError():
         let badRequest = "Bad Request"
-        discard conn.send("HTTP/1.1 400 Bad Request\r\nContent-Length: "& $(badRequest.len) & "\r\n\r\n" & badRequest)
+        discard conn.send("HTTP/1.1 400 Bad Request\r\nContent-Length: " & $(badRequest.len) & "\r\n\r\n" & badRequest)
         conn.close()
         wss.endHandshake(fd)
     ,

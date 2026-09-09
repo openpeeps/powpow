@@ -48,12 +48,11 @@
 ## notifications — forwarding happens automatically before they fire. Use
 ## `pair.client.send` / `pair.upstream.send` inside callbacks for injection.
 
-import std/[tables, sequtils, strutils]
+import std/[tables, sequtils]
 import std/net except IpAddress, IpAddressFamily
 import ../loop
 import ../types
 import ../net/tcp
-import ../net/common
 
 export Port
 export loop
@@ -148,7 +147,7 @@ proc teardown(server: ProxyServer, clientFd: int) =
   if pair.client != nil and pair.client.state != Closed:
     pair.client.close()
 
-proc teardownByUpstreamFd(server: ProxyServer, upstreamFd: int): int =
+proc teardownByUpstreamFd*(server: ProxyServer, upstreamFd: int): int =
   ## Find the clientFd for an upstream fd and tear that pair down. Returns
   ## clientFd or -1.
   result = server.byUpstream.getOrDefault(upstreamFd, -1)

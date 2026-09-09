@@ -18,7 +18,7 @@ import std/[httpcore, strutils, oids, os]
 import pkg/multipart
 
 import ./simdscan
-import ../net/tcp, ../loop
+import ../net/tcp
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -37,8 +37,6 @@ const
     ## buffered in the parser so `getBodyString`/`getBody` work; larger bodies
     ## may be auto-streamed to a temp file when they arrive split across reads.
 
-  httpNewLine = "\r\n"
-  headerSep   = "\r\n\r\n"
 
 # ── Types ────────────────────────────────────────────────────────────────────
 

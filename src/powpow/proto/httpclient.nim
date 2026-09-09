@@ -815,8 +815,8 @@ proc request*(
   var done = false
   var resp: HttpClientResponse
   var errMsg = ""
-  let st = requestImpl(client, client.syncLoop, meth, url, body, headers,
-                       unixSocket, timeoutMs,
+  discard requestImpl(client, client.syncLoop, meth, url, body, headers,
+                         unixSocket, timeoutMs,
     onResponse = proc(res: HttpClientResponse) =
       resp = res
       done = true

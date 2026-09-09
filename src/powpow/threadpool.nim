@@ -95,9 +95,6 @@ when not defined(powpowNoThreads):
       core: ptr PoolCore       ## Set on work-phase nodes; used to publish results
       next: ptr TaskNode
 
-    WorkItem = object
-      head: ptr TaskNode       ## Dequeued cell owned by the taker
-
     PoolCore = object
       ## Everything workers touch — deliberately free of managed fields so no
       ## reference-count operation can race between threads.
@@ -283,7 +280,7 @@ when not defined(powpowNoThreads):
             while true:
               let dropped = popWork(core)
               if dropped == nil: break
-              var junk = cast[BoxBase](dropped.box)   # typed view, sole owner
+              var junk {.used.} = cast[BoxBase](dropped.box)   # typed view, sole owner
               dropped.box = nil                       # scope-end release below
               freeNode(dropped)
             running = false
@@ -300,7 +297,6 @@ when not defined(powpowNoThreads):
     ## Drive the pool's private loop. Results are delivered by the tick
     ## observer registered in `newThreadPool`; the teardown sentinel posted
     ## after the workers join makes this proc return.
-    let core = arg.core
     var lp = cast[Loop](arg.loopRaw)   # borrowing view; creator outlives us
     {.cast(gcsafe).}:
       # A loop carrying only observers would block inside the platform wait

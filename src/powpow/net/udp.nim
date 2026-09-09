@@ -19,7 +19,6 @@ import ../types
 when not defined(windows):
   import std/posix
 import ../loop
-import ../loop
 import common
 when iouEnabled:
   import ../io/uring
