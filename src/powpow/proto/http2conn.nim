@@ -44,8 +44,23 @@ type
     state*: H2StreamState
     reqHeaders*: seq[HpackHeader]
     reqBody*: seq[byte]
+    respHeaders*: seq[HpackHeader]
+    respBody*: seq[byte]
+    clientCb*: H2ClientCallback
     recvWindow*: int32
     sendWindow*: int32
+
+  H2ClientResponse* = object
+    ## A complete response as delivered to `H2ClientCallback`.
+    status*: int
+    headers*: seq[(string, string)]
+    body*: seq[byte]
+
+  H2ClientCallback* = proc(resp: H2ClientResponse,
+                           err: string) {.closure.}
+    ## `err == ""` on success. Errors: `"reset by peer"`, `"refused"`,
+    ## `"goaway"`, `"closed"`, `"protocol error"`. Plain `closure` (like
+    ## the TCP layer) so callers may capture locals.
 
   H2Request* = object
     streamId*: int32
@@ -94,6 +109,8 @@ type
     sendWindow*: int32
     peerInitWindow*: int32
     peerMaxFrame*: int
+    peerMaxConcurrent*: int
+    nextStreamId*: int32
     maxConcurrentLocal*: int
     maxHeaderList*: int
     maxBody*: int
@@ -102,6 +119,7 @@ type
     goawaySent*: bool
     pending*: seq[H2PendingWrite]
     onRequest*: OnH2RequestCallback
+    onSettingsApplied*: proc(h2: H2Conn) {.closure.}
     alpnChecked*: bool
 
   H2Server* = ref object
@@ -191,8 +209,8 @@ proc applyPeerSettings(h2: H2Conn, settings: seq[H2Setting]) =
         h2.encCtx.setMaxTableSize(int(s.value))
     of 2:  # ENABLE_PUSH: accepted and ignored (push deferred).
       discard
-    of 3:  # MAX_CONCURRENT_STREAMS: informational for a server.
-      discard
+    of 3:  # MAX_CONCURRENT_STREAMS: caps streams a client may open.
+      h2.peerMaxConcurrent = int(s.value)
     of 4:  # INITIAL_WINDOW_SIZE.
       if s.value > uint32(H2MaxWindowSize):
         h2.connError(H2FlowControlError)
@@ -231,6 +249,8 @@ proc handleSettings(h2: H2Conn, f: H2Frame) =
   if h2.state == CsClosed:
     return
   discard h2.conn.send(encodeSettingsAck())
+  if h2.onSettingsApplied != nil:
+    h2.onSettingsApplied(h2)
 
 # ── Response path ─────────────────────────────────────────────────────
 
@@ -261,8 +281,14 @@ proc flushPending(h2: H2Conn) =
     head.offset += int(n)
     if head.offset >= head.data.len:
       h2.pending.delete(0)
-      if last:
-        h2.closeStream(head.sid)
+      if last and h2.streams.hasKey(head.sid):
+        # Mirror sendDataChunked: only a half-closed (remote) stream is
+        # done; otherwise we are half-closed (local) and still expect
+        # the peer's END_STREAM (client request path).
+        if h2.streams[head.sid].state == HsHalfClosedRemote:
+          h2.closeStream(head.sid)
+        else:
+          h2.streams[head.sid].state = HsHalfClosedLocal
     else:
       h2.pending[0] = head
       return
@@ -358,6 +384,14 @@ proc send*(res: H2Response, body: string) =
   for i, c in body:
     b[i] = byte(c)
   res.send(b)
+
+proc reset*(res: H2Response, code = H2Cancelled) =
+  ## Abort the stream with RST_STREAM (e.g. handler rejects the request).
+  let h2 = res.h2
+  if res.sent or not h2.streams.hasKey(res.streamId):
+    return
+  res.sent = true
+  h2.streamError(res.streamId, code)
 
 # ── Request validation + dispatch ─────────────────────────────────────
 
@@ -600,6 +634,251 @@ proc handleData(h2: H2Conn, f: H2Frame) =
     if h2.fragStream < 0:
       h2.dispatchStream(stream)
 
+# ── Client role (M4) ────────────────────────────────────────────────
+#
+# Client streams live in the same `streams` table (odd ids opened locally).
+# Responses accumulate on the stream's `respHeaders`/`respBody`; completion
+# or failure delivers exactly one `clientCb` invocation, then the stream is
+# dropped. The shared send path (`sendDataChunked`, `flushPending`) and
+# receive top-ups are reused verbatim.
+
+proc sendHeaderBlock(h2: H2Conn, sid: int32, blk: seq[byte],
+                     endStream: bool) =
+  ## Emit HEADERS, fragmenting across CONTINUATION past `peerMaxFrame`.
+  if blk.len <= h2.peerMaxFrame:
+    var flags = H2FlagEndHeaders
+    if endStream:
+      flags = flags or H2FlagEndStream
+    discard h2.conn.send(encodeFrame(1, flags, sid, blk))
+    return
+  var off = 0
+  var first = true
+  while off < blk.len:
+    let n = min(h2.peerMaxFrame, blk.len - off)
+    let last = off + n == blk.len
+    var fl: uint8 = 0
+    if first and endStream:
+      fl = fl or H2FlagEndStream
+    if last:
+      fl = fl or H2FlagEndHeaders
+    discard h2.conn.send(encodeFrame(if first: 1 else: 9, fl, sid,
+      blk.toOpenArray(off, off + n - 1)))
+    off += n
+    first = false
+
+proc startClientPreface*(h2: H2Conn) =
+  ## Switch a fresh `H2Conn` to the client role and emit the preface:
+  ## magic + SETTINGS with push disabled. The peer's frames drive the rest.
+  h2.state = CsReady
+  h2.prefaceSettingsSeen = true
+  discard h2.conn.send(H2ConnMagic)
+  discard h2.conn.send(encodeSettings([H2Setting(id: 2, value: 0)]))
+
+proc openClientStream*(h2: H2Conn, headers: seq[HpackHeader],
+                       body: seq[byte], endStream: bool,
+                       cb: H2ClientCallback): int32 =
+  ## Open a client-initiated stream and send the request. Returns the
+  ## stream id, or -1 when refused (closed, GOAWAY received, no capacity,
+  ## id exhaustion, HPACK failure) — the callback is NOT invoked on -1.
+  if h2.state == CsClosed or h2.goawayReceived:
+    return -1
+  if h2.openCount >= min(h2.peerMaxConcurrent, h2.maxConcurrentLocal):
+    return -1
+  if h2.nextStreamId > 2147483647'i32 - 2:
+    return -1
+  var blk: seq[byte]
+  try:
+    blk = h2.encCtx.encode(headers)
+  except HpackError:
+    return -1
+  let sid = h2.nextStreamId
+  h2.nextStreamId += 2
+  let stream = H2Stream(id: sid, state: HsOpen, reqHeaders: @[],
+                        reqBody: @[], respHeaders: @[], respBody: @[],
+                        clientCb: cb,
+                        recvWindow: H2DefaultWindowSize,
+                        sendWindow: h2.peerInitWindow)
+  h2.streams[sid] = stream
+  inc h2.openCount
+  h2.sendHeaderBlock(sid, blk, endStream and body.len == 0)
+  if body.len > 0:
+    h2.sendDataChunked(sid, body, endStream)
+  elif endStream:
+    stream.state = HsHalfClosedLocal
+  sid
+
+proc failClientStream(h2: H2Conn, sid: int32, err: string,
+                      code = H2Cancelled) =
+  ## RST the stream and deliver exactly one error to its callback.
+  if not h2.streams.hasKey(sid):
+    return
+  let stream = h2.streams[sid]
+  let cb = stream.clientCb
+  stream.clientCb = nil
+  if h2.state != CsClosed:
+    discard h2.conn.send(encodeRstStream(sid, code))
+  h2.closeStream(sid)
+  if cb != nil:
+    cb(H2ClientResponse(), err)
+
+proc finishClientStream(h2: H2Conn, sid: int32) =
+  ## Assemble the response and deliver it, then drop the stream.
+  if not h2.streams.hasKey(sid):
+    return
+  let stream = h2.streams[sid]
+  let cb = stream.clientCb
+  stream.clientCb = nil
+  let body = stream.respBody
+  var status = -1
+  var headers: seq[(string, string)] = @[]
+  for h in stream.respHeaders:
+    if h.name.len > 0 and h.name[0] == ':':
+      if h.name == ":status":
+        try:
+          status = parseInt(h.value)
+        except ValueError:
+          status = -1
+    else:
+      headers.add((h.name, h.value))
+  h2.closeStream(sid)
+  if cb != nil:
+    if status < 0:
+      cb(H2ClientResponse(), "protocol error")
+    else:
+      cb(H2ClientResponse(status: status, headers: headers, body: body),
+         "")
+
+proc decodeFragBlockResp(h2: H2Conn, sid: int32): bool =
+  let stream = h2.streams.getOrDefault(sid)
+  if stream == nil or stream.clientCb == nil:
+    return false
+  var decoded: seq[HpackHeader]
+  try:
+    decoded = h2.decCtx.decode(h2.fragBuf)
+  except HpackError:
+    h2.failClientStream(sid, "protocol error", H2CompressionError)
+    return false
+  for h in decoded:
+    stream.respHeaders.add(h)
+  true
+
+proc handleClientHeaders(h2: H2Conn, f: H2Frame) =
+  let sid = f.streamId
+  if sid <= 0 or (sid and 1) == 0:
+    h2.connError(H2ProtocolError)  # servers never open streams (no push)
+    return
+  if not h2.streams.hasKey(sid):
+    if sid < h2.nextStreamId:
+      if h2.state != CsClosed:
+        discard h2.conn.send(encodeRstStream(sid, H2StreamClosed))
+    else:
+      h2.connError(H2ProtocolError)  # response for an idle stream
+    return
+  let stream = h2.streams[sid]
+  if stream.clientCb == nil:
+    h2.connError(H2ProtocolError)
+    return
+  if h2.fragStream >= 0 and h2.fragStream != sid:
+    h2.connError(H2ProtocolError)
+    return
+  var fragment = f.payload
+  if (f.flags and H2FlagPriority) != 0:
+    if fragment.len < 5:
+      h2.connError(H2ProtocolError)
+      return
+    fragment = if fragment.len == 5: @[] else: fragment[5 .. ^1]
+  let firstBlock = stream.respHeaders.len == 0
+  h2.fragBuf = fragment
+  if (f.flags and H2FlagEndHeaders) == 0:
+    h2.fragStream = sid
+    h2.fragEndStream = (f.flags and H2FlagEndStream) != 0
+    return
+  h2.fragEndStream = false
+  if not h2.decodeFragBlockResp(sid):
+    return
+  if firstBlock and not stream.respHeaders.anyIt(it.name == ":status"):
+    h2.failClientStream(sid, "protocol error", H2ProtocolError)
+    return
+  if (f.flags and H2FlagEndStream) != 0:
+    h2.finishClientStream(sid)
+
+proc handleClientContinuation(h2: H2Conn, f: H2Frame) =
+  if h2.fragStream < 0 or f.streamId != h2.fragStream:
+    h2.connError(H2ProtocolError)
+    return
+  let sid = f.streamId
+  if not h2.streams.hasKey(sid) or h2.streams[sid].clientCb == nil:
+    h2.connError(H2ProtocolError)
+    return
+  let stream = h2.streams[sid]
+  let firstBlock = stream.respHeaders.len == 0
+  for b in f.payload:
+    h2.fragBuf.add(b)
+  if (f.flags and H2FlagEndHeaders) == 0:
+    return
+  h2.fragStream = -1
+  if not h2.decodeFragBlockResp(sid):
+    return
+  if firstBlock and not stream.respHeaders.anyIt(it.name == ":status"):
+    h2.failClientStream(sid, "protocol error", H2ProtocolError)
+    return
+  if h2.fragEndStream:
+    h2.fragEndStream = false
+    h2.finishClientStream(sid)
+
+proc handleClientData(h2: H2Conn, f: H2Frame) =
+  if h2.fragStream >= 0:
+    h2.connError(H2ProtocolError)
+    return
+  let sid = f.streamId
+  if not h2.streams.hasKey(sid):
+    if sid <= 0 or (sid and 1) == 0:
+      h2.connError(H2ProtocolError)
+    elif sid < h2.nextStreamId:
+      if h2.state != CsClosed:
+        discard h2.conn.send(encodeRstStream(sid, H2StreamClosed))
+    else:
+      h2.connError(H2ProtocolError)  # DATA on idle stream
+    return
+  let stream = h2.streams[sid]
+  if stream.clientCb == nil:
+    h2.connError(H2ProtocolError)
+    return
+  if stream.respHeaders.len == 0:
+    # DATA before any response HEADERS.
+    h2.failClientStream(sid, "protocol error", H2ProtocolError)
+    return
+  if int64(f.payload.len) > int64(stream.recvWindow) or
+     int64(f.payload.len) > int64(h2.recvWindow):
+    h2.connError(H2FlowControlError)
+    return
+  stream.recvWindow -= int32(f.payload.len)
+  h2.recvWindow -= int32(f.payload.len)
+  if stream.respBody.len + f.payload.len > h2.maxBody:
+    h2.failClientStream(sid, "response too large")
+    return
+  for b in f.payload:
+    stream.respBody.add(b)
+  h2.topUpRecv(sid, stream)
+  if (f.flags and H2FlagEndStream) != 0:
+    h2.finishClientStream(sid)
+
+proc handleClientRst(h2: H2Conn, f: H2Frame) =
+  let sid = f.streamId
+  if not h2.streams.hasKey(sid):
+    if sid <= 0 or (sid and 1) == 0 or sid >= h2.nextStreamId:
+      h2.connError(H2ProtocolError)
+    return
+  let stream = h2.streams[sid]
+  if stream.clientCb == nil:
+    h2.connError(H2ProtocolError)
+    return
+  let cb = stream.clientCb
+  stream.clientCb = nil
+  h2.closeStream(sid)
+  if cb != nil:
+    cb(H2ClientResponse(), "reset by peer")
+
 # ── PING / WINDOW_UPDATE / RST / GOAWAY ───────────────────────────────
 
 proc handlePing(h2: H2Conn, f: H2Frame) =
@@ -658,17 +937,26 @@ proc handleGoaway(h2: H2Conn, f: H2Frame) =
     h2.conn.close()
 
 proc handleFrame(h2: H2Conn, f: H2Frame) =
+  let clientRole = h2.role == H2ClientRole
   case f.rawType
-  of 0: h2.handleData(f)
-  of 1: h2.handleHeaders(f)
+  of 0:
+    if clientRole: h2.handleClientData(f)
+    else: h2.handleData(f)
+  of 1:
+    if clientRole: h2.handleClientHeaders(f)
+    else: h2.handleHeaders(f)
   of 2: discard  # PRIORITY validated by the codec; no scheduling (deferred).
-  of 3: h2.handleRst(f)
+  of 3:
+    if clientRole: h2.handleClientRst(f)
+    else: h2.handleRst(f)
   of 4: h2.handleSettings(f)
   of 5: h2.connError(H2ProtocolError)  # PUSH_PROMISE deferred.
   of 6: h2.handlePing(f)
   of 7: h2.handleGoaway(f)
   of 8: h2.handleWindowUpdate(f)
-  of 9: h2.handleContinuation(f)
+  of 9:
+    if clientRole: h2.handleClientContinuation(f)
+    else: h2.handleContinuation(f)
   else: discard  # Unknown frames are ignored (§5.5).
 
 # ── Preface: prior knowledge + Upgrade ────────────────────────────────
@@ -908,6 +1196,14 @@ proc feedH2*(h2: H2Conn, data: openArray[byte]) =
   of CsReady: h2.feedReady(data)
   of CsDraining, CsClosed: discard
 
+proc h2Closed*(h2: H2Conn): bool {.inline.} =
+  ## True once the connection reached its terminal state.
+  h2 == nil or h2.state == CsClosed
+
+proc h2Draining*(h2: H2Conn): bool {.inline.} =
+  ## True once the peer asked to go away (no new streams accepted).
+  h2 != nil and h2.goawayReceived
+
 proc newH2Conn*(conn: Connection, role: H2Role,
                 onRequest: OnH2RequestCallback,
                 maxConcurrent = H2DefaultMaxConcurrent,
@@ -923,10 +1219,11 @@ proc newH2Conn*(conn: Connection, role: H2Role,
          recvWindow: H2DefaultWindowSize, sendWindow: H2DefaultWindowSize,
          peerInitWindow: H2DefaultWindowSize,
          peerMaxFrame: H2DefaultMaxFrameSize,
+         peerMaxConcurrent: high(int), nextStreamId: 1,
          maxConcurrentLocal: maxConcurrent, maxHeaderList: maxHeaderList,
          maxBody: maxBody, peerAckedSettings: false,
          goawayReceived: false, goawaySent: false, pending: @[],
-         onRequest: onRequest)
+         onRequest: onRequest, onSettingsApplied: nil, alpnChecked: false)
 
 # ── H2Server ──────────────────────────────────────────────────────────
 
