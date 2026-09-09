@@ -143,6 +143,8 @@ Most web servers out there are all rainbows and flowers, until you upload or str
 
 - `httpserver_threads.nim` the same server, but it spawns **one event loop per CPU core** and binds them all to the same port via `SO_REUSEPORT`. The kernel load-balances connections across workers for you
 
+- `http2server.nim` the same idea over HTTP/2: multiplexed streams on one TCP connection, h2c (prior knowledge + `Upgrade: h2c`) by default and `h2` over TLS with `--tls cert.pem key.pem`. `curl --http2-prior-knowledge http://localhost:9040/hello`
+
 - `upload_server.nim` file uploads done right, using `pkg/multipart` two ways:
   - `/upload/raw` raw body streamed straight to disk via `streamToFile()`
   - `/upload/stream` multipart parsed on the fly with `getMultipart()`

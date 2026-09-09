@@ -41,6 +41,9 @@ let srv = newH2Server(loop, handler, sslCtx = ctx)
 Responses use `res.status(code).header(name, value).send(body)`; `res.reset()`
 aborts a stream. Oversize header blocks get an automatic `431`.
 
+Runnable version: [`examples/http2server.nim`](../../../examples/http2server.nim)
+— h2c by default, `--tls cert.pem key.pem` for `h2` over TLS.
+
 ## Client
 
 `H2ClientConn` multiplexes many concurrent requests over one connection,
