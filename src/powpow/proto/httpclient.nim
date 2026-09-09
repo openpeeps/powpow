@@ -381,8 +381,12 @@ proc retryFresh(st: HttpReq, client: HttpClientBase): bool =
   true
 
 proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
-              ev: set[EventType])
+               ev: set[EventType])
   ## Forward declaration: `beginConn` registers this as the watcher callback.
+
+proc connectFresh(st: HttpReq, client: HttpClientBase, loop: Loop)
+  ## Forward declaration: `beginConn` retries on a fresh connection when the
+  ## (possibly pooled) connection dies while writing the request.
 
 proc beginConn(st: HttpReq, client: HttpClientBase, conn: Connection,
                reuseParser: HttpParser = nil) =
@@ -412,6 +416,17 @@ proc beginConn(st: HttpReq, client: HttpClientBase, conn: Connection,
   discard conn.send(st.reqHeaders)
   if st.bodyBytes.len > 0:
     discard conn.send(st.bodyBytes)
+  if conn.state != Connected:
+    # The connection died while writing the request (send closes it
+    # internally). Registering its (now invalid) fd would wait on events
+    # that never arrive, so retry or fail here instead. A pooled connection
+    # the server already killed is the classic case — the server never saw
+    # these bytes, so one transparent retry on a fresh connection is safe.
+    if retryFresh(st, client):
+      connectFresh(st, client, conn.loop)
+    else:
+      failReq(st, client, "connection closed while writing")
+    return
   # Re-register in place: register() already replaces the existing watcher.
   # Unregistering first would trash the fd state while its WSARecv is still
   # in flight on Windows/IOCP, so the response bytes would land in the trash
@@ -466,7 +481,12 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
       conn.close()
     return
   if Error in ev and Read notin ev:
-    failReq(st, client, "connection error")
+    if retryFresh(st, client):
+      # Error on a pooled connection the server already killed (RST with
+      # nothing to drain) — same stale keep-alive race as the EOF path.
+      connectFresh(st, client, conn.loop)
+    else:
+      failReq(st, client, "connection error")
     return
   if conn.tlsState == TlsHandshaking:
     if not conn.driveHandshake():
@@ -474,7 +494,12 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
   if Write in ev:
     if conn.flushWriteBuffer():
       if conn.state != Connected:
-        failReq(st, client, "connection closed while writing")
+        if retryFresh(st, client):
+          # Send-side death on a pooled connection (RST processed at flush
+          # time) — the server never saw these bytes, so resending is safe.
+          connectFresh(st, client, conn.loop)
+        else:
+          failReq(st, client, "connection closed while writing")
         return
       if conn.tlsState != TlsHandshaking:
         conn.loop.modify(fd, {Read})
@@ -546,7 +571,12 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
             break
           if sockInterrupted():
             continue
-          failReq(st, client, "recv error")
+          if retryFresh(st, client):
+            # Recv-side death on a pooled connection (RST, e.g. server-side
+            # linger-0 close) with nothing received yet — retry transparently.
+            connectFresh(st, client, conn.loop)
+          else:
+            failReq(st, client, "recv error")
           return
     if (Hup in ev or Error in ev) and conn.state == Connected and st.active:
       if st.parser.phase == PhaseComplete:

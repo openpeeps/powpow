@@ -399,6 +399,43 @@ test "pool_stale_conn_retry":
   server.close()
   client.close()
 
+test "pool_rst_conn_retry":
+  # powpow closes server-side sockets with linger-0, so a server-side close
+  # lands as RST rather than FIN. Kill the pooled connection outright, wait
+  # for the RST to arrive, then request: whether the dead socket surfaces as
+  # a send error or a recv error, the request must succeed transparently via
+  # one fresh retry (accepted == 2 proves the retry happened).
+  var accepted = 0
+  var lastConn: Connection = nil
+  let client = newHttpClient(idleTimeoutMs = 60_000)
+  let loop = client.getLoop()
+  let server = newTcpServer(loop,
+    onAccept = proc(conn: Connection) =
+      inc accepted
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      lastConn = conn
+      discard conn.send("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n" &
+                        "Connection: keep-alive\r\n\r\nok")
+    ,
+    onClose = proc(conn: Connection) = discard,
+  )
+  server.listen("127.0.0.1", 19995)
+
+  let r1 = client.get("http://127.0.0.1:19995/first")
+  check r1.getBodyString() == "ok"
+  check accepted == 1
+
+  lastConn.close()  # RST; the pooled connection is dead from here on
+  sleep(300)        # let the RST land so the pop observes a dead socket
+
+  let r2 = client.get("http://127.0.0.1:19995/second")
+  check r2.getBodyString() == "ok" # RST pooled connection must retry silently
+  check accepted == 2
+
+  server.close()
+  client.close()
+
 test "async_pool_reuses_connection":
   let client = newAsyncHttpClient()
   var conns: seq[int]
