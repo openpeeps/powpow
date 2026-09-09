@@ -34,6 +34,7 @@
 import ./tcp
 import ../types
 import ./tlsapi
+import std/tables
 
 type
   TlsRole* = enum
@@ -42,8 +43,92 @@ type
   SslContext* = ref object
     ctx:  SslCtx
     role: TlsRole
+    alpnProtos*: seq[string]
+    alpnWire: string
 
   SslError* = object of CatchableError
+
+when not defined(windows):
+  var alpnProtosByCtx {.global.}: Table[pointer, seq[string]]
+
+  proc alpnSelectCb(ssl: SslPtr; outProto: ptr ptr cuchar;
+                    outlen: ptr cuchar; input: ptr cuchar;
+                    inlen: cuint; arg: pointer): cint {.cdecl.} =
+    ## Server-side ALPN selection: prefer server order, point `out` into the
+    ## client's `input` buffer per OpenSSL contract. Returns SSL_TLSEXT_ERR_*
+    ## (0 = negotiated, 3 = no overlap, continue without ALPN).
+    if ssl == nil or outProto == nil or outlen == nil:
+      return SSL_TLSEXT_ERR_NOACK.cint
+    let ctxPtr = SSL_get_SSL_CTX(ssl)
+    if ctxPtr == nil or not alpnProtosByCtx.hasKey(ctxPtr):
+      return SSL_TLSEXT_ERR_NOACK.cint
+    let serverProtos = alpnProtosByCtx[ctxPtr]
+    if input == nil or inlen == 0:
+      return SSL_TLSEXT_ERR_NOACK.cint
+    let clientBuf = cast[ptr UncheckedArray[cuchar]](input)
+    # Walk server preference order; for each, scan the client list.
+    for sp in serverProtos:
+      var i = 0
+      while i < int(inlen):
+        let n = int(clientBuf[i])
+        inc i
+        if n <= 0 or i + n > int(inlen):
+          break
+        if n == sp.len:
+          var match = true
+          for k in 0 ..< n:
+            if char(clientBuf[i + k]) != sp[k]:
+              match = false
+              break
+          if match:
+            outProto[] = cast[ptr cuchar](addr clientBuf[i])
+            outlen[] = cuchar(n)
+            return SSL_TLSEXT_ERR_OK.cint
+        i += n
+    return SSL_TLSEXT_ERR_NOACK.cint
+
+  proc encodeAlpnWire(protos: openArray[string]): string =
+    result = ""
+    for p in protos:
+      if p.len < 1 or p.len > 255:
+        raise newException(SslError, "ALPN protocol name must be 1..255 bytes")
+      result.add(char(p.len))
+      result.add(p)
+    if result.len == 0:
+      raise newException(SslError, "ALPN protocol list must not be empty")
+
+  proc setAlpnProtocols*(ctx: SslContext, protos: openArray[string]) =
+    ## Advertise ALPN protocols (e.g. `["h2", "http/1.1"]`). For servers this
+    ## also installs the select callback preferring server order; for clients
+    ## the list is applied per-`SSL*` in `wrapTls`.
+    when defined(windows):
+      raise newException(SslError, "TLS is not supported on Windows")
+    else:
+      let wire = encodeAlpnWire(protos)
+      if SSL_CTX_set_alpn_protos(ctx.ctx, cast[ptr cuchar](wire[0].addr),
+                                 cuint(wire.len)) != 0:
+        raise newException(SslError, "SSL_CTX_set_alpn_protos() failed: " &
+          opensslError())
+      ctx.alpnProtos = @protos
+      ctx.alpnWire = wire
+      if ctx.role == TlsServer:
+        alpnProtosByCtx[ctx.ctx] = @protos
+        discard SSL_CTX_set_alpn_select_cb(ctx.ctx, alpnSelectCb, nil)
+
+  proc alpnSelected*(conn: Connection): string =
+    ## Negotiated ALPN protocol after the handshake, or "" if none.
+    ## Safe to call pre-handshake (returns "").
+    if conn.ssl == nil:
+      return ""
+    var data: ptr cuchar = nil
+    var dlen: cuint = 0
+    SSL_get0_alpn_selected(cast[SslPtr](conn.ssl), addr data, addr dlen)
+    if data == nil or dlen == 0:
+      return ""
+    result = newString(dlen)
+    let src = cast[ptr UncheckedArray[cuchar]](data)
+    for i in 0 ..< int(dlen):
+      result[i] = char(src[i])
 
 when not defined(windows):
   proc newServerTlsContext*(certFile, keyFile: string): SslContext =
@@ -124,6 +209,12 @@ when not defined(windows):
       if SSL_set_fd(ssl, cint(conn.fd)) != 1:
         SSL_free(ssl)
         raise newException(SslError, "SSL_set_fd() failed")
+    if ctx.alpnWire.len > 0 and ctx.role == TlsClient:
+      # Per-connection ALPN list; servers advertise via the SSL_CTX instead.
+      if SSL_set_alpn_protos(ssl, cast[ptr cuchar](ctx.alpnWire[0].addr),
+                             cuint(ctx.alpnWire.len)) != 0:
+        SSL_free(ssl)
+        raise newException(SslError, "SSL_set_alpn_protos() failed")
     case ctx.role
     of TlsServer:
       SSL_set_accept_state(ssl)
@@ -153,5 +244,10 @@ else:
 
   proc wrapTls*(conn: Connection, ctx: SslContext, serverName = "") =
     raise newException(SslError, "TLS is not supported on Windows")
+
+  proc setAlpnProtocols*(ctx: SslContext, protos: openArray[string]) =
+    raise newException(SslError, "TLS is not supported on Windows")
+
+  proc alpnSelected*(conn: Connection): string = ""
 
   proc isTlsActive*(conn: Connection): bool {.inline.} = false
