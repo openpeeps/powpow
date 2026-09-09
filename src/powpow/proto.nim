@@ -12,8 +12,10 @@
 ##
 ## Or just `import powpow` to get everything.
 
-import ./proto/[http, httpserver, multithread, ws, ratelimit, httpclient, proxyserver]
+import ./proto/[http, httpserver, multithread, ws, ratelimit, httpclient, proxyserver,
+                 http2, hpack]
 import pkg/multipart
 
 export http, httpserver, multithread, ws, ratelimit, httpclient, proxyserver
+export http2, hpack
 export multipart
