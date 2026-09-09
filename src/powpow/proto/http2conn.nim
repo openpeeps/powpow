@@ -11,10 +11,11 @@
 ## SETTINGS exchange, stream lifecycle, HPACK block reassembly across
 ## CONTINUATION, receive/send flow control, and GOAWAY draining.
 ##
-## `H2Server` is a cleartext (h2c) server supporting prior knowledge
-## (§3.4) and `Upgrade: h2c` (§3.2) on the same port. TLS/ALPN (`h2`)
-## arrives in M3. Handler API is H2-native (`H2Request`/`H2Response`);
-## sharing the H1 `OnRequestCallback` is M5 work.
+## `H2Server` serves cleartext (h2c) with prior knowledge (§3.4) and
+## `Upgrade: h2c` (§3.2) on one port, or `h2` over TLS (ALPN) when built
+## with `sslCtx`. The TLS port is h2-only: other ALPN outcomes are closed.
+## Handler API is H2-native (`H2Request`/`H2Response`); sharing the H1
+## `OnRequestCallback` is M5 work.
 ##
 ## Deliberate M2 simplifications, all documented at the call site:
 ## - Full request bodies are buffered (no streaming); oversize bodies are
@@ -26,6 +27,7 @@
 import std/[tables, strutils, sequtils, base64]
 
 import ../net/tcp
+import ../net/tls
 import ../loop
 import ./http2
 import ./hpack
@@ -100,11 +102,13 @@ type
     goawaySent*: bool
     pending*: seq[H2PendingWrite]
     onRequest*: OnH2RequestCallback
+    alpnChecked*: bool
 
   H2Server* = ref object
     loop*: Loop
     tcp*: TcpServer
     handler*: OnH2RequestCallback
+    sslCtx*: SslContext
     conns*: Table[int, H2Conn]
     maxConcurrent*: int
     maxHeaderList*: int
@@ -929,13 +933,24 @@ proc newH2Conn*(conn: Connection, role: H2Role,
 proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
                   maxConcurrent = H2DefaultMaxConcurrent,
                   maxHeaderList = H2DefaultMaxHeaderList,
-                  maxBody = H2DefaultMaxBody): H2Server =
-  let s = H2Server(loop: loop, handler: handler,
+                  maxBody = H2DefaultMaxBody,
+                  sslCtx: SslContext = nil): H2Server =
+  ## Create an h2c server, or an `h2` (TLS) server when `sslCtx` is given.
+  ## A TLS server advertises ALPN `["h2"]` only: peers negotiating anything
+  ## else are closed after the handshake (H1 fallback on the same port is
+  ## future work).
+  let s = H2Server(loop: loop, handler: handler, sslCtx: sslCtx,
                    conns: initTable[int, H2Conn](64),
                    maxConcurrent: maxConcurrent,
                    maxHeaderList: maxHeaderList, maxBody: maxBody)
+  when not defined(windows):
+    if sslCtx != nil:
+      sslCtx.setAlpnProtocols(["h2"])
   let tcp = newTcpServer(loop,
     onAccept = proc(conn: Connection) =
+      when not defined(windows):
+        if s.sslCtx != nil:
+          conn.wrapTls(s.sslCtx)
       let h2 = newH2Conn(conn, H2ServerRole, s.handler, s.maxConcurrent,
                          s.maxHeaderList, s.maxBody)
       s.conns[conn.fd.int] = h2
@@ -945,6 +960,17 @@ proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
       if h2 == nil:
         conn.close()
         return
+      when not defined(windows):
+        if s.sslCtx != nil:
+          # The TCP layer only delivers post-handshake plaintext here.
+          if not conn.isTlsActive():
+            return
+          if not h2.alpnChecked:
+            h2.alpnChecked = true
+            if conn.alpnSelected() != "h2":
+              s.conns.del(conn.fd.int)
+              conn.close()
+              return
       h2.feedH2(data)
       if h2.state == CsClosed and h2.openCount <= 0 and
          h2.pending.len == 0:
