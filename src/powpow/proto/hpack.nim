@@ -35,7 +35,7 @@ const
   HpackDefaultTableSize* = 4096
   HpackMaxStringLen* = 4 * 1024 * 1024
 
-proc hpackError(msg: string): ref HpackError =
+proc hpackError*(msg: string): ref HpackError =
   newException(HpackError, msg)
 
 const hpackStaticTable: array[61, tuple[name, value: string]] = [
