@@ -134,12 +134,15 @@ proc newFileWatcher*(loop: Loop, path: string,
     loop.register(kq.int, {Read}) do (fd: int, ev: set[EventType]):
       if Read notin ev: return
       var kev: KEvent
+      var zeroTs: Timespec
+      zeroTs.tv_sec = Time(0)
+      zeroTs.tv_nsec = 0
       while true:
-        let n = kevent(kq, nil, 0, addr kev, 1, nil)
+        let n = kevent(kq, nil, 0, addr kev, 1, addr zeroTs)
         if n <= 0: break
         let fev = toFileEvents(kev.fflags)
         if fev != {}:
-          callback(w, fev)
+          callback(w, fev) 
 
   elif defined(linux):
     let ifd = inotify_init1(IN_NONBLOCK)
