@@ -2,7 +2,8 @@
 ## Replicates: POST /auth/register with Firefox's exact headers
 
 import ../src/powpow
-import std/[httpcore, strutils]
+import std/httpcore except HttpMethod
+import std/strutils
 
 proc buildFirefoxPost(): string =
   let body = "email=test%40example.com&password=%27r%5DK5h%5DkBt%26%26jD%29&password_confirm=%27r%5DK5h%5DkBt%26%26jD%29"

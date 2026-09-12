@@ -21,10 +21,9 @@
 ##   ```
 
 when not defined(windows):
-  import std/[cpuinfo, httpcore, posix]
+  import std/[cpuinfo, posix]
   import ../loop
   import ../types
-  import ../net/tcp
   import ../net/common
   import ./httpserver
 
@@ -75,7 +74,6 @@ when not defined(windows):
     {.gcsafe.}:
       let ctx     = arg.ctx
       let handler = arg.handler
-      let idx     = arg.idx
       let address = arg.address
       let ports   = arg.ports
       freeWorkerArg(arg)

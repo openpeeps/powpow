@@ -13,7 +13,8 @@
 ##   curl "http://localhost:9005/emit?signal=3"     # nobody listening anymore
 
 import ../src/powpow
-import std/[httpcore, strutils]
+import std/httpcore except HttpMethod
+import std/strutils
 
 const SignalPort = 9005
 const SignalCount = 8

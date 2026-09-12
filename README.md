@@ -50,8 +50,9 @@
 > are serialized per connection, so io_uring doesn't dramatically outpace epoll
 > on a single-connection benchmark — it's a way to reach parity with headroom
 > as concurrency scales and for zero-copy file serving. See the
-> [performance docs](docs/contents/performance.md) for details and where
-> HTTP/2/QUIC will make its parallelism count.
+> [performance docs](docs/contents/performance.md) for details. Experimental
+> HTTP/2 multiplexing (see `docs/contents/http/http2.md`) is where that
+> parallelism counts; QUIC is still future work.
 
 ## 📚 Documentation
 
@@ -141,6 +142,8 @@ Most web servers out there are all rainbows and flowers, until you upload or str
 - `httpserver.nim` the classic. A tiny, functional HTTP/1.1 server
 
 - `httpserver_threads.nim` the same server, but it spawns **one event loop per CPU core** and binds them all to the same port via `SO_REUSEPORT`. The kernel load-balances connections across workers for you
+
+- `http2server.nim` the same idea over HTTP/2: multiplexed streams on one TCP connection. Serves `h2` over TLS by default with an embedded self-signed cert, so you can open `https://localhost:9040/` straight in a browser (accept the warning); `--h2c` for cleartext (`curl --http2-prior-knowledge http://localhost:9040/hello`), `--tls cert.pem key.pem` for your own cert
 
 - `upload_server.nim` file uploads done right, using `pkg/multipart` two ways:
   - `/upload/raw` raw body streamed straight to disk via `streamToFile()`
@@ -287,6 +290,15 @@ Transfer/sec:     26.98MB
 - [x] Strict header parsing (reject obs-fold/leading-whitespace header lines,
       non-`chunked` `Transfer-Encoding` tokens)
 - [x] Response-reflection guards for large attacker-controlled echoes under TLS
+
+### Projects built on top of PowPow
+- [Supranim](https://github.com/supranim/supranim) - A full-featured web framework in Nim
+- [Whiz](https://github.com/openpeeps/whiz) - A message queue library implementing ZMTP 3.0 in Nim
+- [NSSH](https://github.com/nimbase/nssh) - A pure Nim SSH server and client based on PowPow
+- [RTMP](https://github.com/nimbase/rtmp) - A pure Nim RTMP server and client on top of PowPow
+- [GrooveBox](https://github.com/openpeeps/groovebox) - Badass Live Streaming Straight from Your Disk. RTMP Client & Server + Icecast Client & Server
+- [StupidGreen](https://github.com/openpeeps/stupidgreen) - A static site generator with themes support (made with Supranim & PowPow backend)
+- [Booyaka](https://github.com/openpeeps/booyaka) - A documentation generator based on Markdown + Supranim + PowPow
 
 ### ❤ Contributions & Support
 - 🐛 Found a bug? [Create a new Issue](https://github.com/openpeeps/powpow/issues)

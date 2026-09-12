@@ -1,34 +1,11 @@
----
-title: HTTPS server
-description: "Implicit TLS on every connection with an embedded self-signed cert."
-keywords: ["powpow", "example", "tls_server"]
----
-
-# HTTPS server
-
-Terminates TLS on accept: every connection is wrapped with an `SslContext` built from a bundled self-signed certificate valid for CN=localhost until 2036, so the demo needs no external files (run curl with `-k`).
-
-Source: [`examples/tls_server.nim`](../../examples/tls_server.nim)
-
-```nim
-## examples/tls_server.nim — HTTPS server with implicit TLS.
+## tests/test_alpn.nim — ALPN negotiation tests (HTTP/2 pre-work, RFC 7301).
 ##
-## Wraps every accepted connection in TLS (HTTPS on :9443) using an embedded
-## self-signed certificate. Point a browser or curl at it with -k.
-##
-## Run:
-##   nim c -r examples/tls_server.nim
-##
-## Test:
-##   curl -k https://localhost:9443/hello
-##   curl -k -d 'secure payload' https://localhost:9443/echo
+## Verifies `setAlpnProtocols` / `alpnSelected` negotiate `h2` when both
+## sides offer it and fall back to `http/1.1` otherwise.
 
 import ../src/powpow
-import std/[httpcore, strutils, os]
+import std/[unittest, os]
 
-const TlsPort = 9443
-
-# Self-signed certificate + key for CN=localhost (valid until 2036).
 const TestCert = """-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIUQ9SLaN1JcfaYyluaCXKsGhNnIa4wDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDgwMTE3MzA0OFoXDTM2MDcy
@@ -80,57 +57,71 @@ K41fk5DdTExX/C2iR5wWzVbN
 -----END PRIVATE KEY-----
 """
 
-proc writeTlsFiles(): tuple[cert, key: string] =
-  let dir = getTempDir() / "powpow-tls-example"
+proc writeTestCert(): tuple[cert, key: string] =
+  let dir = getTempDir() / "powpow-alpn-test"
   discard existsOrCreateDir(dir)
-  result.cert = dir / "cert.pem"
-  result.key = dir / "key.pem"
+  result.cert = dir / "test-cert.pem"
+  result.key = dir / "test-key.pem"
   writeFile(result.cert, TestCert)
   writeFile(result.key, TestKey)
 
-let (certPath, keyPath) = writeTlsFiles()
+proc runAlpnCase(port: int, serverProtos, clientProtos: seq[string],
+                   expected: string) =
+  let (cert, key) = writeTestCert()
+  let serverCtx = newServerTlsContext(cert, key)
+  serverCtx.setAlpnProtocols(serverProtos)
+  let loop = newLoop()
+  var serverAlpn = "<unset>"
+  var clientAlpn = "<unset>"
+  var done = false
 
-let server = newHttpServer()
-server.sslCtx = newServerTlsContext(certPath, keyPath)
+  let server = newTcpServer(loop,
+    onAccept = proc(conn: Connection) =
+      conn.wrapTls(serverCtx)
+    ,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      serverAlpn = conn.alpnSelected()
+      discard conn.send(data)
+    ,
+  )
+  server.listen("127.0.0.1", port)
 
-server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
-  {.gcsafe.}:
-    let path = req.getPath()
-    if path == "/hello":
-      res.status(Http200)
-        .header("Content-Type", "text/plain; charset=utf-8")
-        .send("hello over TLS!")
-    elif path == "/echo":
-      res.status(Http200)
-        .header("Content-Type", "text/plain; charset=utf-8")
-        .send("echo: " & req.getBodyString())
-    else:
-      res.sendError(Http404, "404 Not Found: " & path)
+  discard loop.addTimer(50) do (id: int):
+    let clientCtx = newClientTlsContext(verifyPeer = false)
+    clientCtx.setAlpnProtocols(clientProtos)
+    loop.connect("127.0.0.1", port,
+      onConnect = proc(conn: Connection) =
+        conn.wrapTls(clientCtx)
+        discard conn.send("ping")
+      ,
+      onData = proc(conn: Connection, data: openArray[byte]) =
+        clientAlpn = conn.alpnSelected()
+        done = true
+        conn.close()
+        server.close()
+        loop.stop()
+      ,
+    )
 
-echo "⚡ HTTPS server listening on https://localhost:" & $TlsPort
-echo "  Test with:  curl -k https://localhost:" & $TlsPort & "/hello"
-echo "  Press Ctrl+C to stop"
-server.start(server.handler, Port(TlsPort))
-```
+  discard loop.addTimer(5000) do (id: int):
+    server.close()
+    loop.stop()
 
-## Running
+  loop.run()
 
-```bash
-nim c -r examples/tls_server.nim
-```
+  doAssert done, "ALPN echo should have completed on port " & $port
+  doAssert serverAlpn == expected, "server ALPN mismatch: got '" & serverAlpn &
+    "' want '" & expected & "'"
+  doAssert clientAlpn == expected, "client ALPN mismatch: got '" & clientAlpn &
+    "' want '" & expected & "'"
+  loop.close()
 
-## Try it
+when not defined(windows):
+  test "alpn_negotiates_h2":
+    runAlpnCase(29890, @["h2", "http/1.1"], @["h2", "http/1.1"], "h2")
 
-```bash
-curl -k https://localhost:9443/hello
-curl -k -d 'secure payload' https://localhost:9443/echo
-```
+  test "alpn_falls_back_to_http11":
+    runAlpnCase(29891, @["h2", "http/1.1"], @["http/1.1"], "http/1.1")
 
-## How it works
-
-- `newServerTlsContext(certPath, keyPath)` builds the context; assign it to `server.sslCtx` before `start` to get implicit TLS on all accepts.
-- The PEM pair is written to a temp dir at startup because OpenSSL loads certificates from files.
-- Handler code is unaware of TLS; framing, parsing and responses are unchanged.
-
-[TLS guide](../net/tls.md) and [TLS API](../api/tls.md).
-
+  test "alpn_no_overlap_empty":
+    runAlpnCase(29892, @["http/1.1"], @["h2"], "")

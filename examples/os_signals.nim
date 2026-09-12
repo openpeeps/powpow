@@ -17,7 +17,7 @@
 ##   kill -TERM <pid>
 
 import ../src/powpow
-import std/[httpcore]
+import std/httpcore except HttpMethod
 
 let loop = newLoop()
 let server = newHttpServer(loop)

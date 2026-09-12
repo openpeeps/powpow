@@ -125,7 +125,7 @@ type
       platform*:   Platform
     fdWatchers:    Table[int, FdWatcher]
     nextGen:       int
-    wheel:         array[4, array[256, TimerNode]]
+    wheel:         array[WheelLevels, array[WheelSlots, TimerNode]]
     wheelBase:     int64
     totalTimers:   int
     nextTimerId:   int

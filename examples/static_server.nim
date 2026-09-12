@@ -14,7 +14,8 @@
 ##   curl http://localhost:9004/api/time
 
 import ../src/powpow
-import std/[httpcore, strutils, times, os]
+import std/httpcore except HttpMethod
+import std/[strutils, times, os]
 
 const StaticPort = 9004
 const WwwRoot = currentSourcePath().parentDir() / "www"   # examples/www, CWD-independent

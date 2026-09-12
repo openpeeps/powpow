@@ -20,7 +20,8 @@
 ##   curl http://localhost:9001/time
 
 import ../src/powpow
-import std/[httpcore, strutils, times]
+import std/httpcore except HttpMethod
+import std/[strutils, times]
 
 let server = newHttpServer()
 

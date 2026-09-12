@@ -10,7 +10,8 @@
 ## Run:  nim c -d:release --mm:atomicArc -r tests/ws_refresh_server.nim
 ##       ./drive_refresh.sh    (headless Chrome loop against :9008)
 
-import std/[httpcore, strutils]
+import std/httpcore except HttpMethod
+import std/strutils
 import ../src/powpow
 
 let loop = newLoop()

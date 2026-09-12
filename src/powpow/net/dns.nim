@@ -40,12 +40,9 @@ const
   DnsRecvBufSize      = 2048
   DnsMaxLabelJumps    = 128
   DnsQtypeA           = 1'u16
-  DnsQtypeNS          = 2'u16
-  DnsQtypeCNAME       = 5'u16
   DnsQtypeMX          = 15'u16
   DnsQtypeTXT         = 16'u16
   DnsQtypeAAAA        = 28'u16
-  DnsQtypeSRV         = 33'u16
 
 when defined(windows):
   const HostsPath = "C:\\Windows\\System32\\drivers\\etc\\hosts"

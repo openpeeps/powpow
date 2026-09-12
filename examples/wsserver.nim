@@ -13,7 +13,8 @@
 ##   npx wscat -c ws://localhost:9001
 
 import ../src/powpow
-import std/[httpcore, posix]
+import std/httpcore except HttpMethod
+import std/posix
 
 # ── Standalone WebSocket server ──────────────────────────────────────────────
 #

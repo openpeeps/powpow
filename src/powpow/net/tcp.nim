@@ -18,7 +18,7 @@
 ##     before tearing the socket down.
 ## The public API, pooling, close semantics and connect fallback are shared.
 
-import std/[tables, strutils]
+import std/[tables]
 import ../types
 when not defined(windows):
   import std/posix
@@ -3021,8 +3021,8 @@ else:
                               cast[ptr Sockaddr](addr clientAddr),
                               addr addrLen)
         if clientFd.int >= 0:
-          setNonBlocking(SocketHandle(clientFd))
-          setTcpNoDelay(SocketHandle(clientFd))
+          setNonBlocking(clientFd)
+          setTcpNoDelay(clientFd)
 
         if clientFd.int < 0:
           if sockWouldBlock():
@@ -3160,7 +3160,8 @@ else:
     srv.sharedCb = proc(fd: int, ev: set[EventType]) {.closure.} =
       let conn = srv.fdConn.getOrDefault(fd)
       if conn == nil: return
-      if Error in ev:
+      if Error in ev and (conn.tlsState == TlsHandshaking or
+                             (Read notin ev and Hup notin ev)):
         conn.close()
         if srv.onClose != nil: srv.onClose(conn)
         srv.releaseConnection(conn)
@@ -3185,7 +3186,7 @@ else:
             conn.loop.modify(fd, {Read})
       if (Read in ev or Hup in ev) and conn.sendFileFd < 0:
         conn.handleClientRead(srv.onData, srv.onClose)
-      if Hup in ev and conn.state == Connected:
+      if (Error in ev or Hup in ev) and conn.state == Connected:
         conn.close()
         if srv.onClose != nil: srv.onClose(conn)
       if conn.state == Closed:
@@ -3258,7 +3259,8 @@ else:
           if ret == 0:
             conn.state = Connected
             conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
-              if Error in ev:
+              if Error in ev and (conn.tlsState == TlsHandshaking or
+                                     (Read notin ev and Hup notin ev)):
                 conn.closeAndRelease()
                 if onClose != nil: onClose(conn)
                 return
@@ -3275,7 +3277,7 @@ else:
                     conn.loop.modify(rfd, {Read})
               if Read in ev or Hup in ev:
                 conn.handleClientRead(onData, onClose)
-              if Hup in ev and conn.state == Connected:
+              if (Error in ev or Hup in ev) and conn.state == Connected:
                 conn.closeAndRelease()
                 if onClose != nil: onClose(conn)
             onConnect(conn)
@@ -3311,7 +3313,8 @@ else:
               conn.state = Connected
               setTcpNoDelay(SocketHandle(wfd))
               conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
-                if Error in ev:
+                if Error in ev and (conn.tlsState == TlsHandshaking or
+                                       (Read notin ev and Hup notin ev)):
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
                   return
@@ -3328,7 +3331,7 @@ else:
                       conn.loop.modify(rfd, {Read})
                 if Read in ev or Hup in ev:
                   conn.handleClientRead(onData, onClose)
-                if Hup in ev and conn.state == Connected:
+                if (Error in ev or Hup in ev) and conn.state == Connected:
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
               onConnect(conn)
@@ -3460,7 +3463,8 @@ else:
             if reportSuccess(a):
               conn.state = Connected
               conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
-                if Error in ev:
+                if Error in ev and (conn.tlsState == TlsHandshaking or
+                                       (Read notin ev and Hup notin ev)):
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
                   return
@@ -3482,7 +3486,7 @@ else:
                 if Read in ev or Hup in ev:
                   if conn.sendFileFd < 0:
                     conn.handleClientRead(onData, onClose)
-                if Hup in ev and conn.state == Connected:
+                if (Error in ev or Hup in ev) and conn.state == Connected:
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
               onConnect(conn)
@@ -3511,7 +3515,8 @@ else:
               conn.state = Connected
               setTcpNoDelay(SocketHandle(wfd))
               conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
-                if Error in ev:
+                if Error in ev and (conn.tlsState == TlsHandshaking or
+                                       (Read notin ev and Hup notin ev)):
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
                   return
@@ -3533,7 +3538,7 @@ else:
                 if Read in ev or Hup in ev:
                   if conn.sendFileFd < 0:
                     conn.handleClientRead(onData, onClose)
-                if Hup in ev and conn.state == Connected:
+                if (Error in ev or Hup in ev) and conn.state == Connected:
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
               onConnect(conn)
@@ -3597,7 +3602,8 @@ else:
       if ret == 0:
         conn.state = Connected
         conn.loop.register(fd.int, {Read}) do (rfd: int, ev: set[EventType]):
-          if Error in ev:
+          if Error in ev and (conn.tlsState == TlsHandshaking or
+                                 (Read notin ev and Hup notin ev)):
             conn.closeAndRelease()
             if onClose != nil: onClose(conn)
             return
@@ -3618,7 +3624,7 @@ else:
           if Read in ev or Hup in ev:
             if conn.sendFileFd < 0:
               conn.handleClientRead(onData, onClose)
-          if Hup in ev and conn.state == Connected:
+          if (Error in ev or Hup in ev) and conn.state == Connected:
             conn.closeAndRelease()
             if onClose != nil: onClose(conn)
         onConnect(conn)
@@ -3635,7 +3641,8 @@ else:
 
           conn.state = Connected
           conn.loop.register(wfd, {Read}) do (rfd: int, ev: set[EventType]):
-            if Error in ev:
+            if Error in ev and (conn.tlsState == TlsHandshaking or
+                                   (Read notin ev and Hup notin ev)):
               conn.closeAndRelease()
               if onClose != nil: onClose(conn)
               return
@@ -3656,7 +3663,7 @@ else:
             if Read in ev or Hup in ev:
               if conn.sendFileFd < 0:
                 conn.handleClientRead(onData, onClose)
-            if Hup in ev and conn.state == Connected:
+            if (Error in ev or Hup in ev) and conn.state == Connected:
               conn.closeAndRelease()
               if onClose != nil: onClose(conn)
           onConnect(conn)

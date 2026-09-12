@@ -13,7 +13,8 @@
 
 when not defined(windows):
   import ../src/powpow
-  import std/[httpcore, strutils, os]
+  import std/httpcore except HttpMethod
+  import std/[strutils, os]
 
   const SockPath = "/tmp/powpow.sock"
 

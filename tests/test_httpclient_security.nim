@@ -1,7 +1,8 @@
 ## Security tests for the HTTP client: malformed / malicious servers and URLs
 ## must fail the request — never crash, hang, or allocate unbounded memory.
 
-import std/[asyncdispatch, httpcore, strutils, unittest]
+import std/httpcore except HttpMethod
+import std/[asyncdispatch, strutils, unittest]
 import ../src/powpow
 
 proc rawServer(loop: Loop, port: int,

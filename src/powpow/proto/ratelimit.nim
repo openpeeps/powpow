@@ -17,7 +17,8 @@
 ## Multi-window:
 ##   let rl = newMultiRateLimiter(loop, [(100, 3_600_000), (1_000, 86_400_000)])
 
-import std/[tables, monotimes, httpcore, locks]
+import std/httpcore except HttpMethod
+import std/[tables, monotimes, locks]
 
 import ../loop
 import ../types

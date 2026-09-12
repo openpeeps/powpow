@@ -456,9 +456,10 @@ const
   SendFileChunkSize* = 65536     # fallback chunk size for non-zero-copy paths
   DefaultSendFileChunk* = 0      # 0 = let the platform decide
 
-var sendFileScratch {.threadvar.}: ptr UncheckedArray[byte]
-  ## Reusable Windows fallback read buffer: one 64KB alloc per thread instead
-  ## of an alloc + dealloc per 64KB chunk of every non-zero-copy file send.
+when not defined(linux) and not (defined(macosx) or defined(bsd)):
+  var sendFileScratch {.threadvar.}: ptr UncheckedArray[byte]
+    ## Reusable Windows fallback read buffer: one 64KB alloc per thread instead
+    ## of an alloc + dealloc per 64KB chunk of every non-zero-copy file send.
 
 const
   O_RDONLY* = 0

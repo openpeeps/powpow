@@ -6,6 +6,9 @@
 
 ## powpow/types.nim — Core types shared across all modules.
 
+import pkg/voodoo/extensibles
+export extensibles
+
 const
   iouEnabled* = defined(linux) and
     (defined(features.powpow.io_uring) or defined(powpowIoUring))
@@ -18,6 +21,21 @@ const
     ## Guard backend-specific code with `when iouEnabled:`.
 
 type
+  HttpMethod* {.extensible.} = enum
+    ## HTTP request method. Mirrors `std/httpcore.HttpMethod` wire tokens and
+    ## order so `$` stays compatible, but is extensible at compile time via
+    ## `pkg/voodoo` (`extendEnum` + `extendCaseStmt` before importing powpow).
+    ## WebDAV and other extensions register new verbs without forking powpow.
+    HttpHead = "HEAD"
+    HttpGet = "GET"
+    HttpPost = "POST"
+    HttpPut = "PUT"
+    HttpDelete = "DELETE"
+    HttpTrace = "TRACE"
+    HttpOptions = "OPTIONS"
+    HttpConnect = "CONNECT"
+    HttpPatch = "PATCH"
+
   EventType* = enum
     Read
     Write

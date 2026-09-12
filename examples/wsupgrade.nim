@@ -19,7 +19,8 @@
 ##   npx wscat -c ws://localhost:9000/ws
 
 import ../src/powpow
-import std/[httpcore, strutils, times]
+import std/httpcore except HttpMethod
+import std/[strutils, times]
 
 let server = newHttpServer()
 

@@ -2,7 +2,8 @@
 ## ws.sendText while the loop runs must not race the loop's connection state
 ## and must deliver the frame. This mirrors booyaka's file-watcher thread.
 
-import std/[httpcore, strutils, unittest]
+import std/httpcore except HttpMethod
+import std/[strutils, unittest]
 import ../src/powpow
 when defined(threads):
   import std/threads

@@ -14,7 +14,8 @@
 ##   websocat ws://localhost:9006/ws
 
 import ../src/powpow
-import std/[httpcore, strutils, sequtils, os]
+import std/httpcore except HttpMethod
+import std/[strutils, sequtils, os]
 
 const ChatPort = 9006
 

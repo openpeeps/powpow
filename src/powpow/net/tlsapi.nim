@@ -77,6 +77,45 @@ const SSL_CTRL_SET_TLSEXT_HOSTNAME* = 55
   ## `SSL_set_tlsext_host_name` is a macro over `SSL_ctrl` in OpenSSL 1.1.1+/3,
   ## so it is not linkable; use SSL_ctrl with this command for SNI.
 
+# ── ALPN (RFC 7301, used by HTTP/2 RFC 7540 section 3.3) ─────────────────────
+#
+# Wire format is a sequence of length-prefixed protocol names, e.g. "h2" as
+# `\x02h2`. The client sends its list; the server picks one via the select
+# callback. `SSL_select_next_proto` implements NPN-style selection order.
+
+const
+  OPENSSL_NPN_UNSUPPORTED* = 0
+  OPENSSL_NPN_NEGOTIATED* = 1
+  OPENSSL_NPN_NO_OVERLAP* = 2
+
+  SSL_TLSEXT_ERR_OK* = 0
+  SSL_TLSEXT_ERR_ALERT_WARNING* = 1
+  SSL_TLSEXT_ERR_ALERT_FATAL* = 2
+  SSL_TLSEXT_ERR_NOACK* = 3
+
+type
+  AlpnSelectCb* = proc(ssl: SslPtr; outProto: ptr ptr uint8;
+                       outlen: ptr uint8; input: ptr uint8;
+                       inlen: cuint; arg: pointer): cint {.cdecl.}
+
+proc SSL_CTX_set_alpn_protos*(ctx: SslCtx; protos: ptr uint8;
+                              protosLen: cuint): cint {.
+  importc: "SSL_CTX_set_alpn_protos".}
+proc SSL_set_alpn_protos*(ssl: SslPtr; protos: ptr uint8;
+                          protosLen: cuint): cint {.
+  importc: "SSL_set_alpn_protos".}
+proc SSL_get0_alpn_selected*(ssl: SslPtr; data: ptr ptr uint8;
+                             len: ptr cuint) {.
+  importc: "SSL_get0_alpn_selected".}
+proc SSL_CTX_set_alpn_select_cb*(ctx: SslCtx; cb: AlpnSelectCb;
+                                 arg: pointer): cint {.
+  importc: "SSL_CTX_set_alpn_select_cb".}
+proc SSL_select_next_proto*(outProto: ptr ptr uint8; outlen: ptr uint8;
+                            server: ptr uint8; serverLen: cuint;
+                            client: ptr uint8; clientLen: cuint): cint {.
+  importc: "SSL_select_next_proto".}
+proc SSL_get_SSL_CTX*(ssl: SslPtr): SslCtx {.importc: "SSL_get_SSL_CTX".}
+
 proc ERR_get_error*(): culong {.importc: "ERR_get_error".}
 proc ERR_error_string_n*(e: culong; buf: cstring; len: csize_t) {.
   importc: "ERR_error_string_n".}

@@ -6,7 +6,8 @@
 ## Parser-level tests use zero-copy access patterns.
 
 import ../src/powpow
-import std/[unittest, strutils, httpcore, os]
+import std/httpcore except HttpMethod
+import std/[unittest, strutils, os]
 
 # ══════════════════════════════════════════════════════════════════════
 # Section 1: HTTP Parser Security
