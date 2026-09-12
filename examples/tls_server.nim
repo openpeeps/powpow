@@ -11,7 +11,8 @@
 ##   curl -k -d 'secure payload' https://localhost:9443/echo
 
 import ../src/powpow
-import std/[httpcore, strutils, os]
+import std/httpcore except HttpMethod
+import std/[strutils, os]
 
 const TlsPort = 9443
 

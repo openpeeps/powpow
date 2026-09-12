@@ -1,7 +1,8 @@
 ## WebSocket client tests: connectWs / upgradeToWs against a real powpow
 ## WsServer, plus the handshake-rejection path against a plain HttpServer.
 
-import std/[httpcore, unittest]
+import std/httpcore except HttpMethod
+import std/unittest
 import ../src/powpow
 
 test "ws_client_echo_roundtrip":

@@ -12,11 +12,14 @@
 ##   - Minimal allocations: only allocate when data is accessed
 ##   - Fast method dispatch: switch on first byte for O(1) method detection
 ##
-## Uses std/httpcore types: HttpMethod, HttpCode, HttpHeaders, HttpVersion.
+## Uses powpow/types `HttpMethod` (extensible via pkg/voodoo) and
+## std/httpcore `HttpCode`, `HttpHeaders`, `HttpVersion`.
 
-import std/[httpcore, strutils, oids, os]
+import std/httpcore except HttpMethod
+import std/[strutils, oids, os]
 import pkg/multipart
 
+import ../types
 import ./simdscan
 import ../net/tcp
 
@@ -67,7 +70,7 @@ type
       ## the 512 MB backstop without changing code.
 
     # Request line fields (byte offsets into buf)
-    methodStr:  array[10, char] ## Raw method bytes (fast path)
+    methodStr:  array[16, char] ## Raw method bytes (fast path, fits PROPPATCH=9)
     methodLen:  int
     pathStart:  int
     pathEnd:    int             ## End of path (before '?' or ' ')
@@ -176,34 +179,57 @@ func streamCap(p: HttpParser): int64 {.inline.} =
 
 func parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.} =
   # Parse HTTP method from raw bytes. Switch on first char for speed.
+  # Extended verbs (WebDAV etc.) are injected at compile time via
+  # `extendCaseStmt("powpow.parseMethod")` before importing this module.
   if len == 0: return HttpGet  # default
-  case char(buf[0])
-  of 'G': HttpGet
-  of 'P':
-    if len >= 3 and char(buf[1]) == 'O': HttpPost
-    elif len >= 3 and char(buf[1]) == 'U': HttpPut
-    elif len >= 5 and char(buf[1]) == 'A': HttpPatch
-    else: HttpPost  # fallback
-  of 'D': HttpDelete
-  of 'H': HttpHead
-  of 'O': HttpOptions
-  of 'C': HttpConnect
-  of 'T': HttpTrace
-  else:   HttpGet  # fallback for unknown methods
+  extendableCase "powpow.parseMethod":
+    case char(buf[0])
+    of 'G': return HttpGet
+    of 'P':
+      if len >= 3 and char(buf[1]) == 'O': return HttpPost
+      elif len >= 3 and char(buf[1]) == 'U': return HttpPut
+      elif len >= 5 and char(buf[1]) == 'A': return HttpPatch
+      else:
+        # Extension point for `P*` verbs (PROPFIND, PROPPATCH, ...).
+        # Register with `injectSnippet("powpow.parseMethod.P")` before
+        # importing this module. Snippet must `return` on match.
+        placeholderSnippet("powpow.parseMethod.P")
+        return HttpPost  # fallback
+    of 'D': return HttpDelete
+    of 'H': return HttpHead
+    of 'O': return HttpOptions
+    of 'C':
+      # Extension point for `C*` verbs (COPY vs CONNECT).
+      # Register with `injectSnippet("powpow.parseMethod.C")` before
+      # importing this module. Snippet must `return` on match.
+      placeholderSnippet("powpow.parseMethod.C")
+      return HttpConnect
+    of 'T': return HttpTrace
+    else:
+      # Extension point for new first letters (M, L, U, ...). New `of`
+      # branches can also be injected via
+      # `extendCaseStmt("powpow.parseMethod")`; this snippet catches
+      # anything the injected branches do not handle.
+      placeholderSnippet("powpow.parseMethod.unknown")
+      return HttpGet  # fallback for unknown methods
 
 func methodToken(m: HttpMethod): cstring {.inline.} =
   ## Canonical wire token for a resolved method, used to reject near-miss
   ## tokens like "GETTY" that the first-byte fast path would otherwise accept.
-  case m
-  of HttpHead:    "HEAD"
-  of HttpGet:     "GET"
-  of HttpPost:    "POST"
-  of HttpPut:     "PUT"
-  of HttpDelete:  "DELETE"
-  of HttpTrace:   "TRACE"
-  of HttpOptions: "OPTIONS"
-  of HttpConnect: "CONNECT"
-  of HttpPatch:   "PATCH"
+  ## Extended verbs inject branches via
+  ## `extendCaseStmt("powpow.methodToken")` (required: `case` is exhaustive,
+  ## so a missing branch fails loudly instead of misrouting).
+  extendableCase "powpow.methodToken":
+    case m
+    of HttpHead:    return "HEAD"
+    of HttpGet:     return "GET"
+    of HttpPost:    return "POST"
+    of HttpPut:     return "PUT"
+    of HttpDelete:  return "DELETE"
+    of HttpTrace:   return "TRACE"
+    of HttpOptions: return "OPTIONS"
+    of HttpConnect: return "CONNECT"
+    of HttpPatch:   return "PATCH"
 
 # ── Parser lifecycle ─────────────────────────────────────────────────────────
 
@@ -366,10 +392,10 @@ proc parseRequestLine(p: HttpParser): bool =
       return false
     return false  # need more data
 
-  # Parse method
+  # Parse method (cap matches methodStr; fits PROPPATCH=9 with headroom)
   var i = 0
   while i < crlf and char(buf[i]) != ' ':
-    if i >= 10:
+    if i >= 16:
       p.phase = PhaseError
       p.errorCode = Http400
       return false

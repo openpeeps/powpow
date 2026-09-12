@@ -28,7 +28,8 @@
 ##     websocketUpgrade(res, req, onOpen, onMessage, onClose)
 ##   ```
 
-import std/[httpcore, base64, tables, strutils, random]
+import std/httpcore except HttpMethod
+import std/[base64, tables, strutils, random]
 import pkg/checksums/sha1
 when defined(threads):
   import std/threads

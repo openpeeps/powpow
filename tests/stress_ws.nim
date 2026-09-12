@@ -2,7 +2,8 @@
 ## Starts an HttpServer with a /ws websocketUpgrade route, then hammers it with
 ## many sequential powpow TCP clients: handshake -> masked frame -> close.
 
-import std/[strutils, httpcore, unittest]
+import std/httpcore except HttpMethod
+import std/[strutils, unittest]
 import ../src/powpow
 
 proc buildHandshake(): string =

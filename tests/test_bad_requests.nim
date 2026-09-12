@@ -13,7 +13,8 @@
 ##   - 431  header section too large / too many headers
 
 import ../src/powpow
-import std/[unittest, strutils, httpcore]
+import std/httpcore except HttpMethod
+import std/[unittest, strutils]
 
 # ══════════════════════════════════════════════════════════════════════
 # Layer 1 — parser helpers

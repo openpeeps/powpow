@@ -42,7 +42,8 @@
 ## consumed before issuing the next request. `close` drains the pool and shuts
 ## down the client's private loop.
 
-import std/[asyncdispatch, httpcore, strutils, tables]
+import std/httpcore except HttpMethod
+import std/[asyncdispatch, strutils, tables]
 
 import ../net/tcp
 import ../net/common

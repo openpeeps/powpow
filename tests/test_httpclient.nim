@@ -5,7 +5,8 @@
 ## Sync tests host the server on the client's own loop (via `getLoop`) so the
 ## client's blocking `poll` drives both sides on a single thread.
 
-import std/[asyncdispatch, httpcore, os, sequtils, strutils, unittest]
+import std/httpcore except HttpMethod
+import std/[asyncdispatch, os, sequtils, strutils, unittest]
 import ../src/powpow
 
 # ── Sync tests (server lives on the sync client's loop) ─────────────────────

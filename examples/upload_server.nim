@@ -15,7 +15,8 @@
 ##   curl -X POST http://localhost:9000/upload/stream -F "file=@bigfile.bin"
 
 import ../src/powpow
-import std/[httpcore, strutils]
+import std/httpcore except HttpMethod
+import std/strutils
 
 let server = newHttpServer()
 

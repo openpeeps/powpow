@@ -8,7 +8,8 @@
 ##   for i in $(seq 6); do curl -w "\n%{http_code}\n" http://localhost:9003/; done
 
 import ../src/powpow
-import std/[httpcore, strutils]
+import std/httpcore except HttpMethod
+import std/strutils
 
 let server = newHttpServer()
 

@@ -1,5 +1,5 @@
 import ../src/powpow
-import std/httpcore
+import std/httpcore except HttpMethod
 
 # We are going to use Big_buck_Bunny_4K.webm as a test file for streaming and downloading.
 # You can download this ~2.76 GB file from Wikipedia: https://en.wikipedia.org/wiki/File:Big_Buck_Bunny_4K.webm

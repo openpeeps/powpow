@@ -20,7 +20,8 @@
 ##   , Port(9000)
 ##   ```
 
-import std/[httpcore, tables, options, net, strutils, os, times, oids, paths]
+import std/httpcore except HttpMethod
+import std/[tables, options, net, strutils, os, times, oids, paths]
 
 import ../net/tcp
 import ../net/tls
@@ -236,11 +237,14 @@ func statusText(code: HttpCode): string {.inline.} =
   case code.int
   of 100: "Continue"
   of 101: "Switching Protocols"
+  of 102: "Processing"
   of 200: "OK"
   of 201: "Created"
   of 202: "Accepted"
   of 204: "No Content"
   of 206: "Partial Content"
+  of 207: "Multi-Status"
+  of 208: "Already Reported"
   of 301: "Moved Permanently"
   of 302: "Found"
   of 304: "Not Modified"
@@ -259,10 +263,14 @@ func statusText(code: HttpCode): string {.inline.} =
   of 414: "URI Too Long"
   of 415: "Unsupported Media Type"
   of 416: "Range Not Satisfiable"
+  of 422: "Unprocessable Entity"
+  of 423: "Locked"
+  of 424: "Failed Dependency"
   of 429: "Too Many Requests"
   of 431: "Request Header Fields Too Large"
   of 500: "Internal Server Error"
   of 501: "Not Implemented"
+  of 507: "Insufficient Storage"
   of 502: "Bad Gateway"
   of 503: "Service Unavailable"
   of 504: "Gateway Timeout"

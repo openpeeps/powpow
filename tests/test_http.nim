@@ -3,7 +3,8 @@
 ## Tests: basic GET, POST with body, query string, headers, chunked, keep-alive.
 
 import ../src/powpow
-import std/[httpcore, strutils, unittest, os]
+import std/httpcore except HttpMethod
+import std/[strutils, unittest, os]
 
 # ── Test 1: Basic GET request ────────────────────────────────────────────────
 

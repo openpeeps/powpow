@@ -27,7 +27,7 @@
 ##            Parts A and B; Part C requires a live server of your own.
 
 import std/[unittest, strutils, os, net, nativesockets, sequtils]
-import std/httpcore
+import std/httpcore except HttpMethod
 import ../src/powpow
 import smuggler
 

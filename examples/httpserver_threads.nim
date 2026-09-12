@@ -14,7 +14,8 @@
 ##   curl -X DELETE http://localhost:9000/api/items/42
 
 import ../src/powpow
-import std/[httpcore, strutils, times]
+import std/httpcore except HttpMethod
+import std/[strutils, times]
 
 # Pass an explicit thread count, e.g. newHttpServer(4),
 # or omit the argument to default to countProcessors().

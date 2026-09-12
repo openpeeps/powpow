@@ -135,7 +135,8 @@ type
 const
   H2ConnMagic = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
   H2UpgradeMethods = ["GET ", "POST ", "PUT ", "HEAD ", "OPTIONS ", "DELETE ",
-                      "PATCH ", "CONNECT ", "TRACE "]
+                      "PATCH ", "CONNECT ", "TRACE ", "PROPFIND ", "PROPPATCH ",
+                      "MKCOL ", "COPY ", "MOVE ", "LOCK ", "UNLOCK "]
   H2DefaultMaxConcurrent* = 128
   H2DefaultMaxHeaderList* = 16 * 1024
   H2DefaultMaxBody* = 8 * 1024 * 1024
