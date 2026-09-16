@@ -76,6 +76,9 @@ type
     pathEnd:    int             ## End of path (before '?' or ' ')
     queryStart: int             ## -1 if no query
     queryEnd:   int
+    reqLineEnd: int             ## Byte offset past the request-line \r\n.
+      ## Set by parseRequestLine, consumed by scanHeaders to skip re-walking
+      ## the request line. -1 when unset; cleared by reset/resetForNext.
     httpMajor:  int
     httpMinor:  int
 
@@ -241,6 +244,7 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     headerEnd:     -1,
     pathStart:     -1,
     queryStart:    -1,
+    reqLineEnd:    -1,
     contentLength: -1,
     chunkStart:    0,
     chunkSize:     -1,
@@ -278,6 +282,7 @@ proc reset*(p: HttpParser) =
   p.pathEnd       = -1
   p.queryStart    = -1
   p.queryEnd      = -1
+  p.reqLineEnd    = -1
   p.httpMajor     = 1
   p.httpMinor     = 1
   p.headerEnd     = -1
@@ -341,6 +346,7 @@ proc resetForNext*(p: HttpParser) =
   p.pathEnd      = -1
   p.queryStart   = -1
   p.queryEnd     = -1
+  p.reqLineEnd   = -1
   p.httpMajor     = 1
   p.httpMinor     = 1
   p.headerCount   = 0
@@ -477,7 +483,9 @@ proc parseRequestLine(p: HttpParser): bool =
     p.errorCode = Http400
     return false
 
-  # Advance past the request line \r\n
+  # Advance past the request line \r\n. Cache the offset so scanHeaders
+  # does not re-walk the request line byte-by-byte.
+  p.reqLineEnd = crlf + 2
   p.phase = PhaseHeaders
   return true
 
@@ -561,13 +569,24 @@ proc scanHeaders(p: HttpParser): bool =
   var i = 0
   var lineStart = 0
 
-  # Skip request line
-  while i < sepEnd - 3:
-    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
-      i += 2
-      lineStart = i
-      break
-    inc i
+  # Skip request line. parseRequestLine already located its terminating
+  # CRLF for this message — reuse the cached offset when it is verifiably
+  # still the request-line terminator in the current buffer, otherwise fall
+  # back to the byte walk. The cache is only trusted for request-mode
+  # parsers (response-mode status lines never populate it) and only when the
+  # bytes at the cached offset are actually \r\n, so a stale offset can never
+  # skip a header line and its security checks.
+  if not p.responseMode and p.reqLineEnd >= 2 and p.reqLineEnd <= sepEnd - 1 and
+     char(buf[p.reqLineEnd - 2]) == '\r' and char(buf[p.reqLineEnd - 1]) == '\n':
+    i = p.reqLineEnd
+    lineStart = i
+  else:
+    while i < sepEnd - 3:
+      if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+        i += 2
+        lineStart = i
+        break
+      inc i
 
   # Scan header lines
   while i < sepEnd - 1:

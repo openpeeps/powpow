@@ -282,7 +282,7 @@ proc writeUint(buf: ptr UncheckedArray[byte], n: int64): int =
     buf[0] = byte('0')
     return 1
   var tmp = n
-  var digits: array[20, byte]
+  var digits {.noinit.}: array[20, byte]
   var ndigits = 0
   while tmp > 0:
     digits[ndigits] = byte(ord('0') + tmp mod 10)
@@ -293,12 +293,23 @@ proc writeUint(buf: ptr UncheckedArray[byte], n: int64): int =
   return ndigits
 
 {.push gcsafe.}
-proc send*(res: HttpResponse, body: string = "") =
-  if res.sent: return
+
+const
+  FastSingleWriteCap = 1024
+    ## Max total response bytes for the single-`send()` fast path (status +
+    ## fixed headers + custom headers + blank line + body). The `/` demo
+    ## response (~540B with its Content-Type header) fits, so the hot path
+    ## issues one `send()` instead of `writev()` over a 7-part iovec.
+
+template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
+  ## Shared response serializer for `send(string)` / `send(seq[byte])`.
+  ## Emits byte-identical output on both paths; only the transport differs
+  ## (one coalesced `send()` when the response fits the stack buffer,
+  ## otherwise the scatter `sendv()` as before).
   res.sent = true
   let connHeader = if res.closeConn: "close" else: "keep-alive"
 
-  var hdrBuf: array[256, byte]
+  var hdrBuf {.noinit.}: array[256, byte]
   var p = 0
 
   copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
@@ -314,27 +325,36 @@ proc send*(res: HttpResponse, body: string = "") =
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
   copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), body.len)
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), bodyLen)
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
   copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
   copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
   copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
 
-  # Fast path: single write for tiny responses (≤512 bytes, no custom headers)
-  let totalLen = p + 2 + body.len
-  if totalLen <= 512 and res.headers.len == 0:
-    var buf: array[512, byte]
+  var customLen = 0
+  for (k, v) in res.headers:
+    customLen += k.len + v.len + 4  # "k: v\r\n"
+
+  if p + customLen + 2 + bodyLen <= FastSingleWriteCap:
+    # Fast path: coalesce everything into one stack buffer and issue a single
+    # send() — cheaper in the kernel than writev() over a multi-part iovec.
+    var buf {.noinit.}: array[FastSingleWriteCap, byte]
     copyMem(addr buf[0], addr hdrBuf[0], p)
     var pos = p
+    for (k, v) in res.headers:
+      copyMem(addr buf[pos], k.cstring, k.len); pos += k.len
+      copyMem(addr buf[pos], ": ".cstring, 2); pos += 2
+      copyMem(addr buf[pos], v.cstring, v.len); pos += v.len
+      copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
     copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
-    if body.len > 0:
-      copyMem(addr buf[pos], unsafeAddr body[0], body.len); pos += body.len
+    if bodyLen > 0:
+      copyMem(addr buf[pos], bodyPtr, bodyLen); pos += bodyLen
     discard res.conn.send(buf.toOpenArray(0, pos - 1))
   else:
     type Part = tuple[data: ptr UncheckedArray[byte], len: int]
     const MaxParts = 150
-    let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
+    let numParts = 1 + res.headers.len * 4 + 1 + (if bodyLen > 0: 1 else: 0)
 
     template scatterWrite(parts: var openArray[Part], count: var int) =
       parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
@@ -344,11 +364,11 @@ proc send*(res: HttpResponse, body: string = "") =
         parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
         parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
       parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
-      if body.len > 0:
-        parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
+      if bodyLen > 0:
+        parts[count] = (cast[ptr UncheckedArray[byte]](bodyPtr), bodyLen); inc count
 
     if numParts <= MaxParts:
-      var parts: array[MaxParts, Part]
+      var parts {.noinit.}: array[MaxParts, Part]
       var count = 0
       scatterWrite(parts, count)
       discard res.conn.sendv(parts.toOpenArray(0, count - 1))
@@ -360,73 +380,20 @@ proc send*(res: HttpResponse, body: string = "") =
 
   if res.closeConn:
     res.conn.closeAfterDrain()
+
+proc send*(res: HttpResponse, body: string = "") =
+  if res.sent: return
+  if body.len > 0:
+    sendResponse(res, body.len, unsafeAddr body[0])
+  else:
+    sendResponse(res, 0, nil)
 
 proc send*(res: HttpResponse, body: seq[byte]) =
   if res.sent: return
-  res.sent = true
-  let connHeader = if res.closeConn: "close" else: "keep-alive"
-
-  var hdrBuf: array[256, byte]
-  var p = 0
-
-  copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
-  hdrBuf[p] = byte(' '); p += 1
-  let stext = statusText(HttpCode(res.statusCode))
-  copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  copyMem(addr hdrBuf[p], "Date: ".cstring, 6); p += 6
-  let httpDate = cachedHttpDate()
-  copyMem(addr hdrBuf[p], httpDate.cstring, httpDate.len); p += httpDate.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), body.len)
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
-  copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
-
-  let totalLen = p + 2 + body.len
-  if totalLen <= 512 and res.headers.len == 0:
-    var buf: array[512, byte]
-    copyMem(addr buf[0], addr hdrBuf[0], p)
-    var pos = p
-    copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
-    if body.len > 0:
-      copyMem(addr buf[pos], addr body[0], body.len); pos += body.len
-    discard res.conn.send(buf.toOpenArray(0, pos - 1))
+  if body.len > 0:
+    sendResponse(res, body.len, unsafeAddr body[0])
   else:
-    type Part = tuple[data: ptr UncheckedArray[byte], len: int]
-    const MaxParts = 150
-    let numParts = 1 + res.headers.len * 4 + 1 + (if body.len > 0: 1 else: 0)
-
-    template scatterWrite(parts: var openArray[Part], count: var int) =
-      parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
-      for (k, v) in res.headers:
-        parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
-        parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
-        parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
-        parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
-      parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
-      if body.len > 0:
-        parts[count] = (cast[ptr UncheckedArray[byte]](unsafeAddr body[0]), body.len); inc count
-
-    if numParts <= MaxParts:
-      var parts: array[MaxParts, Part]
-      var count = 0
-      scatterWrite(parts, count)
-      discard res.conn.sendv(parts.toOpenArray(0, count - 1))
-    else:
-      var parts = newSeq[Part](numParts)
-      var count = 0
-      scatterWrite(parts, count)
-      discard res.conn.sendv(parts.toOpenArray(0, count - 1))
-
-  if res.closeConn:
-    res.conn.closeAfterDrain()
+    sendResponse(res, 0, nil)
 
 {.pop.}
 proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) {.inline.} =
@@ -936,18 +903,23 @@ proc removeSession*(server: HttpServer, conn: Connection) =
   releaseParser(server, ctx.parser)
   conn.data = nil
 
-proc markActivity(server: HttpServer, conn: Connection) =
-  ## Record data arrival on a connection (read-timeout window restarts).
-  let ctx = cast[ConnHttp](conn.data)
-  if ctx == nil: return
-  ctx.lastActive = monoMs()
-
 proc markIdle(server: HttpServer, conn: Connection) =
   ## Mark a connection idle: a request just completed, so the keep-alive
-  ## timeout now applies.
+  ## timeout now applies. Refreshes both stamps from a single clock sample —
+  ## the hot path therefore pays one `monoMs()` per completed request instead
+  ## of one per read plus one per completion.
+  ##
+  ## Timeout semantics are preserved: after this call `idleAfter >= lastActive`
+  ## so the sweep applies keepAliveMs from completion time. A connection stuck
+  ## mid-request keeps the stamp of its last completion (or accept time for a
+  ## brand-new connection), so readTimeoutMs still bounds slowloris drips —
+  ## slightly more strictly than before, since individual drips no longer
+  ## restart the window.
   let ctx = cast[ConnHttp](conn.data)
   if ctx == nil: return
-  ctx.idleAfter = monoMs()
+  let now = monoMs()
+  ctx.lastActive = now
+  ctx.idleAfter = now
 
 proc closeStale(server: HttpServer, ctx: ConnHttp) =
   ## Close a connection that exceeded its read/keep-alive timeout.
@@ -1022,7 +994,6 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
               server.connRoots[conn.fd.int] = c
               c
   let p = ctx.parser
-  server.markActivity(conn)
   try:
     p.feed(data)
   except MultipartSizeLimitError:
