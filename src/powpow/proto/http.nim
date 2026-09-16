@@ -298,7 +298,7 @@ proc reset*(p: HttpParser) =
   p.bodyStart     = 0
   p.bodyLen       = 0
   p.chunkBodyLen  = 0
-  p.trailers      = @[]
+  p.trailers.setLen(0)
   p.trailerBytes  = 0
   p.bodyStreamed  = 0
   p.streamingBody = false
@@ -361,7 +361,7 @@ proc resetForNext*(p: HttpParser) =
   p.bodyStart     = 0
   p.bodyLen       = 0
   p.chunkBodyLen  = 0
-  p.trailers      = @[]
+  p.trailers.setLen(0)
   p.trailerBytes  = 0
   p.bodyStreamed  = 0
   p.streamingBody = false
@@ -1367,12 +1367,19 @@ proc materializeHeaders(p: HttpParser, h: HttpHeaders) =
   let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
   h.clear()
   var i = 0
-  # Skip the first line
-  while i < p.headerEnd - 1:
-    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
-      i += 2
-      break
-    inc i
+  # Skip the first line. parseRequestLine already located the request-line
+  # CRLF — reuse the cached offset when it is verifiably still the terminator
+  # (same guards as scanHeaders; response-mode parsers never populate the
+  # cache and fall back to the walk).
+  if not p.responseMode and p.reqLineEnd >= 2 and p.reqLineEnd <= p.headerEnd - 1 and
+     char(buf[p.reqLineEnd - 2]) == '\r' and char(buf[p.reqLineEnd - 1]) == '\n':
+    i = p.reqLineEnd
+  else:
+    while i < p.headerEnd - 1:
+      if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+        i += 2
+        break
+      inc i
   # Parse headers — scan for colon directly in buffer, avoid intermediate line string
   while i < p.headerEnd - 1:
     if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':

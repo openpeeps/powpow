@@ -2618,10 +2618,19 @@ else:
       return totalLen
 
     if conn.writeBuf.len > 0:
+      # Single setLen + raw copies for all parts. queueWrite() would grow and
+      # copy per part; the overflow guard is identical (cumulative sums are
+      # linear, so the up-front total check closes exactly when the per-part
+      # checks would). Buffer contents on close are irrelevant (see close()).
+      if conn.writeBuf.len + totalLen > MaxWriteBufferSize:
+        conn.close()
+        return 0
+      var pos = conn.writeBuf.len
+      conn.writeBuf.setLen(pos + totalLen)
       for part in parts:
         if part.len > 0:
-          if not conn.queueWrite(part.data.toOpenArray(0, part.len - 1)):
-            return 0
+          copyMem(addr conn.writeBuf[pos], part.data, part.len)
+          pos += part.len
       return totalLen
 
     const MaxStackIovs = 128

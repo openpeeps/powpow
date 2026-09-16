@@ -528,7 +528,7 @@ proc sendFile*(res: HttpResponse, path: string;
     hdrAdd(hdrBuf, p, "\r\n", 2)
 
     type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
-    var parts: array[6, Part]
+    var parts {.noinit.}: array[6, Part]
     var count = 0
     parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
     discard res.conn.sendv(parts.toOpenArray(0, count - 1))
@@ -677,7 +677,7 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
     hdrAdd(hdrBuf, p, "\r\n", 2)
 
     type Part = tuple[data: ptr UncheckedArray[byte]; len: int]
-    var parts: array[6, Part]
+    var parts {.noinit.}: array[6, Part]
     var count = 0
     parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
     discard res.conn.sendv(parts.toOpenArray(0, count - 1))
@@ -1016,17 +1016,24 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   #   - multipart/form-data → feed body directly into a MultipartStreamerRef
   #   - any other Content-Type with Content-Length → stream raw body to a temp file
   # This keeps p.buf small (~headers only) regardless of total body size.
+  #
+  # peekContentType() copies the value on first touch, but both branches below
+  # are dead when contentLength <= 0 (multipart needs CL > 0, file streaming
+  # needs CL >= minStreamBodySize), so chunked/empty bodies skip the copy.
   if p.phase == PhaseBody and p.onBodyData == nil and not p.streamingBody and not p.isComplete():
-    let ct = p.peekContentType()
+    var isMultipart = false
+    if p.contentLength > 0:
+      isMultipart = p.peekContentType().startsWith("multipart/form-data")
     # Bound auto-streamed uploads: server.maxBodySize when set, otherwise a
     # hard cap — a client must not be able to fill the disk/temp dir with an
     # unbounded upload. (Previously maxBodySize=0 meant unlimited disk writes.)
     let uploadCap = if server.maxBodySize > 0: server.maxBodySize
                     elif server.maxStreamBodySize > 0: server.maxStreamBodySize
                     else: int64(MaxStreamBodySize)
-    if ct.startsWith("multipart/form-data") and p.contentLength > 0:
+    if isMultipart and p.contentLength > 0:
+      let ct = p.peekContentType()  # cache hit from the check above: no copy
       let fileCap = if server.maxFileSize > 0: server.maxFileSize
-                    else: uploadCap
+                     else: uploadCap
       let fieldCap = if server.maxFieldSize > 0: server.maxFieldSize
                      else: uploadCap
       ctx.streamer = newMultipartStreamerRef(ct,
@@ -1249,7 +1256,7 @@ proc resolveReal*(path: string): string =
   when defined(windows):
     result = winpath.resolveRealWindows(path)
   else:
-    var buf: array[4096, char]
+    var buf {.noinit.}: array[4096, char]
     let r = c_realpath(path.cstring, cast[cstring](addr buf[0]))
     if r != nil:
       result = $cast[cstring](addr buf[0])

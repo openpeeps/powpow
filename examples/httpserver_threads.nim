@@ -55,11 +55,32 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
     let name = req.getQuery()
     var greeting = "Hello, World!"
     if name.len > 0:
-      for pair in name.split('&'):
-        let kv = pair.split('=')
-        if kv.len == 2 and kv[0] == "name":
-          greeting = "Hello, " & kv[1] & "!"
-          break
+      # Single-pass scan for the first name=<value> pair: no seq[string]
+      # splits. Matches split('&')/split('=') semantics exactly (first match
+      # wins, kv.len == 2 required so values containing '=' are skipped,
+      # empty values kept).
+      const needle = "name="
+      var i = 0
+      while i < name.len:
+        var j = i
+        while j < name.len and name[j] != '&': inc j
+        if j - i >= needle.len and name[i] == 'n':
+          var k = 0
+          while k < needle.len and i + k < j and name[i + k] == needle[k]: inc k
+          if k == needle.len:
+            var hasEq = false
+            for t in (i + needle.len) ..< j:
+              if name[t] == '=':
+                hasEq = true
+                break
+            if not hasEq:
+              let vlen = j - (i + needle.len)
+              var val = newString(vlen)
+              if vlen > 0:
+                copyMem(addr val[0], unsafeAddr name[i + needle.len], vlen)
+              greeting = "Hello, " & val & "!"
+              break
+        i = j + 1
     res.status(Http200)
        .header("Content-Type", "text/plain; charset=utf-8")
        .send(greeting)
@@ -70,17 +91,27 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
        .send($now())
 
   elif meth == HttpPost and path == "/api/echo":
-    let body = req.getBodyString()
-    let contentType = req.getHeaders().getOrDefault("Content-Type",
-                                                      @["application/octet-stream"].HttpHeaderValues)
+    # No header-table cost here: peekContentType() is a cached lent view of the
+    # raw header bytes (no per-header strings, no table insert). $ct copies only
+    # this one value so the response header owns its bytes instead of aliasing
+    # the pooled parser buffer. Duplicate Content-Type headers resolve to the
+    # parser's canonical last-wins value, the same value the framework itself
+    # uses for streaming decisions.
+    let ct = req.parser.peekContentType()
+    let contentType = if ct.len > 0: $ct else: "application/octet-stream"
     res.status(Http200)
        .header("Content-Type", contentType)
-       .send(body)
+       # getBody() copies once into the pooled request buffer and send() borrows
+       # it; getBodyString() would copy a second time.
+       .send(req.getBody())
 
   elif meth == HttpDelete and path.startsWith("/api/items/"):
-    # Simple path extraction (no router yet — just split manually)
-    let parts = path.split('/')
-    let id = if parts.len >= 4: parts[3] else: "?"
+    # Index scan for the id segment: one substring copy instead of a
+    # seq[string] split. startsWith guarantees path.len > prefixLen.
+    const prefixLen = len("/api/items/")
+    var e = prefixLen
+    while e < path.len and path[e] != '/': inc e
+    let id = path[prefixLen ..< e]
     res.status(Http200)
        .header("Content-Type", "application/json")
        .send("{\"deleted\": \"" & id & "\"}")
