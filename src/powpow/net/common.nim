@@ -185,7 +185,7 @@ when defined(windows):
       FORMAT_MESSAGE_ALLOCATE_BUFFER or FORMAT_MESSAGE_FROM_SYSTEM or FORMAT_MESSAGE_IGNORE_INSERTS,
       nil, errcode.DWORD, 0, buf, 0, nil)
     if n > 0:
-      result = $cast[ptr UncheckedArray[char]](buf)
+      result = $cast[cstring](buf)
       discard LocalFree(buf)
     else:
       result = "getaddrinfo error (code: " & $errcode & ")"

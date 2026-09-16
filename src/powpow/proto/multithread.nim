@@ -13,11 +13,11 @@
 ##
 ## Usage:
 ##   ```nim
-##   let server = newHttpServer()
+##   let server = newHttpServer(countProcessors())
 ##   server.start do (req: HttpRequest, res: HttpResponse):
 ##     if req.getPath() == "/":
 ##       res.status(Http200).send("Hello!")
-##   , "0.0.0.0", 9000
+##   , "0.0.0.0", Port(9000)
 ##   ```
 
 when not defined(windows):
@@ -139,6 +139,15 @@ when not defined(windows):
   proc listen*(srv: MultiThreadHttpServer, address: string, ports: openArray[int]) =
     srv.listenMulti(address, ports)
 
+  proc listen*(srv: MultiThreadHttpServer, address: string, port: Port) =
+    srv.listenMulti(address, [port.int])
+
+  proc listen*(srv: MultiThreadHttpServer, address: string, ports: openArray[Port]) =
+    var intPorts = newSeq[int](ports.len)
+    for i, p in ports:
+      intPorts[i] = p.int
+    srv.listenMulti(address, intPorts)
+
   proc start*(srv: MultiThreadHttpServer, cb: OnRequestCallback,
               address: string, port: int) =
     srv.handler = cb
@@ -151,6 +160,24 @@ when not defined(windows):
       raise newException(ValueError, "start: at least one port is required")
     srv.handler = cb
     srv.listen(address, ports)
+
+  proc start*(srv: MultiThreadHttpServer, cb: OnRequestCallback,
+              address: string, port: Port) =
+    ## Port variant so the same call works for both `HttpServer` and
+    ## `MultiThreadHttpServer`: `srv.start(handler, "0.0.0.0", Port(9000))`.
+    srv.handler = cb
+    srv.listen(address, port.int)
+
+  proc start*(srv: MultiThreadHttpServer, cb: OnRequestCallback,
+              address: string, ports: varargs[Port]) =
+    ## Multi-port Port variant: `srv.start(handler, "0.0.0.0", Port(9000), Port(9001))`
+    if ports.len == 0:
+      raise newException(ValueError, "start: at least one port is required")
+    srv.handler = cb
+    var intPorts = newSeq[int](ports.len)
+    for i, p in ports:
+      intPorts[i] = p.int
+    srv.listen(address, intPorts)
 
   proc close*(srv: MultiThreadHttpServer) =
     srv.running = false

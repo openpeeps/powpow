@@ -65,13 +65,12 @@
 ## `-d:powpowNoThreads`: the module then compiles but every entry point raises
 ## `ThreadPoolError`.
 
-import ./types
-import ./loop
-
-export types
-
 when not defined(powpowNoThreads):
+  import ./types
+  import ./loop
   import std/[atomics, locks]
+
+  export types
 
   const
     HeartbeatMs* = 10

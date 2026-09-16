@@ -85,12 +85,12 @@ proc formatIp*(saAddr: Sockaddr_storage): string =
   ## families other than IPv4/IPv6.
   let family = saAddr.ss_family
   let raw = cast[ptr UncheckedArray[byte]](unsafeAddr saAddr)
-  if family == AF_INET.TSa_Family:
+  if family == AF_INET.cushort:
     var a4: array[4, uint8]
     for i in 0 ..< 4:
       a4[i] = raw[i + 4]   # sockaddr_in: family(2) + port(2) -> sin_addr @4
     result = $IpAddress(family: IpAddressFamily.IPv4, address_v4: a4)
-  elif family == AF_INET6.TSa_Family:
+  elif family == AF_INET6.cushort:
     # RFC 4291 v4-mapped (::ffff:a.b.c.d): present as a plain IPv4 literal
     # addr bytes are raw[8..23]; mapped form = 10 zero octets + ff ff + 4 octets
     if raw[8] == 0 and raw[9] == 0 and raw[10] == 0 and raw[11] == 0 and

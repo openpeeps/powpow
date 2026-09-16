@@ -1,11 +1,11 @@
-## examples/httpserver.nim — Runnable multi-threaded HTTP server demo.
+## examples/httpserver_threads.nim — Runnable multi-threaded HTTP server demo.
 ##
 ## A small but functional HTTP server showcasing powpow's multi-threaded
 ## HTTP module.  Spawns one event-loop thread per CPU core, all bound to
 ## the same port (SO_REUSEPORT).  The kernel load-balances connections.
 ##
 ## Run:
-##   nim c -r --threads:on examples/httpserver.nim
+##   clue build examples/httpserver_threads.nim --out:/tmp/httpserver_threads
 ##
 ## Test:
 ##   curl http://localhost:9000/
@@ -16,10 +16,16 @@
 import ../src/powpow
 import std/httpcore except HttpMethod
 import std/[strutils, times]
+when not defined(windows):
+  import std/cpuinfo
 
-# Pass an explicit thread count, e.g. newHttpServer(4),
-# or omit the argument to default to countProcessors().
-let server = newHttpServer()
+# Multi-threaded server (POSIX only; multithread.nim is guarded with
+# `when not defined(windows)`). On Windows fall back to the single-threaded
+# HttpServer so the example still compiles.
+when not defined(windows):
+  let server = newHttpServer(countProcessors())
+else:
+  let server = newHttpServer()
 
 # ── Handler ──────────────────────────────────────────────────────────────────
 
@@ -87,4 +93,4 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
 
 # start() blocks the main thread. Each worker thread runs its own
 # event loop on the same port. Press Ctrl+C to stop.
-server.start(handler, "0.0.0.0", 9000)
+server.start(handler, "0.0.0.0", Port(9000))
