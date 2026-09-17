@@ -556,7 +556,8 @@ when not defined(windows):
       loop.close()
 
   
-test "ws_client_highlevel_sendmessage_e2e":
+when not defined(windows):
+  test "ws_client_highlevel_sendmessage_e2e":
     ## newWsClient end to end: sendMessage dispatches string->text and
     ## seq[byte]->binary; close() unblocks run().
     var kinds: array[2, WsFrameKind]

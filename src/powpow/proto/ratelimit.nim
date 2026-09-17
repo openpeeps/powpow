@@ -107,34 +107,38 @@ proc allow*(rl: RateLimiter; key: string): bool =
 
   withLock rl.lock:
     let now = monoMs()
-    var state: KeyState
-    if key in rl.states:
-      state = rl.states[key]
-      state.buckets.setLen(rl.limits.len)
-    else:
-      state = KeyState(buckets: newSeq[Bucket](rl.limits.len), lastSeen: 0)
+    if key notin rl.states:
+      rl.states[key] = KeyState(buckets: newSeq[Bucket](rl.limits.len),
+                                lastSeen: 0)
+    # Borrow the table slot directly and mutate it in place. The previous
+    # copy-out/copy-back (`state = t[key]; ...; t[key] = state`) churns the
+    # shared payload's refcount on every call; when the limiter is shared
+    # across threads that aliasing is a use-after-free hazard (the slot and
+    # the copy briefly alias the same payload). In-place mutation performs no
+    # refcount operations on shared cells at all — `Bucket` is plain ints —
+    # so the lock alone suffices for thread safety.
+    let s = addr rl.states.mgetOrPut(key)
+    if s.buckets.len != rl.limits.len:
+      s.buckets.setLen(rl.limits.len)
 
     # Phase 1 — verify every window has capacity.
     for i in 0 ..< rl.limits.len:
       let lim = rl.limits[i]
       if lim.maxRequests <= 0:
         continue
-      var bucket = state.buckets[i]
-      if now - bucket.start > lim.windowMs:
-        bucket = (now, 0)
-      if bucket.count >= lim.maxRequests:
+      if now - s.buckets[i].start > lim.windowMs:
+        s.buckets[i] = (now, 0)
+      if s.buckets[i].count >= lim.maxRequests:
         return false          # reject — nothing was incremented
-      state.buckets[i] = bucket
 
     # Phase 2 — all passed; increment every non-unlimited window.
     for i in 0 ..< rl.limits.len:
       let lim = rl.limits[i]
       if lim.maxRequests <= 0:
         continue
-      inc state.buckets[i].count
+      inc s.buckets[i].count
 
-    state.lastSeen = now
-    rl.states[key] = state
+    s.lastSeen = now
     return true
 
 # ── HTTP convenience ──────────────────────────────────────────────────────────

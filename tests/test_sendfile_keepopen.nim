@@ -1,7 +1,18 @@
 import std/[os]
 import ../src/powpow
 
-when defined(posix):
+when defined(windows):
+  proc posixOpen(p: string): cint =
+    proc c_open(path: cstring; flags, mode: cint): cint {.
+      importc: "_open", header: "<fcntl.h>".}
+    const O_RDONLY_WIN = 0.cint
+    const O_BINARY_WIN = 0x8000.cint
+    c_open(p.cstring, O_RDONLY_WIN or O_BINARY_WIN, 0)
+
+  proc posixClose(fd: cint) =
+    proc c_close(fd: cint): cint {.importc: "_close", header: "<io.h>".}
+    discard c_close(fd)
+elif defined(posix):
   proc posixOpen(p: string): cint =
     proc c_open(path: cstring; flags: cint): cint {.
       importc: "open", header: "<fcntl.h>".}
@@ -64,7 +75,7 @@ proc main() =
 
   when defined(posix):
     doAssert not isClosedFd(ctx.fd), "fd was closed despite keepOpen=true"
-    posixClose(ctx.fd)
+  posixClose(ctx.fd)
 
   doAssert ctx.err == "", "error: " & ctx.err
   doAssert ctx.doneFired, "onComplete never fired"

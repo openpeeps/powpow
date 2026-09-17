@@ -349,6 +349,24 @@ proc sendMessage*(ws: WsConnection, data: seq[byte]) {.inline.} =
   ## High-level send: byte sequences go out as binary frames.
   ws.sendBinary(data)
 
+proc gracefulWsClose(ws: WsConnection) =
+  ## Flush pending frame bytes, then FIN (shutdown WR) so the peer receives
+  ## everything sent before the teardown. An abortive RST close (SO_LINGER=0)
+  ## can discard kernel-buffered bytes the peer has not read yet — on Windows
+  ## a close frame sent just before the RST never arrives (the peer then
+  ## reports 1001/1006 instead of the real close code). The socket is fully
+  ## closed when the peer's FIN/EOF arrives (the read watchers treat Closing
+  ## accordingly); half-open peers linger like the Linux graceful path in
+  ## `closeAfterDrain`.
+  when iouEnabled:
+    ws.conn.close()
+  else:
+    discard ws.conn.flushWriteBuffer()
+    if ws.conn.state == Connected:
+      ws.conn.shutdown()
+    else:
+      ws.conn.close()
+
 proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
   ## Send a close frame and shut down the connection.
   if ws.idleTimer != TimerId(0):
@@ -366,7 +384,7 @@ proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
       payload[2 + i] = uint8(ch.ord and 0xFF)
   ws.writeFrameFor(0x8, payload)
   notifyClose(ws, code, reason)
-  ws.conn.close()
+  ws.gracefulWsClose()
 
 # ── Frame parser (incremental, state-machine) ────────────────────────────────
 
@@ -441,7 +459,7 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
     else:
       ws.writeFrameFor(0x8, [])
     notifyClose(ws, closeCode, reason)
-    ws.conn.close()
+    ws.gracefulWsClose()
     return
   of 0x9:
     if plen > 0:
@@ -918,11 +936,27 @@ proc listen*(wss: WsServer, address: string, port: int) =
                     cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
                   if n > 0:
                     ws.parseWsFrames(buf.toOpenArray(0, n - 1))
-                    if ws.conn.state != Connected:
+                    if ws.conn.state == Closed:
                       if efd in wss.conns:
                         wss.conns.del(efd)
                         wss.releaseWsConnection(ws)
                       return
+                    elif ws.conn.state == Closing:
+                      # Graceful close sent our FIN; keep watching for the
+                      # peer's EOF instead of orphaning the half-open socket.
+                      ws.conn.loop.modify(efd, {Read})
+                      return
+                  elif n == 0:
+                    # Peer EOF (FIN): mirror the POSIX branch below. The
+                    # closeNotified guard avoids re-firing onClose after a
+                    # graceful closeWs already reported the close.
+                    if not ws.closeNotified and not ws.onClose.isNil:
+                      ws.onClose(ws, 1000, "")
+                    ws.conn.close()
+                    if efd in wss.conns:
+                      wss.conns.del(efd)
+                      wss.releaseWsConnection(ws)
+                    return
                   else:
                     break
                 else:
@@ -935,7 +969,7 @@ proc listen*(wss: WsServer, address: string, port: int) =
                         wss.releaseWsConnection(ws)
                       return
                   elif n == 0:
-                    if not ws.onClose.isNil:
+                    if not ws.closeNotified and not ws.onClose.isNil:
                       ws.onClose(ws, 1000, "")
                     ws.conn.close()
                     if efd in wss.conns:
@@ -1002,7 +1036,9 @@ proc close*(wss: WsServer) =
   for fd, ws in wss.conns:
     if ws.idleTimer != TimerId(0):
       wss.loop.cancelTimer(ws.idleTimer)
-    if not ws.onClose.isNil:
+    # notifyClose-guarded conns already reported their close (e.g. a close
+    # frame); don't overwrite a real close code with 1001 on shutdown.
+    if not ws.closeNotified and not ws.onClose.isNil:
       ws.onClose(ws, 1001, "Server shutting down")
     ws.conn.close()
     wss.releaseWsConnection(ws)
@@ -1126,9 +1162,18 @@ proc websocketUpgrade*(
                 cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
               if n > 0:
                 ws.parseWsFrames(buf.toOpenArray(0, n - 1))
-                if ws.conn.state != Connected:
+                if ws.conn.state == Closed:
                   owner.releaseWs(ws)
                   return
+                elif ws.conn.state == Closing:
+                  ws.conn.loop.modify(fd, {Read})
+                  return
+              elif n == 0:
+                if not ws.closeNotified and not ws.onClose.isNil:
+                  ws.onClose(ws, 1000, "")
+                ws.conn.close()
+                owner.releaseWs(ws)
+                return
               else:
                 break
             else:
@@ -1142,11 +1187,14 @@ proc websocketUpgrade*(
                 n = sockRecv(ws.conn.fd, addr buf[0], buf.len)
               if n > 0:
                 ws.parseWsFrames(buf.toOpenArray(0, n - 1))
-                if ws.conn.state != Connected:
+                if ws.conn.state == Closed:
                   owner.releaseWs(ws)
                   return
+                elif ws.conn.state == Closing:
+                  ws.conn.loop.modify(fd, {Read})
+                  return
               elif n == 0:
-                if not ws.onClose.isNil:
+                if not ws.closeNotified and not ws.onClose.isNil:
                   ws.onClose(ws, 1000, "")
                 ws.conn.close()
                 owner.releaseWs(ws)
@@ -1459,6 +1507,16 @@ proc registerClientFd(ws: WsConnection) =
                   discard  # wait for more response bytes
                 if ws.conn.state != Connected:
                   return
+            elif n == 0:
+              # Peer EOF: mirror the POSIX branch below (notifyClose is
+              # already idempotent via closeNotified).
+              if not ws.handshakeDone:
+                if not ws.onError.isNil:
+                  ws.onError(ws, "Connection closed during WebSocket handshake")
+              else:
+                notifyClose(ws, 1006, "")
+              ws.conn.close()
+              return
             else:
               break
           else:

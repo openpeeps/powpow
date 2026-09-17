@@ -133,6 +133,10 @@ when defined(windows):
                     namelen: ptr SockLen): cint {.
     importc: "getpeername", stdcall, dynlib: "ws2_32.dll".}
 
+  proc getsockname*(s: SocketHandle, name: ptr Sockaddr,
+                    namelen: ptr SockLen): cint {.
+    importc: "getsockname", stdcall, dynlib: "ws2_32.dll".}
+
   proc inet_pton*(af: cint; src: cstring; dst: pointer): cint {.
     importc: "inet_pton", stdcall, dynlib: "ws2_32.dll".}
 

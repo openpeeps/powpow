@@ -147,18 +147,24 @@ const
 
 proc connError(h2: H2Conn, code: H2ErrorCode) =
   ## Connection error: GOAWAY + TCP close. Idempotent.
+  ## The GOAWAY must reach the peer before the socket tears down: an abortive
+  ## RST close (SO_LINGER=0) can discard kernel-buffered bytes that the peer
+  ## has not read yet — on Windows the ACK + GOAWAY sent just before the RST
+  ## never arrive. Flush, then FIN (shutdown WR) so the peer reads GOAWAY +
+  ## FIN in order; the socket is reclaimed when the peer's FIN/EOF arrives
+  ## (same reclamation as the Linux graceful path in closeAfterDrain).
   if h2.state == CsClosed:
     return
   h2.state = CsClosed
   if not h2.goawaySent:
     h2.goawaySent = true
     discard h2.conn.send(encodeGoaway(h2.lastPeerSid, code))
-  h2.conn.close()
-  h2.state = CsClosed
-  if not h2.goawaySent:
-    h2.goawaySent = true
-    discard h2.conn.send(encodeGoaway(h2.lastPeerSid, code))
-  h2.conn.close()
+  when iouEnabled:
+    h2.conn.close()
+  else:
+    discard h2.conn.flushWriteBuffer()
+    if h2.conn.state == Connected:
+      h2.conn.shutdown()
 
 proc maybeDrain(h2: H2Conn) =
   ## After our peer asked to go away, close once in-flight streams finish.
