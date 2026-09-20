@@ -20,7 +20,7 @@ when defined(release):
 
   # Benchmark-only speed flags, gated behind powpowPewPew so normal release
   # builds (and all downstream consumers) keep every runtime check on
-  when defined("powpowPewPew"):
+  when defined(powpowPewPew):
     switch("define", "danger")
     switch("assertions", "off")
     switch("boundChecks", "off")
