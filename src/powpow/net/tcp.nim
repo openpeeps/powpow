@@ -2978,6 +2978,17 @@ else:
           # TLS was enabled during onData (STARTTLS-style upgrade); the
           # handshake is now driven from the event loop.
           return
+        when not defined(windows):
+          # Short-read fast exit: a stream recv() returns every byte available
+          # up to the buffer length, so n < readBufLen proves the socket is
+          # drained — looping would only burn one EAGAIN probe per request.
+          # Correct under edge-triggered epoll/kqueue: any data arriving later
+          # is an empty→non-empty transition and re-fires the event; pipelined
+          # bytes arriving together are consumed by the same recv. Full reads
+          # (n == readBufLen) may leave data behind, so those keep draining.
+          # Gated to plain TCP: TLS record framing has its own drain rules.
+          if conn.tlsState == TlsOff and n < conn.readBufLen:
+            return
       elif n == 0:
         conn.close()
         if onClose != nil: onClose(conn)
@@ -3193,8 +3204,10 @@ else:
             return
           if conn.state == Connected:
             conn.loop.modify(fd, {Read})
-      if (Read in ev or Hup in ev) and conn.sendFileFd < 0:
-        conn.handleClientRead(srv.onData, srv.onClose)
+      if conn.sendFileFd < 0:
+        # No zero-copy file pump in flight — reads must not interleave with it.
+        if Read in ev or Hup in ev:
+          conn.handleClientRead(srv.onData, srv.onClose)
       if (Error in ev or Hup in ev) and conn.state == Connected:
         conn.close()
         if srv.onClose != nil: srv.onClose(conn)

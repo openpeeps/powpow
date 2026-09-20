@@ -15,7 +15,7 @@
 ##   - submission (opt-in, Linux): io_uring (`when iouEnabled`), driven by operation completions.
 ## The timer wheel, deferred calls, posts, observers and idle handlers are identical in both.
 
-import std/[tables, deques, sets, monotimes, bitops, sequtils, locks]
+import std/[tables, deques, sets, monotimes, times, bitops, sequtils, locks]
 when defined(threads):
   import std/threads
 import ./types
@@ -162,6 +162,18 @@ type
 
 proc monoMs*(): int64 {.inline.} =
   getMonoTime().ticks div 1_000_000
+
+var pollNowMs* {.threadvar.}: int64
+  ## Monotonic clock sampled once per `poll` iteration (refreshed again after
+  ## the blocking wait). Per-request stamps (e.g. HTTP keep-alive idle marks)
+  ## read this instead of paying a `clock_gettime` VDSO call each — timeout
+  ## granularity is already far coarser (200 ms sweep), so per-iteration
+  ## quantization is unobservable. Zero outside a running loop (unit tests);
+  ## readers must fall back to `monoMs()` then.
+var pollWallSec* {.threadvar.}: int64
+  ## Wall-clock Unix seconds, same sampling contract as `pollNowMs`. Backs the
+  ## cached HTTP Date header: at most one poll iteration (<- typically ~1 ms)
+  ## stale, far below the header's 1-second resolution.
 
 # ── io_uring helpers ─────────────────────────────────────────────────────────
 
@@ -944,6 +956,16 @@ proc processTimers(loop: Loop; now: int64) =
       t = now
   loop.wheelBase = now
 
+  # Fast path: no timer can be due before the cached earliest deadline, so
+  # skip the 256-slot fire scan (it runs twice per poll iteration). The cache
+  # is maintained as a minimum by addToWheel and refreshed by timerTimeout;
+  # a stale entry (earliest timer cancelled/paused since) only costs one
+  # spurious full scan at its deadline — a missed fire is impossible, since
+  # every live deadline is >= the cached value and the full scan filters
+  # cancelled/paused timers when it runs.
+  if loop.nextDead != int64.high and now < loop.nextDead:
+    return
+
   # Fire all expired Level-0 timers up to batch limit.
   var batch = 0
   for slot in 0 ..< 256:
@@ -1129,6 +1151,8 @@ when iouEnabled:
 
 proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   let now = monoMs()
+  pollNowMs = now
+  pollWallSec = getTime().toUnix()
 
   processDeferred(loop)
   drainPosted(loop)
@@ -1188,21 +1212,24 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   if loop.totalTimers > 0:
     # Timers may have expired during the I/O wait — recompute and fire them.
     let now2 = monoMs()
+    pollNowMs = now2
+    pollWallSec = getTime().toUnix()
     processTimers(loop, now2)
   if loop.stopFlag: return
 
   sweepDead(loop)  # Check observers for variable changes
-  for obs in loop.observers.mitems:
-    if obs.alive:
-      let val = obs.varPtr[]
-      if val != obs.lastVal:
-        obs.lastVal = val
-        obs.cb(val)
-    else:
-      inc loop.obsDead
-  if loop.obsDead > 64:
-    loop.observers.keepItIf(it.alive)
-    loop.obsDead = 0
+  if loop.observers.len > 0:
+    for obs in loop.observers.mitems:
+      if obs.alive:
+        let val = obs.varPtr[]
+        if val != obs.lastVal:
+          obs.lastVal = val
+          obs.cb(val)
+      else:
+        inc loop.obsDead
+    if loop.obsDead > 64:
+      loop.observers.keepItIf(it.alive)
+      loop.obsDead = 0
 
   if nEvents == 0 and loop.idleCbs.len > 0:
     var batch = 0

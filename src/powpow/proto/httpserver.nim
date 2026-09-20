@@ -129,7 +129,11 @@ var httpDateSec {.threadvar.}: int64
 proc cachedHttpDate(): string {.inline.} =
   ## RFC 7231 IMF-fixdate ("Sun, 06 Nov 1994 08:49:37 GMT"), cached once per
   ## second per thread so the response hot path never re-formats it.
-  let sec = getTime().toUnix()
+  ## Reads the wall clock sampled once per event-loop iteration instead of a
+  ## per-request `clock_gettime` — at most one iteration stale, far below the
+  ## header's 1-second resolution. Falls back to a direct sample outside a
+  ## running loop (unit tests).
+  let sec = if pollWallSec != 0: pollWallSec else: getTime().toUnix()
   if sec != httpDateSec:
     httpDateSec = sec
     let dt = fromUnix(sec).utc()
@@ -306,58 +310,68 @@ template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
   ## Emits byte-identical output on both paths; only the transport differs
   ## (one coalesced `send()` when the response fits the stack buffer,
   ## otherwise the scatter `sendv()` as before).
+  ##
+  ## Single-pass build: the fixed headers are emitted directly into the
+  ## final stack buffer and custom headers appended in the same loop that
+  ## bounds-checks them — no intermediate header buffer, no second copy,
+  ## no pre-count pass over `res.headers`.
   res.sent = true
   let connHeader = if res.closeConn: "close" else: "keep-alive"
 
-  var hdrBuf {.noinit.}: array[256, byte]
+  var buf {.noinit.}: array[FastSingleWriteCap, byte]
   var p = 0
 
-  copyMem(addr hdrBuf[p], "HTTP/1.1 ".cstring, 9); p += 9
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), res.statusCode.int)
-  hdrBuf[p] = byte(' '); p += 1
+  copyMem(addr buf[p], "HTTP/1.1 ".cstring, 9); p += 9
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr buf[p]), res.statusCode.int)
+  buf[p] = byte(' '); p += 1
   let stext = statusText(HttpCode(res.statusCode))
-  copyMem(addr hdrBuf[p], stext.cstring, stext.len); p += stext.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+  copyMem(addr buf[p], stext.cstring, stext.len); p += stext.len
+  copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
 
-  copyMem(addr hdrBuf[p], "Date: ".cstring, 6); p += 6
+  copyMem(addr buf[p], "Date: ".cstring, 6); p += 6
   let httpDate = cachedHttpDate()
-  copyMem(addr hdrBuf[p], httpDate.cstring, httpDate.len); p += httpDate.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+  copyMem(addr buf[p], httpDate.cstring, httpDate.len); p += httpDate.len
+  copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
 
-  copyMem(addr hdrBuf[p], "Content-Length: ".cstring, 16); p += 16
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr hdrBuf[p]), bodyLen)
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+  copyMem(addr buf[p], "Content-Length: ".cstring, 16); p += 16
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr buf[p]), bodyLen)
+  copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
 
-  copyMem(addr hdrBuf[p], "Connection: ".cstring, 12); p += 12
-  copyMem(addr hdrBuf[p], connHeader.cstring, connHeader.len); p += connHeader.len
-  copyMem(addr hdrBuf[p], "\r\n".cstring, 2); p += 2
+  copyMem(addr buf[p], "Connection: ".cstring, 12); p += 12
+  copyMem(addr buf[p], connHeader.cstring, connHeader.len); p += connHeader.len
+  copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
+  # Fixed part is <= ~144 bytes (longest reason phrase is 30 chars), so it
+  # always fits the 1024-byte buffer; only custom headers + body can overflow.
+  let fixedEnd = p
 
-  var customLen = 0
+  let tailReserve = 2 + bodyLen  # final CRLF + body
+  var fit = true
   for (k, v) in res.headers:
-    customLen += k.len + v.len + 4  # "k: v\r\n"
+    # Reserve space for this header plus everything that still follows it,
+    # so a successful loop guarantees the tail fits without re-checking.
+    if p + k.len + v.len + 4 + tailReserve > FastSingleWriteCap:
+      fit = false
+      break
+    copyMem(addr buf[p], k.cstring, k.len); p += k.len
+    copyMem(addr buf[p], ": ".cstring, 2); p += 2
+    copyMem(addr buf[p], v.cstring, v.len); p += v.len
+    copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
 
-  if p + customLen + 2 + bodyLen <= FastSingleWriteCap:
-    # Fast path: coalesce everything into one stack buffer and issue a single
-    # send() — cheaper in the kernel than writev() over a multi-part iovec.
-    var buf {.noinit.}: array[FastSingleWriteCap, byte]
-    copyMem(addr buf[0], addr hdrBuf[0], p)
-    var pos = p
-    for (k, v) in res.headers:
-      copyMem(addr buf[pos], k.cstring, k.len); pos += k.len
-      copyMem(addr buf[pos], ": ".cstring, 2); pos += 2
-      copyMem(addr buf[pos], v.cstring, v.len); pos += v.len
-      copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
-    copyMem(addr buf[pos], "\r\n".cstring, 2); pos += 2
+  if fit:
+    # Fast path: everything coalesced in one stack buffer, one send().
+    copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
     if bodyLen > 0:
-      copyMem(addr buf[pos], bodyPtr, bodyLen); pos += bodyLen
-    discard res.conn.send(buf.toOpenArray(0, pos - 1))
+      copyMem(addr buf[p], bodyPtr, bodyLen); p += bodyLen
+    discard res.conn.send(buf.toOpenArray(0, p - 1))
   else:
     type Part = tuple[data: ptr UncheckedArray[byte], len: int]
     const MaxParts = 150
     let numParts = 1 + res.headers.len * 4 + 1 + (if bodyLen > 0: 1 else: 0)
 
     template scatterWrite(parts: var openArray[Part], count: var int) =
-      parts[count] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), p); inc count
+      # First part is the fixed headers only (custom headers that fit were
+      # appended past fixedEnd but are re-emitted below, so stop before them).
+      parts[count] = (cast[ptr UncheckedArray[byte]](addr buf[0]), fixedEnd); inc count
       for (k, v) in res.headers:
         parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
         parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
@@ -905,9 +919,10 @@ proc removeSession*(server: HttpServer, conn: Connection) =
 
 proc markIdle(server: HttpServer, conn: Connection) =
   ## Mark a connection idle: a request just completed, so the keep-alive
-  ## timeout now applies. Refreshes both stamps from a single clock sample —
-  ## the hot path therefore pays one `monoMs()` per completed request instead
-  ## of one per read plus one per completion.
+  ## timeout now applies. Refreshes both stamps from the clock sampled once
+  ## per event-loop iteration — zero per-request `clock_gettime` calls; the
+  ## ~1 ms quantization is unobservable next to the 5 s / 30 s timeouts.
+  ## Falls back to a direct sample outside a running loop (unit tests).
   ##
   ## Timeout semantics are preserved: after this call `idleAfter >= lastActive`
   ## so the sweep applies keepAliveMs from completion time. A connection stuck
@@ -917,7 +932,7 @@ proc markIdle(server: HttpServer, conn: Connection) =
   ## restart the window.
   let ctx = cast[ConnHttp](conn.data)
   if ctx == nil: return
-  let now = monoMs()
+  let now = if pollNowMs != 0: pollNowMs else: monoMs()
   ctx.lastActive = now
   ctx.idleAfter = now
 

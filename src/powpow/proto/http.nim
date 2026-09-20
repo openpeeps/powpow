@@ -617,11 +617,18 @@ proc scanHeaders(p: HttpParser): bool =
           p.errorCode = Http431
           return false
 
-        # Quick check for Content-Length (case-insensitive prefix match)
+        # Header-kind dispatch on the first byte (case-insensitive): each
+        # known header has a distinct initial, so a line can only match one
+        # kind — no line needs more than one key comparison. Byte-identical
+        # semantics to the previous sequential checks: Content-Length,
+        # Transfer-Encoding, Connection and Expect set `matched`; Content-Type
+        # is independent of it (it only shares the 'C' initial, and a
+        # Content-Length line can never spell "content-type:").
         var matched = false
-        if lineLen >= 15:
-          let c = char(buf[lineStart])
-          if c == 'C' or c == 'c':
+        case char(buf[lineStart])
+        of 'C', 'c':
+          # Quick check for Content-Length (case-insensitive prefix match)
+          if lineLen >= 15:
             var isCL = true
             const clKey = "content-length:"
             if lineLen >= clKey.len:
@@ -675,10 +682,54 @@ proc scanHeaders(p: HttpParser): bool =
                 return false
               p.contentLength = num
 
-        # Quick check for Transfer-Encoding
-        if not matched and lineLen >= 19:
-          let c = char(buf[lineStart])
-          if c == 'T' or c == 't':
+          # Quick check for Connection: close
+          if not matched and lineLen >= 12:
+            var isCon = true
+            const conKey = "connection:"
+            if lineLen >= conKey.len:
+              for j in 0 ..< conKey.len:
+                let ch = char(buf[lineStart + j])
+                if ch != conKey[j] and ch != (char(ord(conKey[j]) xor 32)):
+                  isCon = false
+                  break
+              if isCon:
+                matched = true
+                var valStart = lineStart + conKey.len
+                while valStart < i and char(buf[valStart]) == ' ':
+                  inc valStart
+                let valLen = i - valStart
+                const closeKey = "close"
+                if valLen >= closeKey.len:
+                  var isClose = true
+                  for j in 0 ..< closeKey.len:
+                    let ch = char(buf[valStart + j])
+                    if ch != closeKey[j] and ch != (char(ord(closeKey[j]) xor 32)):
+                      isClose = false
+                      break
+                  if isClose:
+                    p.connectionClose = true
+
+          # Quick check for Content-Type
+          if lineLen >= 14:
+            const ctKey = "content-type:"
+            if lineLen >= ctKey.len:
+              var isCT = true
+              for j in 0 ..< ctKey.len:
+                let ch = char(buf[lineStart + j])
+                if ch != ctKey[j] and ch != (char(ord(ctKey[j]) xor 32)):
+                  isCT = false
+                  break
+              if isCT:
+                var valStart = lineStart + ctKey.len
+                while valStart < i and char(buf[valStart]) == ' ':
+                  inc valStart
+                let valLen = i - valStart
+                if valLen > 0:
+                  p.contentTypeStart = valStart
+                  p.contentTypeLen = valLen
+        of 'T', 't':
+          # Quick check for Transfer-Encoding
+          if lineLen >= 19:
             var isTE = true
             const teKey = "transfer-encoding:"
             if lineLen >= teKey.len:
@@ -717,40 +768,9 @@ proc scanHeaders(p: HttpParser): bool =
                       break
                   if isChunked:
                     p.transferChunked = true
-
-        # Quick check for Connection: close
-        if not matched and lineLen >= 12:
-          let c = char(buf[lineStart])
-          if c == 'C' or c == 'c':
-            var isCon = true
-            const conKey = "connection:"
-            if lineLen >= conKey.len:
-              for j in 0 ..< conKey.len:
-                let ch = char(buf[lineStart + j])
-                if ch != conKey[j] and ch != (char(ord(conKey[j]) xor 32)):
-                  isCon = false
-                  break
-              if isCon:
-                matched = true
-                var valStart = lineStart + conKey.len
-                while valStart < i and char(buf[valStart]) == ' ':
-                  inc valStart
-                let valLen = i - valStart
-                const closeKey = "close"
-                if valLen >= closeKey.len:
-                  var isClose = true
-                  for j in 0 ..< closeKey.len:
-                    let ch = char(buf[valStart + j])
-                    if ch != closeKey[j] and ch != (char(ord(closeKey[j]) xor 32)):
-                      isClose = false
-                      break
-                  if isClose:
-                    p.connectionClose = true
-
-        # Quick check for Expect: 100-continue
-        if not matched and lineLen >= 16:
-          let c = char(buf[lineStart])
-          if c == 'E' or c == 'e':
+        of 'E', 'e':
+          # Quick check for Expect: 100-continue
+          if lineLen >= 16:
             var isExp = true
             const expKey = "expect:"
             if lineLen >= expKey.len:
@@ -774,27 +794,8 @@ proc scanHeaders(p: HttpParser): bool =
                       break
                   if isEC:
                     p.expectContinue = true
-
-        # Quick check for Content-Type
-        if lineLen >= 14:
-          let c = char(buf[lineStart])
-          if c == 'C' or c == 'c':
-            const ctKey = "content-type:"
-            if lineLen >= ctKey.len:
-              var isCT = true
-              for j in 0 ..< ctKey.len:
-                let ch = char(buf[lineStart + j])
-                if ch != ctKey[j] and ch != (char(ord(ctKey[j]) xor 32)):
-                  isCT = false
-                  break
-              if isCT:
-                var valStart = lineStart + ctKey.len
-                while valStart < i and char(buf[valStart]) == ' ':
-                  inc valStart
-                let valLen = i - valStart
-                if valLen > 0:
-                  p.contentTypeStart = valStart
-                  p.contentTypeLen = valLen
+        else:
+          discard
 
         inc i  # skip \r
       inc i  # skip \n

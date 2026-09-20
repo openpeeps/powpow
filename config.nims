@@ -17,3 +17,13 @@
 # path is built for speed rather than the size default.
 when defined(release):
   switch("opt", "speed")
+
+  # Benchmark-only speed flags, gated behind powpowPewPew so normal release
+  # builds (and all downstream consumers) keep every runtime check on
+  when defined("powpowPewPew"):
+    switch("define", "danger")
+    switch("assertions", "off")
+    switch("boundChecks", "off")
+    switch("overflowChecks", "off")
+    switch("passC", "-march=native")
+    switch("passL", "-march=native")
