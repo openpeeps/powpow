@@ -345,7 +345,10 @@ template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
   let fixedEnd = p
 
   let tailReserve = 2 + bodyLen  # final CRLF + body
-  var fit = true
+  # Account for the tail up front: with zero custom headers the loop below
+  # never runs, so starting from `true` would wrongly take the fast path and
+  # overflow the 1024-byte stack buffer with a large body.
+  var fit = p + tailReserve <= FastSingleWriteCap
   for (k, v) in res.headers:
     # Reserve space for this header plus everything that still follows it,
     # so a successful loop guarantees the tail fits without re-checking.

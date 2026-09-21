@@ -121,6 +121,29 @@ test "sync_http_close_delimited":
   server.close()
   client.close()
 
+test "sync_http_large_body_no_custom_headers":
+  # Regression: sendResponse used a 1024-byte stack buffer with the
+  # single-send fast path guarded by `fit` starting at true, re-checked only
+  # inside the custom-headers loop. A large body with zero custom headers
+  # wrongly took the fast path, overflowing the buffer and hanging the
+  # server. Must take the scatter path and deliver byte-identical output.
+  var big = newSeq[byte](8192)
+  for i in 0 ..< big.len: big[i] = byte(i mod 251)
+  let client = newHttpClient(timeoutMs = 10000)
+  let server = newHttpServer(client.getLoop())
+  server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+    {.gcsafe.}:
+      res.status(Http200).send(big)
+  server.listen("127.0.0.1", 19996)
+
+  let res = client.get("http://127.0.0.1:19996/big")
+  check res.getStatusCode() == Http200
+  check res.getBody().len == big.len
+  check res.getBody() == big
+
+  server.close()
+  client.close()
+
 test "sync_http_timeout":
   let client = newHttpClient(timeoutMs = 100)
   let server = newTcpServer(client.getLoop(),
