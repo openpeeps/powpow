@@ -16,10 +16,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA3XAAAN1wFCKJt4AAAAB3RJTUUH4QQQEwksSS9ZWwAAAk1JREFUWMPtll2ITVEUx39nn/O7Y5qR8f05wtCUUr6ZIS++8pEnkZInPImneaCQ5METNdOkeFBKUhMPRIkHKfEuUZSUlGlKPN2TrgfncpvmnntnmlEyq1Z7t89/rf9a6+y99oZxGZf/XeIq61EdtgKXgdXA0xrYAvBjOIF1AI9zvjcC74BSpndrJPkBWDScTF8Aa4E3wDlgHbASaANmVqlcCnwHvgDvgVfAJ+AikAAvgfVZwLnSVZHZaOuKoQi3ZOMi4NkYkpe1p4J7A8BpYAD49hfIy/oqG0+hLomiKP2L5L+1ubn5115S+3OAn4EnwBlgMzCjyt6ZAnQCJ4A7wOs88iRJHvw50HoujuPBoCKwHWiosy8MdfZnAdcHk8dxXFJ3VQbQlCTJvRBCGdRbD4M6uc5glpY3eAihpN5S5w12diSEcCCEcKUO4ljdr15T76ur1FDDLIQQ3qv71EdDOe3Kxj3leRXyk+pxdWnFWod6Wt2bY3de3aSuUHcPBVimHs7mK9WrmeOF6lR1o9qnzskh2ar2qm1qizpfXaPeVGdlmGN5pb09qMxz1Xb1kLqgzn1RyH7JUXW52lr5e/Kqi9qpto7V1atuUzfnARrV7jEib1T76gG2qxdGmXyiekkt1GswPTtek0aBfJp6YySGBfWg2tPQ0FAYgf1stUfdmdcjarbYJEniKIq6gY/Aw+zWHAC+p2labGpqiorFYgGYCEzN7oQdQClN07O1/EfDyGgC0ALMBdYAi4FyK+4H3gLPsxfR1zRNi+NP7nH5J+QntnXe5B5mpfQAAAAASUVORK5CYII=">
 
 <!-- CSS -->
-<link rel="stylesheet" type="text/css" href="../nimdoc.out.css?v=2.2.10">
+<link rel="stylesheet" type="text/css" href="../nimdoc.out.css?v=2.2.12">
 
 <!-- JS -->
-<script type="text/javascript" src="../dochack.js?v=2.2.10"></script>
+<script type="text/javascript" src="../dochack.js?v=2.2.12"></script>
 </head>
 <body>
   <div class="document" id="documentId">
@@ -62,6 +62,10 @@
 <li><a class="reference" href="#EventType" title="EventType = enum
   Read, Write, Error, Hup">EventType</a></li>
 <li><a class="reference" href="#FdCallback" title="FdCallback = proc (fd: int; events: set[EventType]) {.closure.}">FdCallback</a></li>
+<li><a class="reference" href="#HttpMethod" title="HttpMethod {..} = enum
+  HttpHead = &quot;HEAD&quot;, HttpGet = &quot;GET&quot;, HttpPost = &quot;POST&quot;, HttpPut = &quot;PUT&quot;,
+  HttpDelete = &quot;DELETE&quot;, HttpTrace = &quot;TRACE&quot;, HttpOptions = &quot;OPTIONS&quot;,
+  HttpConnect = &quot;CONNECT&quot;, HttpPatch = &quot;PATCH&quot;">HttpMethod</a></li>
 <li><a class="reference" href="#ObserverCallback" title="ObserverCallback = proc (value: uint64) {.closure.}">ObserverCallback</a></li>
 <li><a class="reference" href="#TimerCallback" title="TimerCallback = proc (id: int) {.closure.}">TimerCallback</a></li>
 <li><a class="reference" href="#TimerId" title="TimerId = distinct int">TimerId</a></li>
@@ -126,6 +130,17 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+<div id="HttpMethod">
+  <dt><pre><a href="#HttpMethod"><span class="Identifier">HttpMethod</span></a> {..} <span class="Other">=</span> <span class="Keyword">enum</span>
+  <span class="Identifier">HttpHead</span> <span class="Other">=</span> <span class="StringLit">&quot;HEAD&quot;</span><span class="Other">,</span> <span class="Identifier">HttpGet</span> <span class="Other">=</span> <span class="StringLit">&quot;GET&quot;</span><span class="Other">,</span> <span class="Identifier">HttpPost</span> <span class="Other">=</span> <span class="StringLit">&quot;POST&quot;</span><span class="Other">,</span> <span class="Identifier">HttpPut</span> <span class="Other">=</span> <span class="StringLit">&quot;PUT&quot;</span><span class="Other">,</span>
+  <span class="Identifier">HttpDelete</span> <span class="Other">=</span> <span class="StringLit">&quot;DELETE&quot;</span><span class="Other">,</span> <span class="Identifier">HttpTrace</span> <span class="Other">=</span> <span class="StringLit">&quot;TRACE&quot;</span><span class="Other">,</span> <span class="Identifier">HttpOptions</span> <span class="Other">=</span> <span class="StringLit">&quot;OPTIONS&quot;</span><span class="Other">,</span>
+  <span class="Identifier">HttpConnect</span> <span class="Other">=</span> <span class="StringLit">&quot;CONNECT&quot;</span><span class="Other">,</span> <span class="Identifier">HttpPatch</span> <span class="Other">=</span> <span class="StringLit">&quot;PATCH&quot;</span></pre></dt>
+  <dd>
+    
+    HTTP request method. Mirrors <tt class="docutils literal"><span class="pre"><span class="Identifier">std</span><span class="Operator">/</span><span class="Identifier">httpcore</span><span class="Operator">.</span><span class="Identifier">HttpMethod</span></span></tt> wire tokens and order so <tt class="docutils literal"><span class="pre"><span class="Operator">$</span></span></tt> stays compatible, but is extensible at compile time via <tt class="docutils literal"><span class="pre"><span class="Identifier">pkg</span><span class="Operator">/</span><span class="Identifier">voodoo</span></span></tt> (<tt class="docutils literal"><span class="pre"><span class="Identifier">extendEnum</span></span></tt> + <tt class="docutils literal"><span class="pre"><span class="Identifier">extendCaseStmt</span></span></tt> before importing powpow). WebDAV and other extensions register new verbs without forking powpow.
     
   </dd>
 </div>
@@ -203,7 +218,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-05 18:14:35 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-21 12:26:50 UTC</small>
       </div>
     </div>
   </div>

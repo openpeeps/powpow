@@ -41,34 +41,48 @@ nim	SSL_get_error	powpow/net/tlsapi.html#SSL_get_error,SslPtr,cint	proc SSL_get_
 nim	SSL_ctrl	powpow/net/tlsapi.html#SSL_ctrl,SslPtr,cint,cint,pointer	proc SSL_ctrl(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint		71
 nim	SSL_set1_host	powpow/net/tlsapi.html#SSL_set1_host,SslPtr,cstring	proc SSL_set1_host(s: SslPtr; hostname: cstring): cint		73
 nim	SSL_CTRL_SET_TLSEXT_HOSTNAME	powpow/net/tlsapi.html#SSL_CTRL_SET_TLSEXT_HOSTNAME	const SSL_CTRL_SET_TLSEXT_HOSTNAME		76
-nim	ERR_get_error	powpow/net/tlsapi.html#ERR_get_error	proc ERR_get_error(): culong		80
-nim	ERR_error_string_n	powpow/net/tlsapi.html#ERR_error_string_n,culong,cstring,csize_t	proc ERR_error_string_n(e: culong; buf: cstring; len: csize_t)		81
-nim	opensslError	powpow/net/tlsapi.html#opensslError	proc opensslError(): string		84
-nim	DTLS1_2_VERSION	powpow/net/tlsapi.html#DTLS1_2_VERSION	const DTLS1_2_VERSION		105
-nim	SSL_CTRL_SET_MIN_PROTO_VERSION	powpow/net/tlsapi.html#SSL_CTRL_SET_MIN_PROTO_VERSION	const SSL_CTRL_SET_MIN_PROTO_VERSION		108
-nim	SSL_CTRL_SET_MAX_PROTO_VERSION	powpow/net/tlsapi.html#SSL_CTRL_SET_MAX_PROTO_VERSION	const SSL_CTRL_SET_MAX_PROTO_VERSION		109
-nim	SSL_CTRL_SET_MTU	powpow/net/tlsapi.html#SSL_CTRL_SET_MTU	const SSL_CTRL_SET_MTU		110
-nim	DTLS_CTRL_GET_TIMEOUT	powpow/net/tlsapi.html#DTLS_CTRL_GET_TIMEOUT	const DTLS_CTRL_GET_TIMEOUT		112
-nim	DTLS_CTRL_HANDLE_TIMEOUT	powpow/net/tlsapi.html#DTLS_CTRL_HANDLE_TIMEOUT	const DTLS_CTRL_HANDLE_TIMEOUT		113
-nim	DTLS_CTRL_SET_LINK_MTU	powpow/net/tlsapi.html#DTLS_CTRL_SET_LINK_MTU	const DTLS_CTRL_SET_LINK_MTU		114
-nim	SSL_OP_COOKIE_EXCHANGE	powpow/net/tlsapi.html#SSL_OP_COOKIE_EXCHANGE	const SSL_OP_COOKIE_EXCHANGE		116
-nim	DTLS_server_method	powpow/net/tlsapi.html#DTLS_server_method	proc DTLS_server_method(): pointer		121
-nim	DTLS_client_method	powpow/net/tlsapi.html#DTLS_client_method	proc DTLS_client_method(): pointer		122
-nim	SSL_CTX_set_options	powpow/net/tlsapi.html#SSL_CTX_set_options,SslCtx,uint64	proc SSL_CTX_set_options(ctx: SslCtx; options: uint64): uint64		124
-nim	SSL_set_options	powpow/net/tlsapi.html#SSL_set_options,SslPtr,uint64	proc SSL_set_options(ssl: SslPtr; options: uint64): uint64		126
-nim	SSL_CTX_ctrl	powpow/net/tlsapi.html#SSL_CTX_ctrl,SslCtx,cint,cint,pointer	proc SSL_CTX_ctrl(ctx: SslCtx; cmd: cint; larg: cint; parg: pointer): cint		129
-nim	RAND_bytes	powpow/net/tlsapi.html#RAND_bytes,pointer,cint	proc RAND_bytes(buf: pointer; num: cint): cint		132
-nim	DtlsCookieGenerateCb	powpow/net/tlsapi.html#DtlsCookieGenerateCb	type DtlsCookieGenerateCb		135
-nim	DtlsCookieVerifyCb	powpow/net/tlsapi.html#DtlsCookieVerifyCb	type DtlsCookieVerifyCb		137
-nim	SSL_CTX_set_cookie_generate_cb	powpow/net/tlsapi.html#SSL_CTX_set_cookie_generate_cb,SslCtx,DtlsCookieGenerateCb	proc SSL_CTX_set_cookie_generate_cb(ctx: SslCtx; cb: DtlsCookieGenerateCb)		140
-nim	SSL_CTX_set_cookie_verify_cb	powpow/net/tlsapi.html#SSL_CTX_set_cookie_verify_cb,SslCtx,DtlsCookieVerifyCb	proc SSL_CTX_set_cookie_verify_cb(ctx: SslCtx; cb: DtlsCookieVerifyCb)		142
-nim	EvpMdPtr	powpow/net/tlsapi.html#EvpMdPtr	type EvpMdPtr		147
-nim	EVP_sha256	powpow/net/tlsapi.html#EVP_sha256	proc EVP_sha256(): EvpMdPtr		149
-nim	HMAC	powpow/net/tlsapi.html#HMAC,EvpMdPtr,pointer,cint,pointer,cint,ptr.UncheckedArray[byte],ptr.cuint	proc HMAC(evp_md: EvpMdPtr; key: pointer; key_len: cint; data: pointer;\n     data_len: cint; md: ptr UncheckedArray[byte]; md_len: ptr cuint): pointer		151
-nim	CookieSecretLen	powpow/net/tlsapi.html#CookieSecretLen	const CookieSecretLen		157
-nim	CookieMacLen	powpow/net/tlsapi.html#CookieMacLen	const CookieMacLen		158
-nim	CRYPTO_EX_INDEX_SSL	powpow/net/tlsapi.html#CRYPTO_EX_INDEX_SSL	const CRYPTO_EX_INDEX_SSL		165
-nim	CRYPTO_get_ex_new_index	powpow/net/tlsapi.html#CRYPTO_get_ex_new_index,cint,clong,pointer,pointer,pointer,pointer	proc CRYPTO_get_ex_new_index(cls: cint; argl: clong; argp: pointer;\n                        newCb, dupCb, freeCb: pointer): cint		167
-nim	SSL_set_ex_data	powpow/net/tlsapi.html#SSL_set_ex_data,SslPtr,cint,pointer	proc SSL_set_ex_data(ssl: SslPtr; idx: cint; arg: pointer): cint		170
-nim	SSL_get_ex_data	powpow/net/tlsapi.html#SSL_get_ex_data,SslPtr,cint	proc SSL_get_ex_data(ssl: SslPtr; idx: cint): pointer		172
-nim	SSL_OP_NO_QUERY_MTU	powpow/net/tlsapi.html#SSL_OP_NO_QUERY_MTU	const SSL_OP_NO_QUERY_MTU		175
+nim	OPENSSL_NPN_UNSUPPORTED	powpow/net/tlsapi.html#OPENSSL_NPN_UNSUPPORTED	const OPENSSL_NPN_UNSUPPORTED		87
+nim	OPENSSL_NPN_NEGOTIATED	powpow/net/tlsapi.html#OPENSSL_NPN_NEGOTIATED	const OPENSSL_NPN_NEGOTIATED		88
+nim	OPENSSL_NPN_NO_OVERLAP	powpow/net/tlsapi.html#OPENSSL_NPN_NO_OVERLAP	const OPENSSL_NPN_NO_OVERLAP		89
+nim	SSL_TLSEXT_ERR_OK	powpow/net/tlsapi.html#SSL_TLSEXT_ERR_OK	const SSL_TLSEXT_ERR_OK		91
+nim	SSL_TLSEXT_ERR_ALERT_WARNING	powpow/net/tlsapi.html#SSL_TLSEXT_ERR_ALERT_WARNING	const SSL_TLSEXT_ERR_ALERT_WARNING		92
+nim	SSL_TLSEXT_ERR_ALERT_FATAL	powpow/net/tlsapi.html#SSL_TLSEXT_ERR_ALERT_FATAL	const SSL_TLSEXT_ERR_ALERT_FATAL		93
+nim	SSL_TLSEXT_ERR_NOACK	powpow/net/tlsapi.html#SSL_TLSEXT_ERR_NOACK	const SSL_TLSEXT_ERR_NOACK		94
+nim	AlpnSelectCb	powpow/net/tlsapi.html#AlpnSelectCb	type AlpnSelectCb		97
+nim	SSL_CTX_set_alpn_protos	powpow/net/tlsapi.html#SSL_CTX_set_alpn_protos,SslCtx,ptr.uint8,cuint	proc SSL_CTX_set_alpn_protos(ctx: SslCtx; protos: ptr uint8; protosLen: cuint): cint		101
+nim	SSL_set_alpn_protos	powpow/net/tlsapi.html#SSL_set_alpn_protos,SslPtr,ptr.uint8,cuint	proc SSL_set_alpn_protos(ssl: SslPtr; protos: ptr uint8; protosLen: cuint): cint		104
+nim	SSL_get0_alpn_selected	powpow/net/tlsapi.html#SSL_get0_alpn_selected,SslPtr,ptr.ptr.uint8,ptr.cuint	proc SSL_get0_alpn_selected(ssl: SslPtr; data: ptr ptr uint8; len: ptr cuint)		107
+nim	SSL_CTX_set_alpn_select_cb	powpow/net/tlsapi.html#SSL_CTX_set_alpn_select_cb,SslCtx,AlpnSelectCb,pointer	proc SSL_CTX_set_alpn_select_cb(ctx: SslCtx; cb: AlpnSelectCb; arg: pointer): cint		110
+nim	SSL_select_next_proto	powpow/net/tlsapi.html#SSL_select_next_proto,ptr.ptr.uint8,ptr.uint8,ptr.uint8,cuint,ptr.uint8,cuint	proc SSL_select_next_proto(outProto: ptr ptr uint8; outlen: ptr uint8;\n                      server: ptr uint8; serverLen: cuint; client: ptr uint8;\n                      clientLen: cuint): cint		113
+nim	SSL_get_SSL_CTX	powpow/net/tlsapi.html#SSL_get_SSL_CTX,SslPtr	proc SSL_get_SSL_CTX(ssl: SslPtr): SslCtx		117
+nim	ERR_get_error	powpow/net/tlsapi.html#ERR_get_error	proc ERR_get_error(): culong		119
+nim	ERR_error_string_n	powpow/net/tlsapi.html#ERR_error_string_n,culong,cstring,csize_t	proc ERR_error_string_n(e: culong; buf: cstring; len: csize_t)		120
+nim	opensslError	powpow/net/tlsapi.html#opensslError	proc opensslError(): string		123
+nim	DTLS1_2_VERSION	powpow/net/tlsapi.html#DTLS1_2_VERSION	const DTLS1_2_VERSION		144
+nim	SSL_CTRL_SET_MIN_PROTO_VERSION	powpow/net/tlsapi.html#SSL_CTRL_SET_MIN_PROTO_VERSION	const SSL_CTRL_SET_MIN_PROTO_VERSION		147
+nim	SSL_CTRL_SET_MAX_PROTO_VERSION	powpow/net/tlsapi.html#SSL_CTRL_SET_MAX_PROTO_VERSION	const SSL_CTRL_SET_MAX_PROTO_VERSION		148
+nim	SSL_CTRL_SET_MTU	powpow/net/tlsapi.html#SSL_CTRL_SET_MTU	const SSL_CTRL_SET_MTU		149
+nim	DTLS_CTRL_GET_TIMEOUT	powpow/net/tlsapi.html#DTLS_CTRL_GET_TIMEOUT	const DTLS_CTRL_GET_TIMEOUT		151
+nim	DTLS_CTRL_HANDLE_TIMEOUT	powpow/net/tlsapi.html#DTLS_CTRL_HANDLE_TIMEOUT	const DTLS_CTRL_HANDLE_TIMEOUT		152
+nim	DTLS_CTRL_SET_LINK_MTU	powpow/net/tlsapi.html#DTLS_CTRL_SET_LINK_MTU	const DTLS_CTRL_SET_LINK_MTU		153
+nim	SSL_OP_COOKIE_EXCHANGE	powpow/net/tlsapi.html#SSL_OP_COOKIE_EXCHANGE	const SSL_OP_COOKIE_EXCHANGE		155
+nim	DTLS_server_method	powpow/net/tlsapi.html#DTLS_server_method	proc DTLS_server_method(): pointer		160
+nim	DTLS_client_method	powpow/net/tlsapi.html#DTLS_client_method	proc DTLS_client_method(): pointer		161
+nim	SSL_CTX_set_options	powpow/net/tlsapi.html#SSL_CTX_set_options,SslCtx,uint64	proc SSL_CTX_set_options(ctx: SslCtx; options: uint64): uint64		163
+nim	SSL_set_options	powpow/net/tlsapi.html#SSL_set_options,SslPtr,uint64	proc SSL_set_options(ssl: SslPtr; options: uint64): uint64		165
+nim	SSL_CTX_ctrl	powpow/net/tlsapi.html#SSL_CTX_ctrl,SslCtx,cint,cint,pointer	proc SSL_CTX_ctrl(ctx: SslCtx; cmd: cint; larg: cint; parg: pointer): cint		168
+nim	RAND_bytes	powpow/net/tlsapi.html#RAND_bytes,pointer,cint	proc RAND_bytes(buf: pointer; num: cint): cint		171
+nim	DtlsCookieGenerateCb	powpow/net/tlsapi.html#DtlsCookieGenerateCb	type DtlsCookieGenerateCb		174
+nim	DtlsCookieVerifyCb	powpow/net/tlsapi.html#DtlsCookieVerifyCb	type DtlsCookieVerifyCb		176
+nim	SSL_CTX_set_cookie_generate_cb	powpow/net/tlsapi.html#SSL_CTX_set_cookie_generate_cb,SslCtx,DtlsCookieGenerateCb	proc SSL_CTX_set_cookie_generate_cb(ctx: SslCtx; cb: DtlsCookieGenerateCb)		179
+nim	SSL_CTX_set_cookie_verify_cb	powpow/net/tlsapi.html#SSL_CTX_set_cookie_verify_cb,SslCtx,DtlsCookieVerifyCb	proc SSL_CTX_set_cookie_verify_cb(ctx: SslCtx; cb: DtlsCookieVerifyCb)		181
+nim	EvpMdPtr	powpow/net/tlsapi.html#EvpMdPtr	type EvpMdPtr		186
+nim	EVP_sha256	powpow/net/tlsapi.html#EVP_sha256	proc EVP_sha256(): EvpMdPtr		188
+nim	HMAC	powpow/net/tlsapi.html#HMAC,EvpMdPtr,pointer,cint,pointer,cint,ptr.UncheckedArray[byte],ptr.cuint	proc HMAC(evp_md: EvpMdPtr; key: pointer; key_len: cint; data: pointer;\n     data_len: cint; md: ptr UncheckedArray[byte]; md_len: ptr cuint): pointer		190
+nim	CookieSecretLen	powpow/net/tlsapi.html#CookieSecretLen	const CookieSecretLen		196
+nim	CookieMacLen	powpow/net/tlsapi.html#CookieMacLen	const CookieMacLen		197
+nim	CRYPTO_EX_INDEX_SSL	powpow/net/tlsapi.html#CRYPTO_EX_INDEX_SSL	const CRYPTO_EX_INDEX_SSL		204
+nim	CRYPTO_get_ex_new_index	powpow/net/tlsapi.html#CRYPTO_get_ex_new_index,cint,clong,pointer,pointer,pointer,pointer	proc CRYPTO_get_ex_new_index(cls: cint; argl: clong; argp: pointer;\n                        newCb, dupCb, freeCb: pointer): cint		206
+nim	SSL_set_ex_data	powpow/net/tlsapi.html#SSL_set_ex_data,SslPtr,cint,pointer	proc SSL_set_ex_data(ssl: SslPtr; idx: cint; arg: pointer): cint		209
+nim	SSL_get_ex_data	powpow/net/tlsapi.html#SSL_get_ex_data,SslPtr,cint	proc SSL_get_ex_data(ssl: SslPtr; idx: cint): pointer		211
+nim	SSL_OP_NO_QUERY_MTU	powpow/net/tlsapi.html#SSL_OP_NO_QUERY_MTU	const SSL_OP_NO_QUERY_MTU		214

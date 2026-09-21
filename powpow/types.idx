@@ -1,17 +1,18 @@
 nimTitle	types	powpow/types.html	module powpow/types		0
-nim	iouEnabled	powpow/types.html#iouEnabled	const iouEnabled		10
-nim	Read	powpow/types.html#Read	EventType.Read		21
-nim	Write	powpow/types.html#Write	EventType.Write		21
-nim	Error	powpow/types.html#Error	EventType.Error		21
-nim	Hup	powpow/types.html#Hup	EventType.Hup		21
-nim	EventType	powpow/types.html#EventType	enum EventType		21
-nim	TlsOff	powpow/types.html#TlsOff	TlsState.TlsOff		27
-nim	TlsHandshaking	powpow/types.html#TlsHandshaking	TlsState.TlsHandshaking		27
-nim	TlsActive	powpow/types.html#TlsActive	TlsState.TlsActive		27
-nim	TlsState	powpow/types.html#TlsState	enum TlsState		27
-nim	Callback	powpow/types.html#Callback	type Callback		32
-nim	FdCallback	powpow/types.html#FdCallback	type FdCallback		33
-nim	TimerCallback	powpow/types.html#TimerCallback	type TimerCallback		34
-nim	ObserverCallback	powpow/types.html#ObserverCallback	type ObserverCallback		35
-nim	TimerId	powpow/types.html#TimerId	type TimerId		36
-nim	`==`	powpow/types.html#==,TimerId,TimerId	proc `==`(a, b: TimerId): bool		38
+nim	iouEnabled	powpow/types.html#iouEnabled	const iouEnabled		13
+nim	HttpMethod	powpow/types.html#HttpMethod	enum HttpMethod		24
+nim	Read	powpow/types.html#Read	EventType.Read		39
+nim	Write	powpow/types.html#Write	EventType.Write		39
+nim	Error	powpow/types.html#Error	EventType.Error		39
+nim	Hup	powpow/types.html#Hup	EventType.Hup		39
+nim	EventType	powpow/types.html#EventType	enum EventType		39
+nim	TlsOff	powpow/types.html#TlsOff	TlsState.TlsOff		45
+nim	TlsHandshaking	powpow/types.html#TlsHandshaking	TlsState.TlsHandshaking		45
+nim	TlsActive	powpow/types.html#TlsActive	TlsState.TlsActive		45
+nim	TlsState	powpow/types.html#TlsState	enum TlsState		45
+nim	Callback	powpow/types.html#Callback	type Callback		50
+nim	FdCallback	powpow/types.html#FdCallback	type FdCallback		51
+nim	TimerCallback	powpow/types.html#TimerCallback	type TimerCallback		52
+nim	ObserverCallback	powpow/types.html#ObserverCallback	type ObserverCallback		53
+nim	TimerId	powpow/types.html#TimerId	type TimerId		54
+nim	`==`	powpow/types.html#==,TimerId,TimerId	proc `==`(a, b: TimerId): bool		56

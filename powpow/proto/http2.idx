@@ -1,0 +1,71 @@
+nimTitle	http2	powpow/proto/http2.html	module powpow/proto/http2		0
+nim	H2Data	powpow/proto/http2.html#H2Data	H2FrameType.H2Data		20
+nim	H2Headers	powpow/proto/http2.html#H2Headers	H2FrameType.H2Headers		20
+nim	H2Priority	powpow/proto/http2.html#H2Priority	H2FrameType.H2Priority		20
+nim	H2RstStream	powpow/proto/http2.html#H2RstStream	H2FrameType.H2RstStream		20
+nim	H2Settings	powpow/proto/http2.html#H2Settings	H2FrameType.H2Settings		20
+nim	H2PushPromise	powpow/proto/http2.html#H2PushPromise	H2FrameType.H2PushPromise		20
+nim	H2Ping	powpow/proto/http2.html#H2Ping	H2FrameType.H2Ping		20
+nim	H2Goaway	powpow/proto/http2.html#H2Goaway	H2FrameType.H2Goaway		20
+nim	H2WindowUpdate	powpow/proto/http2.html#H2WindowUpdate	H2FrameType.H2WindowUpdate		20
+nim	H2Continuation	powpow/proto/http2.html#H2Continuation	H2FrameType.H2Continuation		20
+nim	H2FrameType	powpow/proto/http2.html#H2FrameType	enum H2FrameType		20
+nim	H2NoError	powpow/proto/http2.html#H2NoError	H2ErrorCode.H2NoError		32
+nim	H2ProtocolError	powpow/proto/http2.html#H2ProtocolError	H2ErrorCode.H2ProtocolError		32
+nim	H2InternalError	powpow/proto/http2.html#H2InternalError	H2ErrorCode.H2InternalError		32
+nim	H2FlowControlError	powpow/proto/http2.html#H2FlowControlError	H2ErrorCode.H2FlowControlError		32
+nim	H2SettingsTimeout	powpow/proto/http2.html#H2SettingsTimeout	H2ErrorCode.H2SettingsTimeout		32
+nim	H2StreamClosed	powpow/proto/http2.html#H2StreamClosed	H2ErrorCode.H2StreamClosed		32
+nim	H2FrameSizeError	powpow/proto/http2.html#H2FrameSizeError	H2ErrorCode.H2FrameSizeError		32
+nim	H2RefusedStream	powpow/proto/http2.html#H2RefusedStream	H2ErrorCode.H2RefusedStream		32
+nim	H2Cancelled	powpow/proto/http2.html#H2Cancelled	H2ErrorCode.H2Cancelled		32
+nim	H2CompressionError	powpow/proto/http2.html#H2CompressionError	H2ErrorCode.H2CompressionError		32
+nim	H2ConnectError	powpow/proto/http2.html#H2ConnectError	H2ErrorCode.H2ConnectError		32
+nim	H2EnhanceYourCalm	powpow/proto/http2.html#H2EnhanceYourCalm	H2ErrorCode.H2EnhanceYourCalm		32
+nim	H2InadequateSecurity	powpow/proto/http2.html#H2InadequateSecurity	H2ErrorCode.H2InadequateSecurity		32
+nim	H2Http11Required	powpow/proto/http2.html#H2Http11Required	H2ErrorCode.H2Http11Required		32
+nim	H2ErrorCode	powpow/proto/http2.html#H2ErrorCode	enum H2ErrorCode		32
+nim	H2HeaderTableSize	powpow/proto/http2.html#H2HeaderTableSize	H2SettingsId.H2HeaderTableSize		48
+nim	H2EnablePush	powpow/proto/http2.html#H2EnablePush	H2SettingsId.H2EnablePush		48
+nim	H2MaxConcurrentStreams	powpow/proto/http2.html#H2MaxConcurrentStreams	H2SettingsId.H2MaxConcurrentStreams		48
+nim	H2InitialWindowSize	powpow/proto/http2.html#H2InitialWindowSize	H2SettingsId.H2InitialWindowSize		48
+nim	H2MaxFrameSize	powpow/proto/http2.html#H2MaxFrameSize	H2SettingsId.H2MaxFrameSize		48
+nim	H2MaxHeaderListSize	powpow/proto/http2.html#H2MaxHeaderListSize	H2SettingsId.H2MaxHeaderListSize		48
+nim	H2SettingsId	powpow/proto/http2.html#H2SettingsId	enum H2SettingsId		48
+nim	H2Error	powpow/proto/http2.html#H2Error	object H2Error		56
+nim	H2Frame	powpow/proto/http2.html#H2Frame	object H2Frame		59
+nim	H2Setting	powpow/proto/http2.html#H2Setting	object H2Setting		68
+nim	H2FrameParser	powpow/proto/http2.html#H2FrameParser	object H2FrameParser		72
+nim	H2FrameHeaderLen	powpow/proto/http2.html#H2FrameHeaderLen	const H2FrameHeaderLen		77
+nim	H2DefaultMaxFrameSize	powpow/proto/http2.html#H2DefaultMaxFrameSize	const H2DefaultMaxFrameSize		78
+nim	H2MaxFrameSizeMin	powpow/proto/http2.html#H2MaxFrameSizeMin	const H2MaxFrameSizeMin		79
+nim	H2MaxFrameSizeMax	powpow/proto/http2.html#H2MaxFrameSizeMax	const H2MaxFrameSizeMax		80
+nim	H2DefaultWindowSize	powpow/proto/http2.html#H2DefaultWindowSize	const H2DefaultWindowSize		81
+nim	H2MaxWindowSize	powpow/proto/http2.html#H2MaxWindowSize	const H2MaxWindowSize		82
+nim	H2ConnectionPreface	powpow/proto/http2.html#H2ConnectionPreface	const H2ConnectionPreface		84
+nim	H2FlagAck	powpow/proto/http2.html#H2FlagAck	const H2FlagAck		87
+nim	H2FlagEndStream	powpow/proto/http2.html#H2FlagEndStream	const H2FlagEndStream		88
+nim	H2FlagEndHeaders	powpow/proto/http2.html#H2FlagEndHeaders	const H2FlagEndHeaders		89
+nim	H2FlagPadded	powpow/proto/http2.html#H2FlagPadded	const H2FlagPadded		90
+nim	H2FlagPriority	powpow/proto/http2.html#H2FlagPriority	const H2FlagPriority		91
+nim	newH2FrameParser	powpow/proto/http2.html#newH2FrameParser	proc newH2FrameParser(maxFrameSize = H2DefaultMaxFrameSize): H2FrameParser		97
+nim	frameTypeFromInt	powpow/proto/http2.html#frameTypeFromInt,int	proc frameTypeFromInt(v: int): tuple[known: bool, typ: H2FrameType]		100
+nim	feed	powpow/proto/http2.html#feed,H2FrameParser,openArray[byte]	proc feed(p: var H2FrameParser; data: openArray[byte]): seq[H2Frame]		184
+nim	pendingBytes	powpow/proto/http2.html#pendingBytes,H2FrameParser	proc pendingBytes(p: H2FrameParser): int		226
+nim	decodeSettings	powpow/proto/http2.html#decodeSettings,H2Frame	proc decodeSettings(f: H2Frame): seq[H2Setting]		231
+nim	decodePing	powpow/proto/http2.html#decodePing,H2Frame	proc decodePing(f: H2Frame): array[8, byte]		248
+nim	decodeRstStream	powpow/proto/http2.html#decodeRstStream,H2Frame	proc decodeRstStream(f: H2Frame): H2ErrorCode		253
+nim	decodeWindowUpdate	powpow/proto/http2.html#decodeWindowUpdate,H2Frame	proc decodeWindowUpdate(f: H2Frame): uint32		260
+nim	decodeGoaway	powpow/proto/http2.html#decodeGoaway,H2Frame	proc decodeGoaway(f: H2Frame): tuple[lastStreamId: int32, code: H2ErrorCode,\n                                debugData: seq[byte]]		271
+nim	decodePriority	powpow/proto/http2.html#decodePriority,H2Frame	proc decodePriority(f: H2Frame): tuple[exclusive: bool, depId: int32, weight: uint8]		284
+nim	encodeFrame	powpow/proto/http2.html#encodeFrame,int,uint8,int32,openArray[byte]	proc encodeFrame(typ: int; flags: uint8; streamId: int32; payload: openArray[byte]): seq[\n    byte]		296
+nim	encodeSettings	powpow/proto/http2.html#encodeSettings,openArray[H2Setting]	proc encodeSettings(settings: openArray[H2Setting]): seq[byte]		311
+nim	encodeSettingsAck	powpow/proto/http2.html#encodeSettingsAck	proc encodeSettingsAck(): seq[byte]		322
+nim	encodePing	powpow/proto/http2.html#encodePing,array[,byte]	proc encodePing(opaqueData: array[8, byte]): seq[byte]		325
+nim	encodePingAck	powpow/proto/http2.html#encodePingAck,array[,byte]	proc encodePingAck(opaqueData: array[8, byte]): seq[byte]		328
+nim	encodeWindowUpdate	powpow/proto/http2.html#encodeWindowUpdate,int32,uint32	proc encodeWindowUpdate(streamId: int32; increment: uint32): seq[byte]		331
+nim	encodeRstStream	powpow/proto/http2.html#encodeRstStream,int32,H2ErrorCode	proc encodeRstStream(streamId: int32; code: H2ErrorCode): seq[byte]		338
+nim	encodeGoaway	powpow/proto/http2.html#encodeGoaway,int32,H2ErrorCode,openArray[byte]	proc encodeGoaway(lastStreamId: int32; code: H2ErrorCode;\n             debugData: openArray[byte] = []): seq[byte]		346
+nim	encodeData	powpow/proto/http2.html#encodeData,int32,openArray[byte]	proc encodeData(streamId: int32; data: openArray[byte]; endStream = false): seq[byte]		362
+nim	encodeHeaders	powpow/proto/http2.html#encodeHeaders,int32,openArray[byte]	proc encodeHeaders(streamId: int32; headerBlock: openArray[byte]; endStream = false;\n              endHeaders = true): seq[byte]		368
+nim	encodePriority	powpow/proto/http2.html#encodePriority,int32,int32,uint8	proc encodePriority(streamId, depId: int32; weight: uint8; exclusive = false): seq[\n    byte]		377

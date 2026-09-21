@@ -1,17 +1,17 @@
 nimTitle	dns	powpow/net/dns.html	module powpow/net/dns		0
-nim	DnsCallback	powpow/net/dns.html#DnsCallback	type DnsCallback		57
-nim	MxRecord	powpow/net/dns.html#MxRecord	object MxRecord		59
-nim	MxCallback	powpow/net/dns.html#MxCallback	type MxCallback		63
-nim	TxtRecord	powpow/net/dns.html#TxtRecord	object TxtRecord		65
-nim	TxtCallback	powpow/net/dns.html#TxtCallback	type TxtCallback		74
-nim	ResolvedIp	powpow/net/dns.html#ResolvedIp	object ResolvedIp		76
-nim	DnsCacheEntry	powpow/net/dns.html#DnsCacheEntry	object DnsCacheEntry		81
-nim	DnsQuery	powpow/net/dns.html#DnsQuery	type DnsQuery		88
-nim	DnsResolver	powpow/net/dns.html#DnsResolver	type DnsResolver		104
-nim	resolveAddrAsync	powpow/net/dns.html#resolveAddrAsync,Loop,string,int,cint,proc(seq[Sockaddr_storage],string)	proc resolveAddrAsync(loop: Loop; address: string; port: int; sockType: cint; cb: proc (\n    addrs: seq[Sockaddr_storage]; err: string) {.closure.})		700
-nim	resolveMxAsync	powpow/net/dns.html#resolveMxAsync,Loop,string,MxCallback	proc resolveMxAsync(loop: Loop; domain: string; mcb: MxCallback)		754
-nim	resolveTxtAsync	powpow/net/dns.html#resolveTxtAsync,Loop,string,TxtCallback	proc resolveTxtAsync(loop: Loop; hostname: string; tcb: TxtCallback)		782
-nim	resolveAddrBothAsync	powpow/net/dns.html#resolveAddrBothAsync,Loop,string,int,DnsCallback	proc resolveAddrBothAsync(loop: Loop; address: string; port: int; cb: DnsCallback)		809
-nim	configureDns	powpow/net/dns.html#configureDns,Loop,int,int	proc configureDns(loop: Loop; timeoutMs: int; attempts: int)		927
-nim	setDnsServers	powpow/net/dns.html#setDnsServers,Loop,openArray[]	proc setDnsServers(loop: Loop; servers: openArray[(string, int)])		936
-nim	closeDns	powpow/net/dns.html#closeDns,Loop	proc closeDns(loop: Loop)		950
+nim	DnsCallback	powpow/net/dns.html#DnsCallback	type DnsCallback		54
+nim	MxRecord	powpow/net/dns.html#MxRecord	object MxRecord		56
+nim	MxCallback	powpow/net/dns.html#MxCallback	type MxCallback		60
+nim	TxtRecord	powpow/net/dns.html#TxtRecord	object TxtRecord		62
+nim	TxtCallback	powpow/net/dns.html#TxtCallback	type TxtCallback		71
+nim	ResolvedIp	powpow/net/dns.html#ResolvedIp	object ResolvedIp		73
+nim	DnsCacheEntry	powpow/net/dns.html#DnsCacheEntry	object DnsCacheEntry		78
+nim	DnsQuery	powpow/net/dns.html#DnsQuery	type DnsQuery		85
+nim	DnsResolver	powpow/net/dns.html#DnsResolver	type DnsResolver		101
+nim	resolveAddrAsync	powpow/net/dns.html#resolveAddrAsync,Loop,string,int,cint,proc(seq[Sockaddr_storage],string)	proc resolveAddrAsync(loop: Loop; address: string; port: int; sockType: cint; cb: proc (\n    addrs: seq[Sockaddr_storage]; err: string) {.closure.})		697
+nim	resolveMxAsync	powpow/net/dns.html#resolveMxAsync,Loop,string,MxCallback	proc resolveMxAsync(loop: Loop; domain: string; mcb: MxCallback)		751
+nim	resolveTxtAsync	powpow/net/dns.html#resolveTxtAsync,Loop,string,TxtCallback	proc resolveTxtAsync(loop: Loop; hostname: string; tcb: TxtCallback)		779
+nim	resolveAddrBothAsync	powpow/net/dns.html#resolveAddrBothAsync,Loop,string,int,DnsCallback	proc resolveAddrBothAsync(loop: Loop; address: string; port: int; cb: DnsCallback)		806
+nim	configureDns	powpow/net/dns.html#configureDns,Loop,int,int	proc configureDns(loop: Loop; timeoutMs: int; attempts: int)		924
+nim	setDnsServers	powpow/net/dns.html#setDnsServers,Loop,openArray[]	proc setDnsServers(loop: Loop; servers: openArray[(string, int)])		933
+nim	closeDns	powpow/net/dns.html#closeDns,Loop	proc closeDns(loop: Loop)		947

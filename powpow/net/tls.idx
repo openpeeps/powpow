@@ -1,10 +1,12 @@
 nimTitle	tls	powpow/net/tls.html	module powpow/net/tls		0
-nim	TlsServer	powpow/net/tls.html#TlsServer	TlsRole.TlsServer		39
-nim	TlsClient	powpow/net/tls.html#TlsClient	TlsRole.TlsClient		39
-nim	TlsRole	powpow/net/tls.html#TlsRole	enum TlsRole		39
-nim	SslContext	powpow/net/tls.html#SslContext	type SslContext		42
-nim	SslError	powpow/net/tls.html#SslError	object SslError		46
-nim	newServerTlsContext	powpow/net/tls.html#newServerTlsContext,string,string	proc newServerTlsContext(certFile, keyFile: string): SslContext		49
-nim	newClientTlsContext	powpow/net/tls.html#newClientTlsContext	proc newClientTlsContext(verifyPeer = true): SslContext		75
-nim	wrapTls	powpow/net/tls.html#wrapTls,Connection,SslContext,string	proc wrapTls(conn: Connection; ctx: SslContext; serverName = "")		95
-nim	isTlsActive	powpow/net/tls.html#isTlsActive,Connection	proc isTlsActive(conn: Connection): bool		143
+nim	TlsServer	powpow/net/tls.html#TlsServer	TlsRole.TlsServer		40
+nim	TlsClient	powpow/net/tls.html#TlsClient	TlsRole.TlsClient		40
+nim	TlsRole	powpow/net/tls.html#TlsRole	enum TlsRole		40
+nim	SslContext	powpow/net/tls.html#SslContext	type SslContext		43
+nim	SslError	powpow/net/tls.html#SslError	object SslError		49
+nim	setAlpnProtocols	powpow/net/tls.html#setAlpnProtocols,SslContext,openArray[string]	proc setAlpnProtocols(ctx: SslContext; protos: openArray[string])		100
+nim	alpnSelected	powpow/net/tls.html#alpnSelected,Connection	proc alpnSelected(conn: Connection): string		118
+nim	newServerTlsContext	powpow/net/tls.html#newServerTlsContext,string,string	proc newServerTlsContext(certFile, keyFile: string): SslContext		134
+nim	newClientTlsContext	powpow/net/tls.html#newClientTlsContext	proc newClientTlsContext(verifyPeer = true): SslContext		160
+nim	wrapTls	powpow/net/tls.html#wrapTls,Connection,SslContext,string	proc wrapTls(conn: Connection; ctx: SslContext; serverName = "")		180
+nim	isTlsActive	powpow/net/tls.html#isTlsActive,Connection	proc isTlsActive(conn: Connection): bool		234

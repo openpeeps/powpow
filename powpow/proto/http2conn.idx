@@ -1,0 +1,35 @@
+nimTitle	http2conn	powpow/proto/http2conn.html	module powpow/proto/http2conn		0
+nim	H2ServerRole	powpow/proto/http2conn.html#H2ServerRole	H2Role.H2ServerRole		36
+nim	H2ClientRole	powpow/proto/http2conn.html#H2ClientRole	H2Role.H2ClientRole		36
+nim	H2Role	powpow/proto/http2conn.html#H2Role	enum H2Role		36
+nim	HsOpen	powpow/proto/http2conn.html#HsOpen	H2StreamState.HsOpen		39
+nim	HsHalfClosedRemote	powpow/proto/http2conn.html#HsHalfClosedRemote	H2StreamState.HsHalfClosedRemote		39
+nim	HsHalfClosedLocal	powpow/proto/http2conn.html#HsHalfClosedLocal	H2StreamState.HsHalfClosedLocal		39
+nim	HsClosed	powpow/proto/http2conn.html#HsClosed	H2StreamState.HsClosed		39
+nim	H2StreamState	powpow/proto/http2conn.html#H2StreamState	enum H2StreamState		39
+nim	H2Stream	powpow/proto/http2conn.html#H2Stream	type H2Stream		42
+nim	H2ClientResponse	powpow/proto/http2conn.html#H2ClientResponse	object H2ClientResponse		53
+nim	H2ClientCallback	powpow/proto/http2conn.html#H2ClientCallback	type H2ClientCallback		59
+nim	H2Request	powpow/proto/http2conn.html#H2Request	object H2Request		65
+nim	H2Response	powpow/proto/http2conn.html#H2Response	type H2Response		74
+nim	OnH2RequestCallback	powpow/proto/http2conn.html#OnH2RequestCallback	type OnH2RequestCallback		81
+nim	H2Conn	powpow/proto/http2conn.html#H2Conn	type H2Conn		93
+nim	H2Server	powpow/proto/http2conn.html#H2Server	type H2Server		125
+nim	H2DefaultMaxConcurrent	powpow/proto/http2conn.html#H2DefaultMaxConcurrent	const H2DefaultMaxConcurrent		140
+nim	H2DefaultMaxHeaderList	powpow/proto/http2conn.html#H2DefaultMaxHeaderList	const H2DefaultMaxHeaderList		141
+nim	H2DefaultMaxBody	powpow/proto/http2conn.html#H2DefaultMaxBody	const H2DefaultMaxBody		142
+nim	status	powpow/proto/http2conn.html#status,H2Response,uint16	proc status(res: H2Response; code: uint16): H2Response		352
+nim	header	powpow/proto/http2conn.html#header,H2Response,string,string	proc header(res: H2Response; name, value: string): H2Response		356
+nim	send	powpow/proto/http2conn.html#send,H2Response,seq[byte]	proc send(res: H2Response; body: seq[byte])		360
+nim	send	powpow/proto/http2conn.html#send,H2Response,string	proc send(res: H2Response; body: string)		389
+nim	reset	powpow/proto/http2conn.html#reset,H2Response	proc reset(res: H2Response; code = H2Cancelled)		395
+nim	startClientPreface	powpow/proto/http2conn.html#startClientPreface,H2Conn	proc startClientPreface(h2: H2Conn)		676
+nim	openClientStream	powpow/proto/http2conn.html#openClientStream,H2Conn,seq[HpackHeader],seq[byte],bool,H2ClientCallback	proc openClientStream(h2: H2Conn; headers: seq[HpackHeader]; body: seq[byte];\n                 endStream: bool; cb: H2ClientCallback): int32		684
+nim	feedH2	powpow/proto/http2conn.html#feedH2,H2Conn,openArray[byte]	proc feedH2(h2: H2Conn; data: openArray[byte])		1198
+nim	h2Closed	powpow/proto/http2conn.html#h2Closed,H2Conn	proc h2Closed(h2: H2Conn): bool		1206
+nim	h2Draining	powpow/proto/http2conn.html#h2Draining,H2Conn	proc h2Draining(h2: H2Conn): bool		1210
+nim	newH2Conn	powpow/proto/http2conn.html#newH2Conn,Connection,H2Role,OnH2RequestCallback	proc newH2Conn(conn: Connection; role: H2Role; onRequest: OnH2RequestCallback;\n          maxConcurrent = H2DefaultMaxConcurrent;\n          maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody): H2Conn		1214
+nim	newH2Server	powpow/proto/http2conn.html#newH2Server,Loop,OnH2RequestCallback,SslContext	proc newH2Server(loop: Loop; handler: OnH2RequestCallback;\n            maxConcurrent = H2DefaultMaxConcurrent;\n            maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;\n            sslCtx: SslContext = nil): H2Server		1237
+nim	listen	powpow/proto/http2conn.html#listen,H2Server,string,int	proc listen(s: H2Server; address: string; port: int)		1289
+nim	close	powpow/proto/http2conn.html#close,H2Server	proc close(s: H2Server)		1292
+nimgrp	send	powpow/proto/http2conn.html#send-procs-all	proc		360

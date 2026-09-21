@@ -10,4 +10,4 @@ nim	FileSystemEvent	powpow/fswatch.html#FileSystemEvent	enum FileSystemEvent		19
 nim	FileWatcherCb	powpow/fswatch.html#FileWatcherCb	type FileWatcherCb		28
 nim	FileWatcher	powpow/fswatch.html#FileWatcher	type FileWatcher		30
 nim	newFileWatcher	powpow/fswatch.html#newFileWatcher,Loop,string,FileWatcherCb	proc newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher		104
-nim	close	powpow/fswatch.html#close,FileWatcher	proc close(w: FileWatcher)		174
+nim	close	powpow/fswatch.html#close,FileWatcher	proc close(w: FileWatcher)		177

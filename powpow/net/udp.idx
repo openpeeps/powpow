@@ -1,14 +1,14 @@
 nimTitle	udp	powpow/net/udp.html	module powpow/net/udp		0
-nim	OnUdpData	powpow/net/udp.html#OnUdpData	type OnUdpData		46
-nim	UdpSocket	powpow/net/udp.html#UdpSocket	type UdpSocket		48
-nim	close	powpow/net/udp.html#close,UdpSocket	proc close(sock: UdpSocket)		158
-nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,openArray[byte],Sockaddr_storage	proc sendTo(sock: UdpSocket; data: openArray[byte]; addrBuf: Sockaddr_storage): int		182
-nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,openArray[byte],string,int	proc sendTo(sock: UdpSocket; data: openArray[byte]; address: string; port: int): int		206
-nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,string,string,int	proc sendTo(sock: UdpSocket; data: string; address: string; port: int): int		211
-nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,string,Sockaddr_storage	proc sendTo(sock: UdpSocket; data: string; addrBuf: Sockaddr_storage): int		216
-nim	send	powpow/net/udp.html#send,UdpSocket,openArray[byte]	proc send(sock: UdpSocket; data: openArray[byte]): int		221
-nim	send	powpow/net/udp.html#send,UdpSocket,string	proc send(sock: UdpSocket; data: string): int		239
-nim	bindUdp	powpow/net/udp.html#bindUdp,Loop,string,int,OnUdpData	proc bindUdp(loop: Loop; address: string; port: int; onData: OnUdpData): UdpSocket		278
-nim	connectUdp	powpow/net/udp.html#connectUdp,Loop,string,int,OnUdpData	proc connectUdp(loop: Loop; address: string; port: int; onData: OnUdpData = nil): UdpSocket		315
-nimgrp	send	powpow/net/udp.html#send-procs-all	proc		221
-nimgrp	sendto	powpow/net/udp.html#sendTo-procs-all	proc		182
+nim	OnUdpData	powpow/net/udp.html#OnUdpData	type OnUdpData		45
+nim	UdpSocket	powpow/net/udp.html#UdpSocket	type UdpSocket		47
+nim	close	powpow/net/udp.html#close,UdpSocket	proc close(sock: UdpSocket)		157
+nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,openArray[byte],Sockaddr_storage	proc sendTo(sock: UdpSocket; data: openArray[byte]; addrBuf: Sockaddr_storage): int		181
+nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,openArray[byte],string,int	proc sendTo(sock: UdpSocket; data: openArray[byte]; address: string; port: int): int		205
+nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,string,string,int	proc sendTo(sock: UdpSocket; data: string; address: string; port: int): int		210
+nim	sendTo	powpow/net/udp.html#sendTo,UdpSocket,string,Sockaddr_storage	proc sendTo(sock: UdpSocket; data: string; addrBuf: Sockaddr_storage): int		215
+nim	send	powpow/net/udp.html#send,UdpSocket,openArray[byte]	proc send(sock: UdpSocket; data: openArray[byte]): int		220
+nim	send	powpow/net/udp.html#send,UdpSocket,string	proc send(sock: UdpSocket; data: string): int		238
+nim	bindUdp	powpow/net/udp.html#bindUdp,Loop,string,int,OnUdpData	proc bindUdp(loop: Loop; address: string; port: int; onData: OnUdpData): UdpSocket		277
+nim	connectUdp	powpow/net/udp.html#connectUdp,Loop,string,int,OnUdpData	proc connectUdp(loop: Loop; address: string; port: int; onData: OnUdpData = nil): UdpSocket		314
+nimgrp	send	powpow/net/udp.html#send-procs-all	proc		220
+nimgrp	sendto	powpow/net/udp.html#sendTo-procs-all	proc		181

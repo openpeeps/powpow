@@ -1,0 +1,15 @@
+nimTitle	http2client	powpow/proto/http2client.html	module powpow/proto/http2client		0
+nim	H2ClientConn	powpow/proto/http2client.html#H2ClientConn	type H2ClientConn		37
+nim	H2ClientPool	powpow/proto/http2client.html#H2ClientPool	type H2ClientPool		51
+nim	H2ClientMaxStreamsHint	powpow/proto/http2client.html#H2ClientMaxStreamsHint	const H2ClientMaxStreamsHint		58
+nim	close	powpow/proto/http2client.html#close,H2ClientConn	proc close(c: H2ClientConn)		73
+nim	request	powpow/proto/http2client.html#request,H2ClientConn,string,string,openArray[],seq[byte],H2ClientCallback	proc request(c: H2ClientConn; meth, path: string;\n        headers: openArray[(string, string)]; body: seq[byte];\n        cb: H2ClientCallback)		112
+nim	request	powpow/proto/http2client.html#request,H2ClientConn,string,string,openArray[],string,H2ClientCallback	proc request(c: H2ClientConn; meth, path: string;\n        headers: openArray[(string, string)]; body: string; cb: H2ClientCallback)		139
+nim	connectH2	powpow/proto/http2client.html#connectH2,Loop,string,int,proc(H2ClientConn,string)	proc connectH2(loop: Loop; host: string; port: int;\n          onConn: proc (c: H2ClientConn; err: string) {.closure.})		165
+nim	connectH2Tls	powpow/proto/http2client.html#connectH2Tls,Loop,string,int,SslContext,proc(H2ClientConn,string)	proc connectH2Tls(loop: Loop; host: string; port: int; tlsCtx: SslContext;\n             onConn: proc (c: H2ClientConn; err: string) {.closure.})		200
+nim	newH2ClientPool	powpow/proto/http2client.html#newH2ClientPool,Loop,SslContext,int	proc newH2ClientPool(loop: Loop; tlsCtx: SslContext = nil; maxPerOrigin = 4): H2ClientPool		242
+nim	request	powpow/proto/http2client.html#request,H2ClientPool,string,int,bool,string,string,openArray[],seq[byte],H2ClientCallback	proc request(pool: H2ClientPool; host: string; port: int; tls: bool;\n        meth, path: string; headers: openArray[(string, string)];\n        body: seq[byte]; cb: H2ClientCallback)		260
+nim	request	powpow/proto/http2client.html#request,H2ClientPool,string,int,bool,string,string,openArray[],string,H2ClientCallback	proc request(pool: H2ClientPool; host: string; port: int; tls: bool;\n        meth, path: string; headers: openArray[(string, string)]; body: string;\n        cb: H2ClientCallback)		328
+nim	close	powpow/proto/http2client.html#close,H2ClientPool	proc close(pool: H2ClientPool)		336
+nimgrp	request	powpow/proto/http2client.html#request-procs-all	proc		112
+nimgrp	close	powpow/proto/http2client.html#close-procs-all	proc		73
