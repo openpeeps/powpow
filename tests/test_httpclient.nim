@@ -362,9 +362,9 @@ test "pool_connection_close_not_pooled":
   client.close()
 
 test "pool_stale_conn_retry":
-  # Server responds with keep-alive semantics but closes ~90ms later. The
-  # second request pops the (about-to-die) pooled connection; whether the FIN
-  # lands before or after the pop, the request must succeed transparently.
+  # Server responds with keep-alive semantics but the pooled connection is
+  # killed while idle. The next request pops the dead socket and must
+  # succeed transparently via one fresh retry (accepted == 2).
   var accepted = 0
   var closed = 0
   var lastConn: Connection = nil
@@ -387,15 +387,24 @@ test "pool_stale_conn_retry":
   check r1.getBodyString() == "ok"
   check accepted == 1
 
-  # Doom the pooled connection shortly after it goes idle.
-  discard loop.addTimer(90) do (id: int):
+  # Doom the pooled connection while it is idle. The timer is driven
+  # explicitly here so it can never slip into the next request and kill an
+  # ACTIVE connection mid-flight (that race is timing-dependent and flakes
+  # across kernels/load). Afterwards the RST propagates while the loop is
+  # not driven, so the pop deterministically reuses a dead socket.
+  discard loop.addTimer(20) do (id: int):
     if lastConn != nil:
       lastConn.close()
       inc closed
+  let doomDeadline = monoMs() + 2000
+  while closed == 0 and monoMs() < doomDeadline:
+    loop.poll(1)
+  check closed == 1
 
-  sleep(30)   # still inside idle window — conn is pooled but doomed
+  sleep(300)  # let the RST land so the pop observes a dead socket
   let r2 = client.get("http://127.0.0.1:19987/second")
   check r2.getBodyString() == "ok" # stale pooled connection must retry silently
+  check accepted == 2
 
   server.close()
   client.close()

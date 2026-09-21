@@ -388,13 +388,13 @@ when not defined(windows):
       loop.stop()
   
     # Poll until we have response data or timeout. Driving the loop with
-    # poll(0) (instead of run()) avoids stopping on the connection-close
+    # manual polls (instead of run()) avoids stopping on the connection-close
     # event before the pending read data is drained, which differs between
-    # kqueue (macOS) and epoll (Linux).
-    var polls = 0
-    while responseData.len == 0 and polls < 500000:
-      loop.poll(0)
-      inc polls
+    # kqueue (macOS) and epoll (Linux). Wall-clock deadline: poll(0) is
+    # non-blocking, so an iteration-count budget is machine-dependent.
+    let deadline = monoMs() + 5000
+    while responseData.len == 0 and monoMs() < deadline:
+      loop.poll(1)
     if clientConn != nil: clientConn.close()
     server.close()
     loop.close()
@@ -515,11 +515,13 @@ proc testServeStaticRejects(port: int, path: string): string =
     server.close()
     loop.stop()
 
-  # Poll until we have response data or timeout
-  var polls = 0
-  while responseData.len == 0 and polls < 50000:
-    loop.poll(0)
-    inc polls
+  # Poll until we have response data or timeout (wall-clock deadline:
+  # poll(0) is non-blocking, so an iteration-count budget is
+  # machine-dependent and a fast runner can exhaust it before the 50ms
+  # connect timer fires, yielding an empty response).
+  let deadline = monoMs() + 5000
+  while responseData.len == 0 and monoMs() < deadline:
+    loop.poll(1)
   if responseData.len == 0:
     result = ""
   else:
