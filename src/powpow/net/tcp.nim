@@ -3290,7 +3290,11 @@ else:
                 if not conn.driveHandshake():
                   return
               if Write in ev:
-                if conn.flushWriteBuffer():
+                if conn.sendFileFd >= 0:
+                  # Keep pumping an in-flight sendfile until it drains.
+                  if conn.continueSendFile() and conn.state == Connected:
+                    conn.loop.modify(rfd, {Read})
+                elif conn.flushWriteBuffer():
                   if conn.closeAfterFlush:
                     conn.closeAndRelease()
                     if onClose != nil: onClose(conn)
@@ -3298,7 +3302,8 @@ else:
                   if conn.state == Connected:
                     conn.loop.modify(rfd, {Read})
               if Read in ev or Hup in ev:
-                conn.handleClientRead(onData, onClose)
+                if conn.sendFileFd < 0:
+                  conn.handleClientRead(onData, onClose)
               if (Error in ev or Hup in ev) and conn.state == Connected:
                 conn.closeAndRelease()
                 if onClose != nil: onClose(conn)
@@ -3344,7 +3349,11 @@ else:
                   if not conn.driveHandshake():
                     return
                 if Write in ev:
-                  if conn.flushWriteBuffer():
+                  if conn.sendFileFd >= 0:
+                    # Keep pumping an in-flight sendfile until it drains.
+                    if conn.continueSendFile() and conn.state == Connected:
+                      conn.loop.modify(rfd, {Read})
+                  elif conn.flushWriteBuffer():
                     if conn.closeAfterFlush:
                       conn.closeAndRelease()
                       if onClose != nil: onClose(conn)
@@ -3352,7 +3361,8 @@ else:
                     if conn.state == Connected:
                       conn.loop.modify(rfd, {Read})
                 if Read in ev or Hup in ev:
-                  conn.handleClientRead(onData, onClose)
+                  if conn.sendFileFd < 0:
+                    conn.handleClientRead(onData, onClose)
                 if (Error in ev or Hup in ev) and conn.state == Connected:
                   conn.closeAndRelease()
                   if onClose != nil: onClose(conn)
