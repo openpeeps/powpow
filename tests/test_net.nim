@@ -164,12 +164,15 @@ test "test_tcp_write_buffering":
       onData = proc(conn: Connection, data: openArray[byte]) = discard,
     )
 
-  # Poll manually until all data arrives (max 5s = 50000 polls × 100µs)
-  var polls = 0
-  while totalReceived.len < largePayload.len and polls < 50000:
-    loop.poll(0)
-    inc polls
-  doAssert polls < 50000, "timeout: received " & $totalReceived.len & " of " & $largePayload.len
+  # Poll until all data arrives (wall-clock deadline: poll(0) is
+  # non-blocking, so an iteration-count budget is machine-dependent and a
+  # fast runner can exhaust it before the 50ms connect timer fires).
+  let deadline = monoMs() + 5000
+  while totalReceived.len < largePayload.len and monoMs() < deadline:
+    loop.poll(1)
+  doAssert totalReceived.len == largePayload.len,
+    "timeout: received " & $totalReceived.len & " of " & $largePayload.len &
+    " (clientConnected=" & $clientConnected & ")"
 
   doAssert clientConnected, "client should have connected"
   doAssert totalReceived.len == largePayload.len, "server should have received all data"
