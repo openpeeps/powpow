@@ -15,8 +15,15 @@ suite "signal":
       inc count
     discard loop.addTimer(10) do (id: int):
       relay.emit(0)
-    discard loop.addTimer(30) do (id: int):
-      loop.stop()
+    # Stop only after the deferred delivery ran: on a loaded runner the
+    # loop can oversleep and fire emit + stop in one iteration, orphaning
+    # the deferred callbacks before they run.
+    discard loop.addInterval(5) do (id: int):
+      if count == 1:
+        loop.cancelTimer(TimerId(id))
+        loop.stop()
+    discard loop.addTimer(5000) do (id: int):
+      loop.stop()  # failsafe: the check below fails instead of hanging
     loop.run()
     check count == 1
 
@@ -45,8 +52,12 @@ suite "signal":
       inc count
     discard loop.addTimer(10) do (id: int):
       relay.emit(1)
-    discard loop.addTimer(30) do (id: int):
-      loop.stop()
+    discard loop.addInterval(5) do (id: int):
+      if count == 1:
+        loop.cancelTimer(TimerId(id))
+        loop.stop()
+    discard loop.addTimer(5000) do (id: int):
+      loop.stop()  # failsafe
     loop.run()
     check count == 1
 
@@ -101,8 +112,12 @@ suite "signal":
     discard relay.listen(0) do (): inc count
     discard loop.addTimer(10) do (id: int):
       relay.emit(0)
-    discard loop.addTimer(30) do (id: int):
-      loop.stop()
+    discard loop.addInterval(5) do (id: int):
+      if count == 3:
+        loop.cancelTimer(TimerId(id))
+        loop.stop()
+    discard loop.addTimer(5000) do (id: int):
+      loop.stop()  # failsafe
     loop.run()
     check count == 3
 
@@ -114,8 +129,12 @@ suite "signal":
     discard relay.listen(1) do (): inc b
     discard loop.addTimer(10) do (id: int):
       relay.emit(0)
-    discard loop.addTimer(30) do (id: int):
-      loop.stop()
+    discard loop.addInterval(5) do (id: int):
+      if a == 1:
+        loop.cancelTimer(TimerId(id))
+        loop.stop()
+    discard loop.addTimer(5000) do (id: int):
+      loop.stop()  # failsafe
     loop.run()
     check a == 1
     check b == 0
@@ -130,8 +149,12 @@ suite "signal":
       liB.unlisten()
     discard loop.addTimer(10) do (id: int):
       relay.emit(0)
-    discard loop.addTimer(30) do (id: int):
-      loop.stop()
+    discard loop.addInterval(5) do (id: int):
+      if a == 1 and b == 1:
+        loop.cancelTimer(TimerId(id))
+        loop.stop()
+    discard loop.addTimer(5000) do (id: int):
+      loop.stop()  # failsafe
     loop.run()
     check a == 1
     check b == 1  # B fires once (already deferred before A unlistened it)
