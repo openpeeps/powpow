@@ -15,11 +15,11 @@
 ## 😍 Key Features
 - High-performance, event-driven networking library for Nim
 - Support for low-level **UDP, TCP sockets**
-- Built-in HTTP/1.1 server implementation
-- Built-in **WebSocket** client and server: standalone + HTTP-upgrade modes, `wss://` on both ends, subprotocol negotiation, custom handshake headers, keepalive pings/idle timeouts, and a self-managed client (`newWsClient`) with auto-reconnect and a `sendMessage` API
-- **Threadpool** (`import powpow/threadpool`): a self-managed worker pool on raw threads with a private event loop for result delivery; submit CPU-bound or blocking work off a live event loop without blocking any single thread
+- Built-in HTTP/1.1 & HTTP/2 server implementation
+- Built-in **WebSocket** client and server: standalone + HTTP-upgrade modes
 - **TLS/SSL** support (implicit + STARTTLS-style upgrades)
 - **DTLS 1.2** over UDP — one socket, per-peer sessions, stateless cookie exchange
+- **Threadpool**: a self-managed worker pool. Submit CPU-bound or blocking work off a live event loop without blocking any single thread
 - **Signal/Relay** system for in-process event dispatch
 - Built-in **rate limiting** per client IP with multi-window support (e.g. hourly + daily quotas checked atomically via `newMultiRateLimiter`)
 - **HTTP over Unix Domain Sockets** (UDS) support for super fast local IPC
