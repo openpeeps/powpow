@@ -998,6 +998,7 @@ test "test_ws_idle_timeout_activity_keeps_connection_open":
   var opened = false
   var closed = false
   var trafficTimer: TimerId
+  var pingsSent = 0
 
   loop.connect("127.0.0.1", 29963,
     onConnect = proc(conn: Connection) =
@@ -1010,22 +1011,34 @@ test "test_ws_idle_timeout_activity_keeps_connection_open":
     onData = proc(conn: Connection, data: openArray[byte]) =
       if not opened:
         opened = true
-        # after upgrade, keep the connection alive with a masked ping every 40ms
-        trafficTimer = loop.addInterval(40) do (id: int):
+        # after upgrade, keep the connection alive with masked pings.
+        # Windows/IOCP loop iterations are coarse (~15ms timer granularity
+        # plus completion latency), stretching the gap between a ping being
+        # sent and the server processing it — ping twice as often there so
+        # the gap between *processed* pings stays well under idleTimeoutMs.
+        when defined(windows):
+          const pingEveryMs = 20
+        else:
+          const pingEveryMs = 40
+        trafficTimer = loop.addInterval(pingEveryMs) do (id: int):
           if clientConn != nil and clientConn.state == Connected:
             discard clientConn.send(makeMaskedFrame(0x9, @[0x00'u8]))
+            inc pingsSent
     ,
     onClose = proc(conn: Connection) = closed = true,
   )
 
   var polls = 0
   let t0 = monoMs()
-  # keep sending pings for ~400ms (well past idleTimeoutMs=150), then stop
-  while polls < 400 and not closed:
+  # keep sending pings for ~600ms wall time (well past idleTimeoutMs=150),
+  # then stop. Wall-clock bound, not a poll count: poll(1) wall duration
+  # varies by platform, but ping cadence is what keeps the connection alive.
+  while monoMs() - t0 < 600 and not closed:
     loop.poll(1)
     inc polls
   assert opened, "handshake should complete"
-  assert not closed, "connection must stay open while frames arrive"
+  assert not closed, "connection must stay open while frames arrive (pingsSent=" &
+    $pingsSent & ")"
   if trafficTimer != TimerId(0):
     loop.cancelTimer(trafficTimer)
   # now stop sending; the idle timer must close it
