@@ -136,7 +136,6 @@ test "test_udp":
 
 test "test_tcp_write_buffering":
   var clientConnected = false
-  var totalReceived: seq[byte] = @[]
 
   let loop = newLoop()
 
@@ -144,12 +143,20 @@ test "test_tcp_write_buffering":
   var largePayload: string
   for i in 0..8000:
     largePayload.add("Hello powpow! This is a test message for write buffering. ")
+  # Pre-size: avoids repeated realloc/copy churn while 100+ 4KB chunks arrive.
+  var totalReceived = newSeqOfCap[byte](largePayload.len)
 
   var server: TcpServer
   server = newTcpServer(loop,
     onAccept = proc(conn: Connection) = discard,
     onData = proc(conn: Connection, data: openArray[byte]) =
       totalReceived.add(@data)
+      if totalReceived.len >= largePayload.len:
+        # Full payload received — stop from inside the callback so a slow or
+        # heavily loaded runner does not have to observe completion via the
+        # poll loop below.
+        server.close()
+        loop.stop()
     ,
   )
   server.listen("127.0.0.1", 19879)
@@ -164,18 +171,20 @@ test "test_tcp_write_buffering":
       onData = proc(conn: Connection, data: openArray[byte]) = discard,
     )
 
-  # Poll until all data arrives (wall-clock deadline: poll(0) is
-  # non-blocking, so an iteration-count budget is machine-dependent and a
-  # fast runner can exhaust it before the 50ms connect timer fires).
-  let deadline = monoMs() + 5000
+  # Poll until all data arrives. Generous wall-clock deadline: a transfer that
+  # takes milliseconds locally can take seconds on a heavily loaded CI runner
+  # (observed: 449KB/464KB in 5s on a macos Intel runner).
+  let t0 = monoMs()
+  let deadline = t0 + 15000
   while totalReceived.len < largePayload.len and monoMs() < deadline:
     loop.poll(1)
   doAssert totalReceived.len == largePayload.len,
-    "timeout: received " & $totalReceived.len & " of " & $largePayload.len &
-    " (clientConnected=" & $clientConnected & ")"
+    "timeout after " & $(monoMs() - t0) & "ms: received " & $totalReceived.len &
+    " of " & $largePayload.len & " (clientConnected=" & $clientConnected & ")"
 
   doAssert clientConnected, "client should have connected"
   doAssert totalReceived.len == largePayload.len, "server should have received all data"
   doAssert cast[string](totalReceived) == largePayload, "received data mismatch"
+  server.close()
   loop.close()
 
