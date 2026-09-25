@@ -21,7 +21,7 @@
 - **DTLS 1.2** over UDP — one socket, per-peer sessions, stateless cookie exchange
 - **Threadpool**: a self-managed worker pool. Submit CPU-bound or blocking work off a live event loop without blocking any single thread
 - **Signal/Relay** system for in-process event dispatch
-- Built-in **rate limiting** per client IP with multi-window support (e.g. hourly + daily quotas checked atomically via `newMultiRateLimiter`)
+- Built-in **rate limiting** per client IP with multi-window support
 - **HTTP over Unix Domain Sockets** (UDS) support for super fast local IPC
 - **Zero-copy file transmission** using `sendfile` (Unix) and `TransmitFile` (Windows)
 - Chunked Request Body support for streaming uploads and large payloads
