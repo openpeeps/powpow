@@ -287,9 +287,13 @@ test "test_configurable_stream_cap_honored":
 # Section 2: HTTP Server Security
 # ══════════════════════════════════════════════════════════════════════
 
-test "test_no_auto_multipart_streaming":
+test "test_multipart_prearm_transparent":
+  # Multipart bodies are streamer-armed at header time (even small,
+  # single-packet ones), so a large upload never sits in the parser buffer.
+  # Handlers are unaffected: getMultipart() returns the pre-populated
+  # req.streamer directly.
   var handlerRan = false
-  var streamerWasNil = false
+  var streamerPrepopulated = false
   var multipartWorked = false
   let loop = newLoop()
 
@@ -297,9 +301,9 @@ test "test_no_auto_multipart_streaming":
   server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
     {.gcsafe.}:
       handlerRan = true
-      streamerWasNil = req.streamer == nil
+      streamerPrepopulated = req.streamer != nil
       let mp = req.getMultipart()
-      if mp != nil:
+      if mp != nil and mp == req.streamer and mp.isComplete():
         multipartWorked = true
         mp.cleanup()
       res.status(Http200).send("OK")
@@ -335,8 +339,8 @@ test "test_no_auto_multipart_streaming":
   loop.run()
   loop.close()
   assert handlerRan, "handler should have been called"
-  assert streamerWasNil, "streamer should be nil until getMultipart() is called"
-  assert multipartWorked, "getMultipart() should work when called explicitly"
+  assert streamerPrepopulated, "streamer should be pre-populated at header time"
+  assert multipartWorked, "getMultipart() should return the pre-populated streamer"
 
 when not defined(windows):
   test "test_multipart_per_file_limit_413":

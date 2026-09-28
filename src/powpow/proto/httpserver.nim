@@ -927,6 +927,11 @@ proc stop*(server: HttpServer) =
   server.close()
   server.loop.close()
 
+proc maybeArmBodyStream(server: HttpServer, ctx: ConnHttp, p: HttpParser)
+  ## Forward declaration (defined near handleConnectionData): choose the body
+  ## strategy at header time. Needed here because acquireConnHttp wires it as
+  ## the parser's onHeadersComplete hook.
+
 proc acquireParser(server: HttpServer): HttpParser =
   if server.parserPool.len > 0:
     result = server.parserPool.pop()
@@ -972,6 +977,15 @@ proc acquireConnHttp(server: HttpServer, conn: Connection): ConnHttp =
     result.conn = conn
     result.fd = conn.fd.int
     result.lastActive = monoMs()
+  # Pre-arm body streaming: when this connection's parser finishes a request's
+  # headers, decide the body strategy before the first body byte is consumed
+  # (see maybeArmBodyStream). Set once per connection — pooled parsers arrive
+  # with hooks cleared (reset), and the per-request fired flag is cleared by
+  # resetForNext so pipelined requests re-arm independently.
+  let srv = server
+  let session = result
+  result.parser.onHeadersComplete = proc(p: HttpParser) {.closure.} =
+    srv.maybeArmBodyStream(session, p)
   result.inRoots = false
   result.pendingIdx = server.pendingConns.len
   server.pendingConns.add(result)
@@ -1131,13 +1145,94 @@ proc dispatchRequest(server: HttpServer, conn: Connection,
   releaseHttpResponse(server, res)
 
 
+proc openStreamFile(server: HttpServer, ctx: ConnHttp, p: HttpParser): bool =
+  ## Create the private temp file for a streamed body and install the
+  ## file-writing onBodyData. Returns false (with p in PhaseError/500) when
+  ## no temp file could be created.
+  let dir = getTempDir()
+  discard existsOrCreateDir(dir)
+  for attempt in 0 ..< 8:
+    ctx.sessionStreamPath = dir / $genOid()
+    try:
+      ctx.sessionStreamFile = openPrivateFile(ctx.sessionStreamPath)
+      p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+        if data.len > 0:
+          discard ctx.sessionStreamFile.writeBuffer(unsafeAddr data[0], data.len)
+        if done:
+          ctx.sessionStreamFile.close()
+      return true
+    except IOError:
+      ctx.sessionStreamPath = ""
+  p.setError(Http500)
+  return false
+
+proc maybeArmBodyStream(server: HttpServer, ctx: ConnHttp, p: HttpParser) =
+  ## Choose the body strategy as soon as the headers are known. Invoked via
+  ## onHeadersComplete (before any body byte is consumed — including bytes
+  ## already sitting in the same packet), and once defensively after feed.
+  ## Small bodies stay buffered so getBody*/bodyView keep working; large or
+  ## unknown-size bodies stream, keeping p.buf at ~headers:
+  ##   - multipart/form-data (any Content-Length, or chunked) → incremental
+  ##     MultipartStreamerRef from the first body byte; handlers keep using
+  ##     getMultipart() unchanged (it returns req.streamer directly when
+  ##     pre-populated). Eager arming also rejects over-limit file parts
+  ##     early, without waiting for the rest of the body.
+  ##   - Content-Length >= minStreamBodySize → temp file (req.streamPath).
+  ##   - chunked, other types → spill to temp file once decoded bytes reach
+  ##     minStreamBodySize (threshold hook); small chunked stays buffered.
+  if p.onBodyData != nil or p.streamingBody: return
+  if p.phase != PhaseBody or p.isComplete(): return
+  var isMultipart = false
+  if p.contentLength > 0 or p.transferChunked:
+    isMultipart = p.peekContentType().startsWith("multipart/form-data")
+  # Bound auto-streamed uploads: server.maxBodySize when set, otherwise a
+  # hard cap — a client must not be able to fill the disk/temp dir with an
+  # unbounded upload. (Previously maxBodySize=0 meant unlimited disk writes.)
+  let uploadCap = if server.maxBodySize > 0: server.maxBodySize
+                  elif server.maxStreamBodySize > 0: server.maxStreamBodySize
+                  else: int64(MaxStreamBodySize)
+  let streamThreshold = if server.minStreamBodySize > 0: server.minStreamBodySize
+                        else: int64(MinStreamBodySize)
+  # Multipart of any size streams from the first body byte: the streamer
+  # enforces per-file/per-field/total caps inline, so over-limit parts are
+  # rejected early without waiting for the rest of the body (and a large
+  # single-packet upload never sits in p.buf). Handlers are unaffected:
+  # getMultipart() returns the pre-populated req.streamer directly.
+  if isMultipart and (p.contentLength > 0 or p.transferChunked):
+    let ct = p.peekContentType()  # cache hit from the check above: no copy
+    let fileCap = if server.maxFileSize > 0: server.maxFileSize
+                  else: uploadCap
+    let fieldCap = if server.maxFieldSize > 0: server.maxFieldSize
+                   else: uploadCap
+    # bodySize 0 (chunked): total unknown; the parser-level streamCap still
+    # bounds total decoded bytes, and per-file/per-field limits apply inline.
+    ctx.streamer = newMultipartStreamerRef(ct,
+      bodySize = if p.contentLength > 0: p.contentLength.int64 else: 0,
+      sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
+                                     maxFileSize: fileCap,
+                                     maxFieldSize: fieldCap))
+    let ms = ctx.streamer
+    p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+      ms[].feed(data)  # empty-safe no-op; completion detected via boundary
+  elif p.contentLength >= streamThreshold:
+    discard server.openStreamFile(ctx, p)
+  elif p.transferChunked:
+    # Unknown size: stay buffered until the decoded bytes prove large.
+    p.bodyThreshold = streamThreshold
+    p.onBodyThreshold = proc(pp: HttpParser) {.closure.} =
+      discard server.openStreamFile(ctx, pp)
+
 proc handleConnectionData(server: HttpServer, conn: Connection,
                           data: openArray[byte]) =
   ## Feed incoming bytes into the per-connection parser.
   ## Supports HTTP/1.1 pipelining: if multiple complete requests arrive
   ## in the same TCP read, all of them are processed in order.
-  ## Multipart/form-data is NOT auto-streamed — handlers must call
-  ## `req.getMultipart()` to process it explicitly.
+  ## Large bodies never sit in the parser buffer: the onHeadersComplete hook
+  ## (wired per connection) pre-arms tempfile/multipart streaming before the
+  ## first body byte is consumed, so a large single-packet upload peaks at
+  ## ~headers. Handlers read big bodies via `req.streamPath`/`streamToFile`
+  ## (raw) or `req.getMultipart()` (multipart); small bodies stay buffered
+  ## for `getBodyString`/`bodyView`.
   let ctx = if conn.data != nil: cast[ConnHttp](conn.data)
             else:
               let c = server.acquireConnHttp(conn)
@@ -1154,78 +1249,24 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   except MultipartInvalidHeader:
     # Malformed multipart part headers — same handling, respond 400.
     p.setError(Http400)
+  except MultipartConfigError:
+    # Garbage multipart boundary in Content-Type — same handling, 400.
+    p.setError(Http400)
+  except IOError, OSError:
+    # Temp-file write failed mid-stream (disk full/unlinked tmp) — reply 500;
+    # the shared error handling below closes and removes the partial file.
+    p.setError(Http500)
 
   if p.expectContinue and p.phase == PhaseBody:
     let continueResp = "HTTP/1.1 100 Continue\r\n\r\n"
     discard conn.send(continueResp.toOpenArrayByte(0, continueResp.len - 1))
     p.expectContinue = false
 
-  # Auto-detect body streaming for large uploads.
-  # If the body is still incoming (not yet complete) and no streaming is set up,
-  # check Content-Type to decide the streaming strategy:
-  #   - multipart/form-data → feed body directly into a MultipartStreamerRef
-  #   - any other Content-Type with Content-Length → stream raw body to a temp file
-  # This keeps p.buf small (~headers only) regardless of total body size.
-  #
-  # peekContentType() copies the value on first touch, but both branches below
-  # are dead when contentLength <= 0 (multipart needs CL > 0, file streaming
-  # needs CL >= minStreamBodySize), so chunked/empty bodies skip the copy.
-  if p.phase == PhaseBody and p.onBodyData == nil and not p.streamingBody and not p.isComplete():
-    var isMultipart = false
-    if p.contentLength > 0:
-      isMultipart = p.peekContentType().startsWith("multipart/form-data")
-    # Bound auto-streamed uploads: server.maxBodySize when set, otherwise a
-    # hard cap — a client must not be able to fill the disk/temp dir with an
-    # unbounded upload. (Previously maxBodySize=0 meant unlimited disk writes.)
-    let uploadCap = if server.maxBodySize > 0: server.maxBodySize
-                    elif server.maxStreamBodySize > 0: server.maxStreamBodySize
-                    else: int64(MaxStreamBodySize)
-    if isMultipart and p.contentLength > 0:
-      let ct = p.peekContentType()  # cache hit from the check above: no copy
-      let fileCap = if server.maxFileSize > 0: server.maxFileSize
-                     else: uploadCap
-      let fieldCap = if server.maxFieldSize > 0: server.maxFieldSize
-                     else: uploadCap
-      ctx.streamer = newMultipartStreamerRef(ct,
-        bodySize = p.contentLength.int64,
-        sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
-                                       maxFileSize: fileCap,
-                                       maxFieldSize: fieldCap))
-      let ms = ctx.streamer
-      p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
-        ms[].feed(data)
-      try:
-        p.tryAdvance()
-      except MultipartSizeLimitError:
-        p.setError(Http413)
-      except MultipartInvalidHeader:
-        p.setError(Http400)
-    elif p.contentLength >= (if server.minStreamBodySize > 0:
-                               server.minStreamBodySize
-                             else:
-                               int64(MinStreamBodySize)):
-      let dir = getTempDir()
-      discard existsOrCreateDir(dir)
-      ctx.sessionStreamPath = dir / $genOid()
-      var f: File
-      var opened = false
-      for attempt in 0 ..< 8:
-        ctx.sessionStreamPath = dir / $genOid()
-        try:
-          f = openPrivateFile(ctx.sessionStreamPath)
-          opened = true
-          break
-        except IOError:
-          ctx.sessionStreamPath = ""
-      if not opened:
-        p.setError(Http500)
-      else:
-        ctx.sessionStreamFile = f
-        p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
-          discard ctx.sessionStreamFile.writeBuffer(unsafeAddr data[0], data.len)
-          if done:
-            ctx.sessionStreamFile.close()
-        p.tryAdvance()
+  # Defensive re-arm: headers normally complete inside feed (firing
+  # onHeadersComplete synchronously), but any path that reached PhaseBody
+  # with no strategy yet gets one here before dispatch below.
+  if p.phase == PhaseBody and not p.isComplete():
+    server.maybeArmBodyStream(ctx, p)
 
   var pipelineCount = 0
   while p.isComplete():
