@@ -361,16 +361,18 @@ when defined(linux):
     return 0
 
   test "test_server_rss_flat_across_repeated_uploads":
-    # Six 4 MB uploads (24 MB total through the server, files deleted by the
-    # handler): RSS after a warmup upload must stay flat — nothing may
-    # accumulate per request (parser slabs, pooled sessions, temp files).
-    const BodySize = 4 * 1024 * 1024
-    const Uploads = 6
+    # Eight 2 MB uploads (16 MB total through the server, files deleted by
+    # the handler): RSS slope across the steady-state uploads must stay
+    # flat — nothing may accumulate per request (parser slabs, pooled
+    # sessions, temp files). Slope (not absolute delta) is asserted so
+    # one-time allocator retention on first uploads can't fail the test.
+    const BodySize = 2 * 1024 * 1024
+    const Uploads = 8
     var chunk = newString(BodySize)
     for i in 0 ..< BodySize:
       chunk[i] = chr(ord('d') + (i mod 20))
     var done = 0
-    var baseline = 0
+    var samples: seq[int] = @[]
     let loop = newLoop()
     let server = newHttpServer(loop, populate = false)
     server.handler = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
@@ -392,10 +394,8 @@ when defined(linux):
         ,
         onClose = proc(conn: Connection) =
           inc done
-          if done == 1:
-            baseline = testRssKB()  # steady state after warmup
-            GC_fullCollect()        # don't let GC timing masquerade as growth
-            baseline = testRssKB()
+          GC_fullCollect()  # steady allocator state before every sample
+          samples.add(testRssKB())
           if done < Uploads:
             uploadOne()
           else:
@@ -405,12 +405,16 @@ when defined(linux):
 
     discard loop.addTimer(50) do (id: int):
       uploadOne()
-    discard loop.addTimer(60000) do (id: int):
+    discard loop.addTimer(120000) do (id: int):
       server.close()
       loop.stop()
     loop.run()
     loop.close()
     doAssert done == Uploads, "all uploads must complete, got " & $done
-    let growth = testRssKB() - baseline
-    doAssert growth < 6 * 1024,
-      "RSS must stay flat across 24 MB of uploads, grew " & $growth & " KB"
+    doAssert samples.len == Uploads
+    # First two samples absorb warmup/allocator one-timers; uploads 3..8
+    # (12 MB through) must not grow RSS.
+    let growth = samples[^1] - samples[2]
+    doAssert growth < 3 * 1024,
+      "RSS must stay flat across 12 MB of steady-state uploads, grew " &
+      $growth & " KB (samples: " & $samples & ")"

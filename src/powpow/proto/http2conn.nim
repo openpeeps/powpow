@@ -669,6 +669,15 @@ proc headerListSize(hs: seq[HpackHeader]): int =
   for h in hs:
     result += h.name.len + h.value.len
 
+proc fragBlockTooBig(h2: H2Conn, addLen: int): bool {.inline.} =
+  ## Incremental header-block budget: wire bytes accumulated for the current
+  ## block must stay within maxHeaderList plus one frame of framing slop
+  ## (raw literals carry a few overhead bytes per header, so wire can
+  ## legitimately exceed decoded size by a small margin). Decoded size is
+  ## still checked exactly at END_HEADERS (431 path); this bounds per-stream
+  ## RAM at ~2x budget instead of unbounded (CONTINUATION bomb).
+  h2.fragBuf.len + addLen > h2.maxHeaderList + H2DefaultMaxFrameSize
+
 proc decodeFragBlock(h2: H2Conn, sid: int32,
                      decoded: var seq[HpackHeader]): bool =
   ## HPACK-decode `fragBuf`. Returns false after raising a stream error.
@@ -722,6 +731,13 @@ proc handleHeaders(h2: H2Conn, f: H2Frame) =
     else:
       h2.fragStream = sid
       h2.fragBuf = fragment
+      if h2.fragBlockTooBig(0):
+        # First fragment alone exceeds the block budget: reset the fragment
+        # state and refuse the stream (COMPRESSION_ERROR, RFC 7540 §4.3).
+        h2.fragStream = -1
+        h2.fragEndStream = false
+        h2.streamError(sid, H2CompressionError)
+        return
       h2.fragEndStream = true
     return
   # New stream: client-initiated ids are odd and increasing.
@@ -765,6 +781,12 @@ proc handleHeaders(h2: H2Conn, f: H2Frame) =
   else:
     h2.fragStream = sid
     h2.fragBuf = fragment
+    if h2.fragBlockTooBig(0):
+      # First fragment alone exceeds the block budget (see above).
+      h2.fragStream = -1
+      h2.fragEndStream = false
+      h2.streamError(sid, H2CompressionError)
+      return
     h2.fragEndStream = (f.flags and H2FlagEndStream) != 0
 
 proc handleContinuation(h2: H2Conn, f: H2Frame) =
@@ -774,6 +796,13 @@ proc handleContinuation(h2: H2Conn, f: H2Frame) =
   let sid = f.streamId
   let wasTrailer = h2.streams.hasKey(sid) and
     h2.streams[sid].reqHeaders.len > 0
+  if h2.fragBlockTooBig(f.payload.len):
+    # CONTINUATION bomb: block budget exceeded mid-block. Drop the fragment
+    # state and refuse the stream instead of buffering further.
+    h2.fragStream = -1
+    h2.fragEndStream = false
+    h2.streamError(sid, H2CompressionError)
+    return
   appendBytes(h2.fragBuf, f.payload)
   if (f.flags and H2FlagEndHeaders) == 0:
     return
