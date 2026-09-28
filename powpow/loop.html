@@ -121,6 +121,10 @@
   <li><a class="reference" href="#addTimer%2CLoop%2Cint%2CTimerCallback" title="addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId">addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">addTurnEndHook
+  <li><a class="reference" href="#addTurnEndHook%2CLoop%2Cstring%2CCallback" title="addTurnEndHook(loop: Loop; tag: string; cb: Callback)">addTurnEndHook(loop: Loop; tag: string; cb: Callback)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">cancelObserver
   <li><a class="reference" href="#cancelObserver%2CObserver" title="cancelObserver(obs: Observer)">cancelObserver(obs: Observer)</a></li>
 
@@ -171,8 +175,8 @@
 </ul>
 <ul class="simple nested-toc-section">register
   <li><a class="reference" href="#register%2CLoop%2Cint%2Cset%5BEventType%5D%2CFdCallback" title="register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;
-         edgeTriggered = false)">register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;
-         edgeTriggered = false)</a></li>
+         edgeTriggered = false; freshFd = false)">register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;
+         edgeTriggered = false; freshFd = false)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">releaseBuf
@@ -373,6 +377,18 @@
 </div>
 
 </div>
+<div id="addTurnEndHook-procs-all">
+  <div id="addTurnEndHook,Loop,string,Callback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#addTurnEndHook%2CLoop%2Cstring%2CCallback"><span class="Identifier">addTurnEndHook</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">tag</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="types.html#Callback"><span class="Identifier">Callback</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Run <tt class="docutils literal"><span class="pre"><span class="Identifier">cb</span></span></tt> at the end of every <tt class="docutils literal"><span class="pre"><span class="Identifier">poll</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> turn. For idempotent, queue-draining work (e.g. flushing staged socket bytes). <tt class="docutils literal"><span class="pre"><span class="Identifier">tag</span></span></tt> dedupes per loop (pointer-identity must NOT be used: loop objects are recycled by the allocator, so a new loop can share a dead loop's address). The callback must tolerate an empty queue.
+    
+  </dd>
+</div>
+
+</div>
 <div id="cancelObserver-procs-all">
   <div id="cancelObserver,Observer">
   <dt><pre><span class="Keyword">proc</span> <a href="#cancelObserver%2CObserver"><span class="Identifier">cancelObserver</span></a><span class="Other">(</span><span class="Identifier">obs</span><span class="Other">:</span> <a href="#Observer"><span class="Identifier">Observer</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -513,8 +529,8 @@
 <div id="register-procs-all">
   <div id="register,Loop,int,set[EventType],FdCallback">
   <dt><pre><span class="Keyword">proc</span> <a href="#register%2CLoop%2Cint%2Cset%5BEventType%5D%2CFdCallback"><span class="Identifier">register</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">events</span><span class="Other">:</span> <span class="Identifier">set</span><span class="Other">[</span><a href="types.html#EventType"><span class="Identifier">EventType</span></a><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">callback</span><span class="Other">:</span> <a href="types.html#FdCallback"><span class="Identifier">FdCallback</span></a><span class="Other">;</span>
-              <span class="Identifier">edgeTriggered</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-                                       <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+              <span class="Identifier">edgeTriggered</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">;</span> <span class="Identifier">freshFd</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -645,7 +661,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-25 16:49:19 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 17:23:41 UTC</small>
       </div>
     </div>
   </div>

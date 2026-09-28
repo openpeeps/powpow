@@ -63,6 +63,10 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId" href="powpow/loop.html#addTimer%2CLoop%2Cint%2CTimerCallback">loop: proc addTimer(loop: Loop; delayMs: int; callback: TimerCallback): TimerId</a></li>
           </ul></dd>
+<dt><a name="addTurnEndHook" href="#addTurnEndHook"><span>addTurnEndHook:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="loop: proc addTurnEndHook(loop: Loop; tag: string; cb: Callback)" href="powpow/loop.html#addTurnEndHook%2CLoop%2Cstring%2CCallback">loop: proc addTurnEndHook(loop: Loop; tag: string; cb: Callback)</a></li>
+          </ul></dd>
 <dt><a name="allow" href="#allow"><span>allow:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ratelimit: proc allow(rl: RateLimiter; key: string): bool" href="powpow/proto/ratelimit.html#allow%2CRateLimiter%2Cstring">ratelimit: proc allow(rl: RateLimiter; key: string): bool</a></li>
@@ -74,6 +78,10 @@
 <dt><a name="alpnSelected" href="#alpnSelected"><span>alpnSelected:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tls: proc alpnSelected(conn: Connection): string" href="powpow/net/tls.html#alpnSelected%2CConnection">tls: proc alpnSelected(conn: Connection): string</a></li>
+          </ul></dd>
+<dt><a name="appendBytes" href="#appendBytes"><span>appendBytes:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2: proc appendBytes(buf: var seq[byte]; data: openArray[byte])" href="powpow/proto/http2.html#appendBytes%2Cseq%5Bbyte%5D%2CopenArray%5Bbyte%5D">http2: proc appendBytes(buf: var seq[byte]; data: openArray[byte])</a></li>
           </ul></dd>
 <dt><a name="AsyncHttpClient" href="#AsyncHttpClient"><span>AsyncHttpClient:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -171,6 +179,8 @@
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc close(server: HttpServer)" href="powpow/proto/httpserver.html#close%2CHttpServer">httpserver: proc close(server: HttpServer)</a></li>
           <li><a class="reference external"
+          data-doc-search-tag="multithread: proc close(srv: MultiThreadH2Server)" href="powpow/proto/multithread.html#close%2CMultiThreadH2Server">multithread: proc close(srv: MultiThreadH2Server)</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="multithread: proc close(srv: MultiThreadHttpServer)" href="powpow/proto/multithread.html#close%2CMultiThreadHttpServer">multithread: proc close(srv: MultiThreadHttpServer)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="proxyserver: proc close(server: ProxyServer)" href="powpow/proto/proxyserver.html#close%2CProxyServer">proxyserver: proc close(server: ProxyServer)</a></li>
@@ -186,6 +196,10 @@
 <dt><a name="closeAfterDrain" href="#closeAfterDrain"><span>closeAfterDrain:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: proc closeAfterDrain(conn: Connection)" href="powpow/net/tcp.html#closeAfterDrain%2CConnection">tcp: proc closeAfterDrain(conn: Connection)</a></li>
+          </ul></dd>
+<dt><a name="closeAfterSend" href="#closeAfterSend"><span>closeAfterSend:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc closeAfterSend(conn: Connection)" href="powpow/net/tcp.html#closeAfterSend%2CConnection">tcp: proc closeAfterSend(conn: Connection)</a></li>
           </ul></dd>
 <dt><a name="closeAfterWrite" href="#closeAfterWrite"><span>closeAfterWrite:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -623,6 +637,10 @@
 <li><a class="reference external"
           data-doc-search-tag="signal: proc emit(relay: SignalRelay; signalId: int)" href="powpow/signal.html#emit%2CSignalRelay%2Cint">signal: proc emit(relay: SignalRelay; signalId: int)</a></li>
           </ul></dd>
+<dt><a name="emptyH2Body" href="#emptyH2Body"><span>emptyH2Body:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: const emptyH2Body" href="powpow/proto/http2conn.html#emptyH2Body">http2conn: const emptyH2Body</a></li>
+          </ul></dd>
 <dt><a name="encode" href="#encode"><span>encode:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="hpack: proc encode(ctx: var HpackContext; headers: openArray[HpackHeader]; useHuffman = true): seq[
@@ -639,6 +657,12 @@
     byte]" href="powpow/proto/http2.html#encodeFrame%2Cint%2Cuint8%2Cint32%2CopenArray%5Bbyte%5D">http2: proc encodeFrame(typ: int; flags: uint8; streamId: int32; payload: openArray[byte]): seq[
     byte]</a></li>
           </ul></dd>
+<dt><a name="encodeFrameInto" href="#encodeFrameInto"><span>encodeFrameInto:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2: proc encodeFrameInto(buf: var seq[byte]; typ: int; flags: uint8; streamId: int32;
+                payload: openArray[byte])" href="powpow/proto/http2.html#encodeFrameInto%2Cseq%5Bbyte%5D%2Cint%2Cuint8%2Cint32%2CopenArray%5Bbyte%5D">http2: proc encodeFrameInto(buf: var seq[byte]; typ: int; flags: uint8; streamId: int32;
+                payload: openArray[byte])</a></li>
+          </ul></dd>
 <dt><a name="encodeGoaway" href="#encodeGoaway"><span>encodeGoaway:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http2: proc encodeGoaway(lastStreamId: int32; code: H2ErrorCode;
@@ -654,6 +678,18 @@
 <dt><a name="encodeInt" href="#encodeInt"><span>encodeInt:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="hpack: proc encodeInt(value: int; prefixBits: int; prefixMask: uint8): seq[byte]" href="powpow/proto/hpack.html#encodeInt%2Cint%2Cint%2Cuint8">hpack: proc encodeInt(value: int; prefixBits: int; prefixMask: uint8): seq[byte]</a></li>
+          </ul></dd>
+<dt><a name="encodeIntInto" href="#encodeIntInto"><span>encodeIntInto:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="hpack: proc encodeIntInto(buf: var seq[byte]; value: int; prefixBits: int; prefixMask: uint8)" href="powpow/proto/hpack.html#encodeIntInto%2Cseq%5Bbyte%5D%2Cint%2Cint%2Cuint8">hpack: proc encodeIntInto(buf: var seq[byte]; value: int; prefixBits: int; prefixMask: uint8)</a></li>
+          </ul></dd>
+<dt><a name="encodeInto" href="#encodeInto"><span>encodeInto:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="hpack: proc encodeInto(ctx: var HpackContext; headers: openArray[HpackHeader];
+           buf: var seq[byte]; scratch: var seq[byte]; useHuffman = true;
+           allowIndex = true)" href="powpow/proto/hpack.html#encodeInto%2CHpackContext%2CopenArray%5BHpackHeader%5D%2Cseq%5Bbyte%5D%2Cseq%5Bbyte%5D">hpack: proc encodeInto(ctx: var HpackContext; headers: openArray[HpackHeader];
+           buf: var seq[byte]; scratch: var seq[byte]; useHuffman = true;
+           allowIndex = true)</a></li>
           </ul></dd>
 <dt><a name="encodePing" href="#encodePing"><span>encodePing:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -685,6 +721,12 @@
 <li><a class="reference external"
           data-doc-search-tag="hpack: proc encodeString(s: string; useHuffman = true): seq[byte]" href="powpow/proto/hpack.html#encodeString%2Cstring">hpack: proc encodeString(s: string; useHuffman = true): seq[byte]</a></li>
           </ul></dd>
+<dt><a name="encodeStringInto" href="#encodeStringInto"><span>encodeStringInto:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="hpack: proc encodeStringInto(buf: var seq[byte]; s: string; useHuffman: bool;
+                 scratch: var seq[byte])" href="powpow/proto/hpack.html#encodeStringInto%2Cseq%5Bbyte%5D%2Cstring%2Cbool%2Cseq%5Bbyte%5D">hpack: proc encodeStringInto(buf: var seq[byte]; s: string; useHuffman: bool;
+                 scratch: var seq[byte])</a></li>
+          </ul></dd>
 <dt><a name="encodeWindowUpdate" href="#encodeWindowUpdate"><span>encodeWindowUpdate:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http2: proc encodeWindowUpdate(streamId: int32; increment: uint32): seq[byte]" href="powpow/proto/http2.html#encodeWindowUpdate%2Cint32%2Cuint32">http2: proc encodeWindowUpdate(streamId: int32; increment: uint32): seq[byte]</a></li>
@@ -692,6 +734,10 @@
 <dt><a name="ensureCapacity" href="#ensureCapacity"><span>ensureCapacity:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="epoll: proc ensureCapacity(p: Platform; fdCount: int)" href="powpow/platform/epoll.html#ensureCapacity%2CPlatform%2Cint">epoll: proc ensureCapacity(p: Platform; fdCount: int)</a></li>
+          </ul></dd>
+<dt><a name="ensureH2FlushHook" href="#ensureH2FlushHook"><span>ensureH2FlushHook:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc ensureH2FlushHook(loop: Loop)" href="powpow/proto/http2conn.html#ensureH2FlushHook%2CLoop">http2conn: proc ensureH2FlushHook(loop: Loop)</a></li>
           </ul></dd>
 <dt><a name="ensureTcpServer" href="#ensureTcpServer"><span>ensureTcpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -761,6 +807,10 @@
 <li><a class="reference external"
           data-doc-search-tag="http: proc finalizeCloseDelimited(p: HttpParser)" href="powpow/proto/http.html#finalizeCloseDelimited%2CHttpParser">http: proc finalizeCloseDelimited(p: HttpParser)</a></li>
           </ul></dd>
+<dt><a name="finCloseNow" href="#finCloseNow"><span>finCloseNow:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc finCloseNow(conn: Connection)" href="powpow/net/tcp.html#finCloseNow%2CConnection">tcp: proc finCloseNow(conn: Connection)</a></li>
+          </ul></dd>
 <dt><a name="findCRLF" href="#findCRLF"><span>findCRLF:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="simdscan: proc findCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int" href="powpow/proto/simdscan.html#findCRLF%2Cptr.UncheckedArray%5Bbyte%5D%2Cint%2Cint">simdscan: proc findCRLF(buf: ptr UncheckedArray[byte]; start, maxLen: int): int</a></li>
@@ -784,6 +834,14 @@
 <dt><a name="findDoubleCRLFSse2" href="#findDoubleCRLFSse2"><span>findDoubleCRLFSse2:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int" href="powpow/proto/simdscan.html#findDoubleCRLFSse2%2Cptr.UncheckedArray%5Bbyte%5D%2Cint%2Cint">simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int</a></li>
+          </ul></dd>
+<dt><a name="flushSendBuf" href="#flushSendBuf"><span>flushSendBuf:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc flushSendBuf(h2: H2Conn)" href="powpow/proto/http2conn.html#flushSendBuf%2CH2Conn">http2conn: proc flushSendBuf(h2: H2Conn)</a></li>
+          </ul></dd>
+<dt><a name="flushStagedH2" href="#flushStagedH2"><span>flushStagedH2:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc flushStagedH2()" href="powpow/proto/http2conn.html#flushStagedH2">http2conn: proc flushStagedH2()</a></li>
           </ul></dd>
 <dt><a name="flushWriteBuffer" href="#flushWriteBuffer"><span>flushWriteBuffer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -934,6 +992,12 @@
           data-doc-search-tag="http: proc getHeaders(req: HttpRequest): HttpHeaders" href="powpow/proto/http.html#getHeaders%2CHttpRequest">http: proc getHeaders(req: HttpRequest): HttpHeaders</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpclient: proc getHeaders(res: HttpClientResponse): HttpHeaders" href="powpow/proto/httpclient.html#getHeaders%2CHttpClientResponse">httpclient: proc getHeaders(res: HttpClientResponse): HttpHeaders</a></li>
+          </ul></dd>
+<dt><a name="getHeaderValue" href="#getHeaderValue"><span>getHeaderValue:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc getHeaderValue(p: HttpParser; name: string): lent string" href="powpow/proto/http.html#getHeaderValue%2CHttpParser%2Cstring">http: proc getHeaderValue(p: HttpParser; name: string): lent string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http: proc getHeaderValue(req: HttpRequest; name: string): lent string" href="powpow/proto/http.html#getHeaderValue%2CHttpRequest%2Cstring">http: proc getHeaderValue(req: HttpRequest; name: string): lent string</a></li>
           </ul></dd>
 <dt><a name="getHttpMinor" href="#getHttpMinor"><span>getHttpMinor:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1241,6 +1305,10 @@
 <li><a class="reference external"
           data-doc-search-tag="http2: H2FrameType.H2RstStream" href="powpow/proto/http2.html#H2RstStream">http2: H2FrameType.H2RstStream</a></li>
           </ul></dd>
+<dt><a name="H2SendBufCap" href="#H2SendBufCap"><span>H2SendBufCap:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: const H2SendBufCap" href="powpow/proto/http2conn.html#H2SendBufCap">http2conn: const H2SendBufCap</a></li>
+          </ul></dd>
 <dt><a name="H2Server" href="#H2Server"><span>H2Server:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http2conn: type H2Server" href="powpow/proto/http2conn.html#H2Server">http2conn: type H2Server</a></li>
@@ -1449,6 +1517,10 @@
 <li><a class="reference external"
           data-doc-search-tag="hpack: proc huffmanEncode(s: string): seq[byte]" href="powpow/proto/hpack.html#huffmanEncode%2Cstring">hpack: proc huffmanEncode(s: string): seq[byte]</a></li>
           </ul></dd>
+<dt><a name="huffmanEncodeInto" href="#huffmanEncodeInto"><span>huffmanEncodeInto:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="hpack: proc huffmanEncodeInto(buf: var seq[byte]; s: string)" href="powpow/proto/hpack.html#huffmanEncodeInto%2Cseq%5Bbyte%5D%2Cstring">hpack: proc huffmanEncodeInto(buf: var seq[byte]; s: string)</a></li>
+          </ul></dd>
 <dt><a name="Hup" href="#Hup"><span>Hup:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="types: EventType.Hup" href="powpow/types.html#Hup">types: EventType.Hup</a></li>
@@ -1466,6 +1538,10 @@
 <dt><a name="init" href="#init"><span>init:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="epoll: proc init(T: typedesc[Platform]): T:type" href="powpow/platform/epoll.html#init%2Ctypedesc%5BPlatform%5D">epoll: proc init(T: typedesc[Platform]): T:type</a></li>
+          </ul></dd>
+<dt><a name="initHuffman" href="#initHuffman"><span>initHuffman:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="hpack: proc initHuffman()" href="powpow/proto/hpack.html#initHuffman">hpack: proc initHuffman()</a></li>
           </ul></dd>
 <dt><a name="initNet" href="#initNet"><span>initNet:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1486,6 +1562,10 @@
 <dt><a name="iouEnabled" href="#iouEnabled"><span>iouEnabled:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="types: const iouEnabled" href="powpow/types.html#iouEnabled">types: const iouEnabled</a></li>
+          </ul></dd>
+<dt><a name="isBytesUnit" href="#isBytesUnit"><span>isBytesUnit:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc isBytesUnit(s: string): bool" href="powpow/proto/httpserver.html#isBytesUnit%2Cstring">httpserver: proc isBytesUnit(s: string): bool</a></li>
           </ul></dd>
 <dt><a name="isChunked" href="#isChunked"><span>isChunked:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1639,6 +1719,10 @@
 <li><a class="reference external"
           data-doc-search-tag="loop: proc monoMs(): int64" href="powpow/loop.html#monoMs">loop: proc monoMs(): int64</a></li>
           </ul></dd>
+<dt><a name="MultiThreadH2Server" href="#MultiThreadH2Server"><span>MultiThreadH2Server:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="multithread: type MultiThreadH2Server" href="powpow/proto/multithread.html#MultiThreadH2Server">multithread: type MultiThreadH2Server</a></li>
+          </ul></dd>
 <dt><a name="MultiThreadHttpServer" href="#MultiThreadHttpServer"><span>MultiThreadHttpServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="multithread: type MultiThreadHttpServer" href="powpow/proto/multithread.html#MultiThreadHttpServer">multithread: type MultiThreadHttpServer</a></li>
@@ -1774,6 +1858,10 @@
           data-doc-search-tag="ratelimit: proc newMultiRateLimiter(loop: Loop; limits: openArray[WindowLimit];
                     enableCleanup = true): RateLimiter" href="powpow/proto/ratelimit.html#newMultiRateLimiter%2CLoop%2CopenArray%5BWindowLimit%5D">ratelimit: proc newMultiRateLimiter(loop: Loop; limits: openArray[WindowLimit];
                     enableCleanup = true): RateLimiter</a></li>
+          </ul></dd>
+<dt><a name="newMultiThreadH2Server" href="#newMultiThreadH2Server"><span>newMultiThreadH2Server:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="multithread: proc newMultiThreadH2Server(numThreads: int): MultiThreadH2Server" href="powpow/proto/multithread.html#newMultiThreadH2Server%2Cint">multithread: proc newMultiThreadH2Server(numThreads: int): MultiThreadH2Server</a></li>
           </ul></dd>
 <dt><a name="newOsSignalRelay" href="#newOsSignalRelay"><span>newOsSignalRelay:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2093,6 +2181,12 @@
       headers`gensym154: openArray[(string, string)] = [];
       unixSocket`gensym154: string = &quot;&quot;; timeoutMs`gensym154: int = -1): HttpClientResponse</a></li>
           </ul></dd>
+<dt><a name="patchFrameHeader" href="#patchFrameHeader"><span>patchFrameHeader:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2: proc patchFrameHeader(buf: var seq[byte]; pos: int; typ: int; flags: uint8;
+                 streamId: int32)" href="powpow/proto/http2.html#patchFrameHeader%2Cseq%5Bbyte%5D%2Cint%2Cint%2Cuint8%2Cint32">http2: proc patchFrameHeader(buf: var seq[byte]; pos: int; typ: int; flags: uint8;
+                 streamId: int32)</a></li>
+          </ul></dd>
 <dt><a name="pause" href="#pause"><span>pause:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="stream: proc pause(s: IoStream)" href="powpow/stream.html#pause%2CIoStream">stream: proc pause(s: IoStream)</a></li>
@@ -2310,8 +2404,8 @@
 <dt><a name="register" href="#register"><span>register:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="loop: proc register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;
-         edgeTriggered = false)" href="powpow/loop.html#register%2CLoop%2Cint%2Cset%5BEventType%5D%2CFdCallback">loop: proc register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;
-         edgeTriggered = false)</a></li>
+         edgeTriggered = false; freshFd = false)" href="powpow/loop.html#register%2CLoop%2Cint%2Cset%5BEventType%5D%2CFdCallback">loop: proc register(loop: Loop; fd: int; events: set[EventType]; callback: FdCallback;
+         edgeTriggered = false; freshFd = false)</a></li>
           </ul></dd>
 <dt><a name="releaseBuf" href="#releaseBuf"><span>releaseBuf:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2380,6 +2474,10 @@
         timeoutMs: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#request%2CHttpClient%2CHttpMethod%2Cstring%2Cstring%2CopenArray%5B%5D%2Cstring%2Cint">httpclient: proc request(client: HttpClient; meth: HttpMethod; url: string; body: string;
         headers: openArray[(string, string)] = []; unixSocket: string = &quot;&quot;;
         timeoutMs: int = -1): HttpClientResponse</a></li>
+          </ul></dd>
+<dt><a name="reserveFrameHeader" href="#reserveFrameHeader"><span>reserveFrameHeader:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2: proc reserveFrameHeader(buf: var seq[byte]): int" href="powpow/proto/http2.html#reserveFrameHeader%2Cseq%5Bbyte%5D">http2: proc reserveFrameHeader(buf: var seq[byte]): int</a></li>
           </ul></dd>
 <dt><a name="reset" href="#reset"><span>reset:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2479,7 +2577,7 @@
           <li><a class="reference external"
           data-doc-search-tag="udp: proc send(sock: UdpSocket; data: string): int" href="powpow/net/udp.html#send%2CUdpSocket%2Cstring">udp: proc send(sock: UdpSocket; data: string): int</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="http2conn: proc send(res: H2Response; body: seq[byte])" href="powpow/proto/http2conn.html#send%2CH2Response%2Cseq%5Bbyte%5D">http2conn: proc send(res: H2Response; body: seq[byte])</a></li>
+          data-doc-search-tag="http2conn: proc send(res: H2Response; body: openArray[byte])" href="powpow/proto/http2conn.html#send%2CH2Response%2CopenArray%5Bbyte%5D">http2conn: proc send(res: H2Response; body: openArray[byte])</a></li>
           <li><a class="reference external"
           data-doc-search-tag="http2conn: proc send(res: H2Response; body: string)" href="powpow/proto/http2conn.html#send%2CH2Response%2Cstring">http2conn: proc send(res: H2Response; body: string)</a></li>
           <li><a class="reference external"
@@ -2999,6 +3097,12 @@
 <li><a class="reference external"
           data-doc-search-tag="tlsapi: proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint" href="powpow/net/tlsapi.html#SSL_write%2CSslPtr%2Cpointer%2Ccint">tlsapi: proc SSL_write(s: SslPtr; buf: pointer; num: cint): cint</a></li>
           </ul></dd>
+<dt><a name="stageFrame" href="#stageFrame"><span>stageFrame:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc stageFrame(h2: H2Conn; data: openArray[byte])" href="powpow/proto/http2conn.html#stageFrame%2CH2Conn%2CopenArray%5Bbyte%5D">http2conn: proc stageFrame(h2: H2Conn; data: openArray[byte])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc stageFrame(h2: H2Conn; s: string)" href="powpow/proto/http2conn.html#stageFrame%2CH2Conn%2Cstring">http2conn: proc stageFrame(h2: H2Conn; s: string)</a></li>
+          </ul></dd>
 <dt><a name="start" href="#start"><span>start:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc start(server: HttpServer; handler: OnRequestCallback; port: Port)" href="powpow/proto/httpserver.html#start%2CHttpServer%2COnRequestCallback%2CPort">httpserver: proc start(server: HttpServer; handler: OnRequestCallback; port: Port)</a></li>
@@ -3008,6 +3112,10 @@
       ports: varargs[Port])</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc start(server: HttpServer; handler: OnRequestCallback; ports: varargs[Port])" href="powpow/proto/httpserver.html#start%2CHttpServer%2COnRequestCallback%2Cvarargs%5BPort%5D">httpserver: proc start(server: HttpServer; handler: OnRequestCallback; ports: varargs[Port])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="multithread: proc start(srv: MultiThreadH2Server; handler: OnH2RequestCallback; address: string;
+      port: int)" href="powpow/proto/multithread.html#start%2CMultiThreadH2Server%2COnH2RequestCallback%2Cstring%2Cint">multithread: proc start(srv: MultiThreadH2Server; handler: OnH2RequestCallback; address: string;
+      port: int)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
       port: int)" href="powpow/proto/multithread.html#start%2CMultiThreadHttpServer%2COnRequestCallback%2Cstring%2Cint">multithread: proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;
@@ -3355,7 +3463,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-25 16:49:21 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 17:23:43 UTC</small>
       </div>
     </div>
   </div>

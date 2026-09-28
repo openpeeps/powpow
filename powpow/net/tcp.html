@@ -128,6 +128,10 @@
   <li><a class="reference" href="#closeAfterDrain%2CConnection" title="closeAfterDrain(conn: Connection)">closeAfterDrain(conn: Connection)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">closeAfterSend
+  <li><a class="reference" href="#closeAfterSend%2CConnection" title="closeAfterSend(conn: Connection)">closeAfterSend(conn: Connection)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">closeAndRelease
   <li><a class="reference" href="#closeAndRelease%2CConnection" title="closeAndRelease(conn: Connection)">closeAndRelease(conn: Connection)</a></li>
 
@@ -162,6 +166,10 @@
 </ul>
 <ul class="simple nested-toc-section">driveHandshake
   <li><a class="reference" href="#driveHandshake%2CConnection" title="driveHandshake(conn: Connection): bool">driveHandshake(conn: Connection): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">finCloseNow
+  <li><a class="reference" href="#finCloseNow%2CConnection" title="finCloseNow(conn: Connection)">finCloseNow(conn: Connection)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">flushWriteBuffer
@@ -453,6 +461,19 @@
 </div>
 
 </div>
+<div id="closeAfterSend-procs-all">
+  <div id="closeAfterSend,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#closeAfterSend%2CConnection"><span class="Identifier">closeAfterSend</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
+                                        <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+                                        <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Fast teardown for <tt class="docutils literal"><span class="pre"><span class="Identifier">Connection</span><span class="Punctuation">:</span> <span class="Identifier">close</span></span></tt> responses sent via <tt class="docutils literal"><span class="pre"><span class="Identifier">send</span><span class="Operator">/</span><span class="Identifier">sendv</span></span></tt>. Takes the FIN+close path when the response fully flushed (user-space buffer empty, no sendfile/TLS in flight); otherwise falls back to the existing <tt class="docutils literal"><span class="pre"><span class="Identifier">closeAfterDrain</span></span></tt> (buffered-close / graceful) path.
+    
+  </dd>
+</div>
+
+</div>
 <div id="closeAndRelease-procs-all">
   <div id="closeAndRelease,Connection">
   <dt><pre><span class="Keyword">proc</span> <a href="#closeAndRelease%2CConnection"><span class="Identifier">closeAndRelease</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
@@ -529,6 +550,18 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="finCloseNow-procs-all">
+  <div id="finCloseNow,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#finCloseNow%2CConnection"><span class="Identifier">finCloseNow</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    FIN + immediate close for <tt class="docutils literal"><span class="pre"><span class="Identifier">Connection</span><span class="Punctuation">:</span> <span class="Identifier">close</span></span></tt> small responses. <tt class="docutils literal"><span class="pre"><span class="Identifier">shutdown</span><span class="Punctuation">(</span><span class="Identifier">WR</span><span class="Punctuation">)</span></span></tt> queues FIN after the already-flushed response bytes, so delivery stays reliable (unlike <tt class="docutils literal"><span class="pre"><span class="Identifier">SO_LINGER</span><span class="Operator">=</span><span class="DecNumber">0</span></span></tt> RST, which discards the kernel send queue). The fd is freed right away instead of waiting for the peer FIN in a second event-loop turn: no extra <tt class="docutils literal"><span class="pre"><span class="Identifier">modify</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> + <tt class="docutils literal"><span class="pre"><span class="Identifier">recv</span></span></tt>, no <tt class="docutils literal"><span class="pre"><span class="Identifier">Closing</span></span></tt> state held in <tt class="docutils literal"><span class="pre"><span class="Identifier">fdConn</span></span></tt>/sweep tables, no in-process TIME_WAIT hold (the peer's later FIN gets RST once the socket is gone). Pooling is preserved — the <tt class="docutils literal"><span class="pre"><span class="Identifier">Connection</span></span></tt> wrapper + <tt class="docutils literal"><span class="pre"><span class="Identifier">readBuf</span></span></tt> are recycled by the outer <tt class="docutils literal"><span class="pre"><span class="Identifier">releaseConnection</span></span></tt>; only the fd is torn down.
     
   </dd>
 </div>
@@ -774,7 +807,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-25 16:49:20 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 17:23:41 UTC</small>
       </div>
     </div>
   </div>

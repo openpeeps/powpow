@@ -6,13 +6,18 @@ nim	HpackStaticTableLen	powpow/proto/hpack.html#HpackStaticTableLen	const HpackS
 nim	HpackDefaultTableSize	powpow/proto/hpack.html#HpackDefaultTableSize	const HpackDefaultTableSize		35
 nim	HpackMaxStringLen	powpow/proto/hpack.html#HpackMaxStringLen	const HpackMaxStringLen		36
 nim	hpackError	powpow/proto/hpack.html#hpackError,string	proc hpackError(msg: string): ref HpackError		38
-nim	huffmanEncode	powpow/proto/hpack.html#huffmanEncode,string	proc huffmanEncode(s: string): seq[byte]		261
-nim	huffmanDecode	powpow/proto/hpack.html#huffmanDecode,openArray[byte]	proc huffmanDecode(data: openArray[byte]): string		279
-nim	encodeInt	powpow/proto/hpack.html#encodeInt,int,int,uint8	proc encodeInt(value: int; prefixBits: int; prefixMask: uint8): seq[byte]		316
-nim	decodeInt	powpow/proto/hpack.html#decodeInt,openArray[byte],int,int	proc decodeInt(data: openArray[byte]; pos: int; prefixBits: int): tuple[value: int,\n    next: int]		332
-nim	encodeString	powpow/proto/hpack.html#encodeString,string	proc encodeString(s: string; useHuffman = true): seq[byte]		361
-nim	decodeString	powpow/proto/hpack.html#decodeString,openArray[byte],int	proc decodeString(data: openArray[byte]; pos: int): tuple[s: string, next: int]		370
-nim	newHpackContext	powpow/proto/hpack.html#newHpackContext	proc newHpackContext(maxTableSize = HpackDefaultTableSize;\n                maxAllowedSize = HpackDefaultTableSize): HpackContext		393
-nim	setMaxTableSize	powpow/proto/hpack.html#setMaxTableSize,HpackContext,int	proc setMaxTableSize(ctx: var HpackContext; size: int)		408
-nim	decode	powpow/proto/hpack.html#decode,HpackContext,openArray[byte]	proc decode(ctx: var HpackContext; data: openArray[byte]): seq[HpackHeader]		446
-nim	encode	powpow/proto/hpack.html#encode,HpackContext,openArray[HpackHeader]	proc encode(ctx: var HpackContext; headers: openArray[HpackHeader]; useHuffman = true): seq[\n    byte]		523
+nim	initHuffman	powpow/proto/hpack.html#initHuffman	proc initHuffman()		261
+nim	huffmanEncodeInto	powpow/proto/hpack.html#huffmanEncodeInto,seq[byte],string	proc huffmanEncodeInto(buf: var seq[byte]; s: string)		269
+nim	huffmanEncode	powpow/proto/hpack.html#huffmanEncode,string	proc huffmanEncode(s: string): seq[byte]		285
+nim	huffmanDecode	powpow/proto/hpack.html#huffmanDecode,openArray[byte]	proc huffmanDecode(data: openArray[byte]): string		291
+nim	encodeIntInto	powpow/proto/hpack.html#encodeIntInto,seq[byte],int,int,uint8	proc encodeIntInto(buf: var seq[byte]; value: int; prefixBits: int; prefixMask: uint8)		326
+nim	encodeInt	powpow/proto/hpack.html#encodeInt,int,int,uint8	proc encodeInt(value: int; prefixBits: int; prefixMask: uint8): seq[byte]		342
+nim	decodeInt	powpow/proto/hpack.html#decodeInt,openArray[byte],int,int	proc decodeInt(data: openArray[byte]; pos: int; prefixBits: int): tuple[value: int,\n    next: int]		348
+nim	encodeStringInto	powpow/proto/hpack.html#encodeStringInto,seq[byte],string,bool,seq[byte]	proc encodeStringInto(buf: var seq[byte]; s: string; useHuffman: bool;\n                 scratch: var seq[byte])		377
+nim	encodeString	powpow/proto/hpack.html#encodeString,string	proc encodeString(s: string; useHuffman = true): seq[byte]		393
+nim	decodeString	powpow/proto/hpack.html#decodeString,openArray[byte],int	proc decodeString(data: openArray[byte]; pos: int): tuple[s: string, next: int]		398
+nim	newHpackContext	powpow/proto/hpack.html#newHpackContext	proc newHpackContext(maxTableSize = HpackDefaultTableSize;\n                maxAllowedSize = HpackDefaultTableSize): HpackContext		421
+nim	setMaxTableSize	powpow/proto/hpack.html#setMaxTableSize,HpackContext,int	proc setMaxTableSize(ctx: var HpackContext; size: int)		436
+nim	decode	powpow/proto/hpack.html#decode,HpackContext,openArray[byte]	proc decode(ctx: var HpackContext; data: openArray[byte]): seq[HpackHeader]		474
+nim	encodeInto	powpow/proto/hpack.html#encodeInto,HpackContext,openArray[HpackHeader],seq[byte],seq[byte]	proc encodeInto(ctx: var HpackContext; headers: openArray[HpackHeader];\n           buf: var seq[byte]; scratch: var seq[byte]; useHuffman = true;\n           allowIndex = true)		551
+nim	encode	powpow/proto/hpack.html#encode,HpackContext,openArray[HpackHeader]	proc encode(ctx: var HpackContext; headers: openArray[HpackHeader]; useHuffman = true): seq[\n    byte]		593

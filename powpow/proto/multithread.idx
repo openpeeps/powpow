@@ -1,14 +1,19 @@
 nimTitle	multithread	powpow/proto/multithread.html	module powpow/proto/multithread		0
-nim	MultiThreadHttpServer	powpow/proto/multithread.html#MultiThreadHttpServer	type MultiThreadHttpServer		46
-nim	newHttpServer	powpow/proto/multithread.html#newHttpServer,int	proc newHttpServer(numThreads: int): MultiThreadHttpServer		99
-nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,int	proc listen(srv: MultiThreadHttpServer; address: string; port: int)		136
-nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,openArray[int]	proc listen(srv: MultiThreadHttpServer; address: string; ports: openArray[int])		139
-nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,Port	proc listen(srv: MultiThreadHttpServer; address: string; port: Port)		142
-nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,openArray[Port]	proc listen(srv: MultiThreadHttpServer; address: string; ports: openArray[Port])		145
-nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,int	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      port: int)		151
-nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,varargs[int]	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      ports: varargs[int])		156
-nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,Port	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      port: Port)		164
-nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,varargs[Port]	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      ports: varargs[Port])		171
-nim	close	powpow/proto/multithread.html#close,MultiThreadHttpServer	proc close(srv: MultiThreadHttpServer)		182
-nimgrp	start	powpow/proto/multithread.html#start-procs-all	proc		151
-nimgrp	listen	powpow/proto/multithread.html#listen-procs-all	proc		136
+nim	MultiThreadHttpServer	powpow/proto/multithread.html#MultiThreadHttpServer	type MultiThreadHttpServer		55
+nim	newHttpServer	powpow/proto/multithread.html#newHttpServer,int	proc newHttpServer(numThreads: int): MultiThreadHttpServer		112
+nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,int	proc listen(srv: MultiThreadHttpServer; address: string; port: int)		149
+nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,openArray[int]	proc listen(srv: MultiThreadHttpServer; address: string; ports: openArray[int])		152
+nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,Port	proc listen(srv: MultiThreadHttpServer; address: string; port: Port)		155
+nim	listen	powpow/proto/multithread.html#listen,MultiThreadHttpServer,string,openArray[Port]	proc listen(srv: MultiThreadHttpServer; address: string; ports: openArray[Port])		158
+nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,int	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      port: int)		164
+nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,varargs[int]	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      ports: varargs[int])		169
+nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,Port	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      port: Port)		177
+nim	start	powpow/proto/multithread.html#start,MultiThreadHttpServer,OnRequestCallback,string,varargs[Port]	proc start(srv: MultiThreadHttpServer; cb: OnRequestCallback; address: string;\n      ports: varargs[Port])		184
+nim	close	powpow/proto/multithread.html#close,MultiThreadHttpServer	proc close(srv: MultiThreadHttpServer)		195
+nim	MultiThreadH2Server	powpow/proto/multithread.html#MultiThreadH2Server	type MultiThreadH2Server		218
+nim	newMultiThreadH2Server	powpow/proto/multithread.html#newMultiThreadH2Server,int	proc newMultiThreadH2Server(numThreads: int): MultiThreadH2Server		253
+nim	start	powpow/proto/multithread.html#start,MultiThreadH2Server,OnH2RequestCallback,string,int	proc start(srv: MultiThreadH2Server; handler: OnH2RequestCallback; address: string;\n      port: int)		263
+nim	close	powpow/proto/multithread.html#close,MultiThreadH2Server	proc close(srv: MultiThreadH2Server)		286
+nimgrp	close	powpow/proto/multithread.html#close-procs-all	proc		195
+nimgrp	start	powpow/proto/multithread.html#start-procs-all	proc		164
+nimgrp	listen	powpow/proto/multithread.html#listen-procs-all	proc		149

@@ -58,14 +58,18 @@ nim	decodeRstStream	powpow/proto/http2.html#decodeRstStream,H2Frame	proc decodeR
 nim	decodeWindowUpdate	powpow/proto/http2.html#decodeWindowUpdate,H2Frame	proc decodeWindowUpdate(f: H2Frame): uint32		260
 nim	decodeGoaway	powpow/proto/http2.html#decodeGoaway,H2Frame	proc decodeGoaway(f: H2Frame): tuple[lastStreamId: int32, code: H2ErrorCode,\n                                debugData: seq[byte]]		271
 nim	decodePriority	powpow/proto/http2.html#decodePriority,H2Frame	proc decodePriority(f: H2Frame): tuple[exclusive: bool, depId: int32, weight: uint8]		284
-nim	encodeFrame	powpow/proto/http2.html#encodeFrame,int,uint8,int32,openArray[byte]	proc encodeFrame(typ: int; flags: uint8; streamId: int32; payload: openArray[byte]): seq[\n    byte]		296
-nim	encodeSettings	powpow/proto/http2.html#encodeSettings,openArray[H2Setting]	proc encodeSettings(settings: openArray[H2Setting]): seq[byte]		311
-nim	encodeSettingsAck	powpow/proto/http2.html#encodeSettingsAck	proc encodeSettingsAck(): seq[byte]		322
-nim	encodePing	powpow/proto/http2.html#encodePing,array[,byte]	proc encodePing(opaqueData: array[8, byte]): seq[byte]		325
-nim	encodePingAck	powpow/proto/http2.html#encodePingAck,array[,byte]	proc encodePingAck(opaqueData: array[8, byte]): seq[byte]		328
-nim	encodeWindowUpdate	powpow/proto/http2.html#encodeWindowUpdate,int32,uint32	proc encodeWindowUpdate(streamId: int32; increment: uint32): seq[byte]		331
-nim	encodeRstStream	powpow/proto/http2.html#encodeRstStream,int32,H2ErrorCode	proc encodeRstStream(streamId: int32; code: H2ErrorCode): seq[byte]		338
-nim	encodeGoaway	powpow/proto/http2.html#encodeGoaway,int32,H2ErrorCode,openArray[byte]	proc encodeGoaway(lastStreamId: int32; code: H2ErrorCode;\n             debugData: openArray[byte] = []): seq[byte]		346
-nim	encodeData	powpow/proto/http2.html#encodeData,int32,openArray[byte]	proc encodeData(streamId: int32; data: openArray[byte]; endStream = false): seq[byte]		362
-nim	encodeHeaders	powpow/proto/http2.html#encodeHeaders,int32,openArray[byte]	proc encodeHeaders(streamId: int32; headerBlock: openArray[byte]; endStream = false;\n              endHeaders = true): seq[byte]		368
-nim	encodePriority	powpow/proto/http2.html#encodePriority,int32,int32,uint8	proc encodePriority(streamId, depId: int32; weight: uint8; exclusive = false): seq[\n    byte]		377
+nim	appendBytes	powpow/proto/http2.html#appendBytes,seq[byte],openArray[byte]	proc appendBytes(buf: var seq[byte]; data: openArray[byte])		296
+nim	encodeFrameInto	powpow/proto/http2.html#encodeFrameInto,seq[byte],int,uint8,int32,openArray[byte]	proc encodeFrameInto(buf: var seq[byte]; typ: int; flags: uint8; streamId: int32;\n                payload: openArray[byte])		304
+nim	reserveFrameHeader	powpow/proto/http2.html#reserveFrameHeader,seq[byte]	proc reserveFrameHeader(buf: var seq[byte]): int		322
+nim	patchFrameHeader	powpow/proto/http2.html#patchFrameHeader,seq[byte],int,int,uint8,int32	proc patchFrameHeader(buf: var seq[byte]; pos: int; typ: int; flags: uint8;\n                 streamId: int32)		328
+nim	encodeFrame	powpow/proto/http2.html#encodeFrame,int,uint8,int32,openArray[byte]	proc encodeFrame(typ: int; flags: uint8; streamId: int32; payload: openArray[byte]): seq[\n    byte]		342
+nim	encodeSettings	powpow/proto/http2.html#encodeSettings,openArray[H2Setting]	proc encodeSettings(settings: openArray[H2Setting]): seq[byte]		357
+nim	encodeSettingsAck	powpow/proto/http2.html#encodeSettingsAck	proc encodeSettingsAck(): seq[byte]		368
+nim	encodePing	powpow/proto/http2.html#encodePing,array[,byte]	proc encodePing(opaqueData: array[8, byte]): seq[byte]		371
+nim	encodePingAck	powpow/proto/http2.html#encodePingAck,array[,byte]	proc encodePingAck(opaqueData: array[8, byte]): seq[byte]		374
+nim	encodeWindowUpdate	powpow/proto/http2.html#encodeWindowUpdate,int32,uint32	proc encodeWindowUpdate(streamId: int32; increment: uint32): seq[byte]		377
+nim	encodeRstStream	powpow/proto/http2.html#encodeRstStream,int32,H2ErrorCode	proc encodeRstStream(streamId: int32; code: H2ErrorCode): seq[byte]		384
+nim	encodeGoaway	powpow/proto/http2.html#encodeGoaway,int32,H2ErrorCode,openArray[byte]	proc encodeGoaway(lastStreamId: int32; code: H2ErrorCode;\n             debugData: openArray[byte] = []): seq[byte]		392
+nim	encodeData	powpow/proto/http2.html#encodeData,int32,openArray[byte]	proc encodeData(streamId: int32; data: openArray[byte]; endStream = false): seq[byte]		408
+nim	encodeHeaders	powpow/proto/http2.html#encodeHeaders,int32,openArray[byte]	proc encodeHeaders(streamId: int32; headerBlock: openArray[byte]; endStream = false;\n              endHeaders = true): seq[byte]		414
+nim	encodePriority	powpow/proto/http2.html#encodePriority,int32,int32,uint8	proc encodePriority(streamId, depId: int32; weight: uint8; exclusive = false): seq[\n    byte]		423

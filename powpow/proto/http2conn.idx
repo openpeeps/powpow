@@ -14,22 +14,30 @@ nim	H2Request	powpow/proto/http2conn.html#H2Request	object H2Request		65
 nim	H2Response	powpow/proto/http2conn.html#H2Response	type H2Response		74
 nim	OnH2RequestCallback	powpow/proto/http2conn.html#OnH2RequestCallback	type OnH2RequestCallback		81
 nim	H2Conn	powpow/proto/http2conn.html#H2Conn	type H2Conn		93
-nim	H2Server	powpow/proto/http2conn.html#H2Server	type H2Server		125
-nim	H2DefaultMaxConcurrent	powpow/proto/http2conn.html#H2DefaultMaxConcurrent	const H2DefaultMaxConcurrent		140
-nim	H2DefaultMaxHeaderList	powpow/proto/http2conn.html#H2DefaultMaxHeaderList	const H2DefaultMaxHeaderList		141
-nim	H2DefaultMaxBody	powpow/proto/http2conn.html#H2DefaultMaxBody	const H2DefaultMaxBody		142
-nim	status	powpow/proto/http2conn.html#status,H2Response,uint16	proc status(res: H2Response; code: uint16): H2Response		352
-nim	header	powpow/proto/http2conn.html#header,H2Response,string,string	proc header(res: H2Response; name, value: string): H2Response		356
-nim	send	powpow/proto/http2conn.html#send,H2Response,seq[byte]	proc send(res: H2Response; body: seq[byte])		360
-nim	send	powpow/proto/http2conn.html#send,H2Response,string	proc send(res: H2Response; body: string)		389
-nim	reset	powpow/proto/http2conn.html#reset,H2Response	proc reset(res: H2Response; code = H2Cancelled)		395
-nim	startClientPreface	powpow/proto/http2conn.html#startClientPreface,H2Conn	proc startClientPreface(h2: H2Conn)		676
-nim	openClientStream	powpow/proto/http2conn.html#openClientStream,H2Conn,seq[HpackHeader],seq[byte],bool,H2ClientCallback	proc openClientStream(h2: H2Conn; headers: seq[HpackHeader]; body: seq[byte];\n                 endStream: bool; cb: H2ClientCallback): int32		684
-nim	feedH2	powpow/proto/http2conn.html#feedH2,H2Conn,openArray[byte]	proc feedH2(h2: H2Conn; data: openArray[byte])		1198
-nim	h2Closed	powpow/proto/http2conn.html#h2Closed,H2Conn	proc h2Closed(h2: H2Conn): bool		1206
-nim	h2Draining	powpow/proto/http2conn.html#h2Draining,H2Conn	proc h2Draining(h2: H2Conn): bool		1210
-nim	newH2Conn	powpow/proto/http2conn.html#newH2Conn,Connection,H2Role,OnH2RequestCallback	proc newH2Conn(conn: Connection; role: H2Role; onRequest: OnH2RequestCallback;\n          maxConcurrent = H2DefaultMaxConcurrent;\n          maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody): H2Conn		1214
-nim	newH2Server	powpow/proto/http2conn.html#newH2Server,Loop,OnH2RequestCallback,SslContext	proc newH2Server(loop: Loop; handler: OnH2RequestCallback;\n            maxConcurrent = H2DefaultMaxConcurrent;\n            maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;\n            sslCtx: SslContext = nil): H2Server		1237
-nim	listen	powpow/proto/http2conn.html#listen,H2Server,string,int	proc listen(s: H2Server; address: string; port: int)		1289
-nim	close	powpow/proto/http2conn.html#close,H2Server	proc close(s: H2Server)		1292
-nimgrp	send	powpow/proto/http2conn.html#send-procs-all	proc		360
+nim	H2Server	powpow/proto/http2conn.html#H2Server	type H2Server		138
+nim	H2DefaultMaxConcurrent	powpow/proto/http2conn.html#H2DefaultMaxConcurrent	const H2DefaultMaxConcurrent		153
+nim	H2DefaultMaxHeaderList	powpow/proto/http2conn.html#H2DefaultMaxHeaderList	const H2DefaultMaxHeaderList		154
+nim	H2DefaultMaxBody	powpow/proto/http2conn.html#H2DefaultMaxBody	const H2DefaultMaxBody		155
+nim	H2SendBufCap	powpow/proto/http2conn.html#H2SendBufCap	const H2SendBufCap		158
+nim	flushSendBuf	powpow/proto/http2conn.html#flushSendBuf,H2Conn	proc flushSendBuf(h2: H2Conn)		167
+nim	flushStagedH2	powpow/proto/http2conn.html#flushStagedH2	proc flushStagedH2()		182
+nim	ensureH2FlushHook	powpow/proto/http2conn.html#ensureH2FlushHook,Loop	proc ensureH2FlushHook(loop: Loop)		200
+nim	stageFrame	powpow/proto/http2conn.html#stageFrame,H2Conn,openArray[byte]	proc stageFrame(h2: H2Conn; data: openArray[byte])		204
+nim	stageFrame	powpow/proto/http2conn.html#stageFrame,H2Conn,string	proc stageFrame(h2: H2Conn; s: string)		217
+nim	emptyH2Body	powpow/proto/http2conn.html#emptyH2Body	const emptyH2Body		265
+nim	status	powpow/proto/http2conn.html#status,H2Response,uint16	proc status(res: H2Response; code: uint16): H2Response		488
+nim	header	powpow/proto/http2conn.html#header,H2Response,string,string	proc header(res: H2Response; name, value: string): H2Response		492
+nim	send	powpow/proto/http2conn.html#send,H2Response,openArray[byte]	proc send(res: H2Response; body: openArray[byte])		547
+nim	send	powpow/proto/http2conn.html#send,H2Response,string	proc send(res: H2Response; body: string)		563
+nim	reset	powpow/proto/http2conn.html#reset,H2Response	proc reset(res: H2Response; code = H2Cancelled)		570
+nim	startClientPreface	powpow/proto/http2conn.html#startClientPreface,H2Conn	proc startClientPreface(h2: H2Conn)		914
+nim	openClientStream	powpow/proto/http2conn.html#openClientStream,H2Conn,seq[HpackHeader],seq[byte],bool,H2ClientCallback	proc openClientStream(h2: H2Conn; headers: seq[HpackHeader]; body: seq[byte];\n                 endStream: bool; cb: H2ClientCallback): int32		922
+nim	feedH2	powpow/proto/http2conn.html#feedH2,H2Conn,openArray[byte]	proc feedH2(h2: H2Conn; data: openArray[byte])		1437
+nim	h2Closed	powpow/proto/http2conn.html#h2Closed,H2Conn	proc h2Closed(h2: H2Conn): bool		1445
+nim	h2Draining	powpow/proto/http2conn.html#h2Draining,H2Conn	proc h2Draining(h2: H2Conn): bool		1449
+nim	newH2Conn	powpow/proto/http2conn.html#newH2Conn,Connection,H2Role,OnH2RequestCallback	proc newH2Conn(conn: Connection; role: H2Role; onRequest: OnH2RequestCallback;\n          maxConcurrent = H2DefaultMaxConcurrent;\n          maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody): H2Conn		1453
+nim	newH2Server	powpow/proto/http2conn.html#newH2Server,Loop,OnH2RequestCallback,SslContext	proc newH2Server(loop: Loop; handler: OnH2RequestCallback;\n            maxConcurrent = H2DefaultMaxConcurrent;\n            maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;\n            sslCtx: SslContext = nil): H2Server		1477
+nim	listen	powpow/proto/http2conn.html#listen,H2Server,string,int	proc listen(s: H2Server; address: string; port: int)		1530
+nim	close	powpow/proto/http2conn.html#close,H2Server	proc close(s: H2Server)		1533
+nimgrp	send	powpow/proto/http2conn.html#send-procs-all	proc		547
+nimgrp	stageframe	powpow/proto/http2conn.html#stageFrame-procs-all	proc		204
