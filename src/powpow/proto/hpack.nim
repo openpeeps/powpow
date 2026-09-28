@@ -258,30 +258,40 @@ proc buildHuffman() =
       node = huffNodes[node].child[bit]
     huffNodes[node].sym = sym
 
-proc huffmanEncode*(s: string): seq[byte] =
-  ## Huffman-encode raw octets, padding with ones (MSB of EOS) to the octet
-  ## boundary per RFC 7541 §5.2.
+proc initHuffman*() =
+  ## Build the shared Huffman decode tree. Idempotent. Call once from the
+  ## main thread before spawning workers: the tree is `{.global.}` and
+  ## lazy-building it from several threads at once would race.
+  if not huffBuilt:
+    buildHuffman()
+    huffBuilt = true
+
+proc huffmanEncodeInto*(buf: var seq[byte], s: string) =
+  ## Append Huffman-encoded octets (padding with ones per §5.2).
   var acc: uint64 = 0
   var nbits = 0
-  result = @[]
   for ch in s:
     let (code, bits) = huffmanCodes[uint8(ch)]
     acc = (acc shl bits) or uint64(code)
     nbits += int(bits)
     while nbits >= 8:
       nbits -= 8
-      result.add(byte((acc shr nbits) and 0xFF))
+      buf.add(byte((acc shr nbits) and 0xFF))
   if nbits > 0:
     # Pad with ones (most significant bits of EOS).
     acc = (acc shl (8 - nbits)) or ((1'u64 shl (8 - nbits)) - 1)
-    result.add(byte(acc and 0xFF))
+    buf.add(byte(acc and 0xFF))
+
+proc huffmanEncode*(s: string): seq[byte] =
+  ## Huffman-encode raw octets, padding with ones (MSB of EOS) to the octet
+  ## boundary per RFC 7541 §5.2.
+  result = @[]
+  huffmanEncodeInto(result, s)
 
 proc huffmanDecode*(data: openArray[byte]): string =
   ## Decode a Huffman string. An EOS code, padding longer than 7 bits, or
   ## non-ones padding raises `HpackError`.
-  if not huffBuilt:
-    buildHuffman()
-    huffBuilt = true
+  initHuffman()
   result = ""
   var node = 0
   var pending = 0      # bits walked since the last emitted symbol
@@ -313,21 +323,27 @@ proc huffmanDecode*(data: openArray[byte]): string =
 
 # ── Integer codec (RFC 7541 §5.1) ─────────────────────────────────────
 
+proc encodeIntInto*(buf: var seq[byte], value: int, prefixBits: int,
+                    prefixMask: uint8) =
+  ## Append `value` with an N-bit prefix, OR-ing `prefixMask` (the upper
+  ## pattern bits) into the first octet. No temporary allocation.
+  assert prefixBits >= 1 and prefixBits <= 8
+  let maxPrefix = (1 shl prefixBits) - 1
+  if value < maxPrefix:
+    buf.add(prefixMask or uint8(value))
+    return
+  buf.add(prefixMask or uint8(maxPrefix))
+  var v = value - maxPrefix
+  while v >= 128:
+    buf.add(uint8((v mod 128) + 128))
+    v = v div 128
+  buf.add(uint8(v))
+
 proc encodeInt*(value: int, prefixBits: int, prefixMask: uint8): seq[byte] =
   ## Encode `value` with an N-bit prefix, OR-ing `prefixMask` (the upper
   ## pattern bits) into the first octet.
-  assert prefixBits >= 1 and prefixBits <= 8
-  let maxPrefix = (1 shl prefixBits) - 1
   result = @[]
-  if value < maxPrefix:
-    result.add(prefixMask or uint8(value))
-    return
-  result.add(prefixMask or uint8(maxPrefix))
-  var v = value - maxPrefix
-  while v >= 128:
-    result.add(uint8((v mod 128) + 128))
-    v = v div 128
-  result.add(uint8(v))
+  encodeIntInto(result, value, prefixBits, prefixMask)
 
 proc decodeInt*(data: openArray[byte], pos: int,
                 prefixBits: int): tuple[value: int, next: int] =
@@ -358,14 +374,26 @@ proc decodeInt*(data: openArray[byte], pos: int,
       break
   (value, p)
 
+proc encodeStringInto*(buf: var seq[byte], s: string, useHuffman: bool,
+                         scratch: var seq[byte]) =
+  ## Append a string literal, Huffman-coding only when it wins. `scratch`
+  ## is reused across fields (caller clears per response, not per field).
+  if useHuffman:
+    scratch.setLen(0)
+    huffmanEncodeInto(scratch, s)
+    if scratch.len < s.len:
+      encodeIntInto(buf, scratch.len, 7, 0x80'u8)
+      for b in scratch:
+        buf.add(b)
+      return
+  encodeIntInto(buf, s.len, 7, 0x00'u8)
+  for c in s:
+    buf.add(byte(c))
+
 proc encodeString*(s: string, useHuffman = true): seq[byte] =
-  let huffed = huffmanEncode(s)
-  if useHuffman and huffed.len < s.len:
-    result = encodeInt(huffed.len, 7, 0x80'u8)
-    for b in huffed: result.add(b)
-  else:
-    result = encodeInt(s.len, 7, 0x00'u8)
-    for c in s: result.add(byte(c))
+  result = @[]
+  var scratch: seq[byte] = @[]
+  encodeStringInto(result, s, useHuffman, scratch)
 
 proc decodeString*(data: openArray[byte],
                    pos: int): tuple[s: string, next: int] =
@@ -520,6 +548,48 @@ proc findNameMatch(ctx: HpackContext, name: string): int =
       return HpackStaticTableLen + 1 + i
   0
 
+proc encodeInto*(ctx: var HpackContext, headers: openArray[HpackHeader],
+                  buf: var seq[byte], scratch: var seq[byte],
+                  useHuffman = true, allowIndex = true) =
+  ## Append an encoded header list to `buf`. Full matches become indexed
+  ## fields; otherwise literal with incremental indexing (or never-indexed
+  ## when flagged), with indexed names where possible. With
+  ## `allowIndex = false` (transient responses, B3) literals use the
+  ## without-indexing representation and skip the dynamic table entirely:
+  ## no insert shifts, no eviction churn. Announces a pending table-size
+  ## change first per §4.2.
+  if ctx.maxTableSize != ctx.lastSignaledSize:
+    encodeIntInto(buf, ctx.maxTableSize, 5, 0x20'u8)
+    ctx.lastSignaledSize = ctx.maxTableSize
+  for h in headers:
+    let full = ctx.findFullMatch(h.name, h.value)
+    if full > 0 and not h.neverIndexed:
+      encodeIntInto(buf, full, 7, 0x80'u8)
+      continue
+    let nameIdx = ctx.findNameMatch(h.name)
+    if h.neverIndexed:
+      if nameIdx > 0:
+        encodeIntInto(buf, nameIdx, 4, 0x10'u8)
+      else:
+        encodeIntInto(buf, 0, 4, 0x10'u8)
+        encodeStringInto(buf, h.name, useHuffman, scratch)
+      encodeStringInto(buf, h.value, useHuffman, scratch)
+    elif allowIndex:
+      if nameIdx > 0:
+        encodeIntInto(buf, nameIdx, 6, 0x40'u8)
+      else:
+        encodeIntInto(buf, 0, 6, 0x40'u8)
+        encodeStringInto(buf, h.name, useHuffman, scratch)
+      encodeStringInto(buf, h.value, useHuffman, scratch)
+      ctx.insertEntry(h.name, h.value)
+    else:
+      if nameIdx > 0:
+        encodeIntInto(buf, nameIdx, 4, 0x00'u8)
+      else:
+        encodeIntInto(buf, 0, 4, 0x00'u8)
+        encodeStringInto(buf, h.name, useHuffman, scratch)
+      encodeStringInto(buf, h.value, useHuffman, scratch)
+
 proc encode*(ctx: var HpackContext, headers: openArray[HpackHeader],
              useHuffman = true): seq[byte] =
   ## Encode a header list. Full matches become indexed fields; everything
@@ -527,37 +597,5 @@ proc encode*(ctx: var HpackContext, headers: openArray[HpackHeader],
   ## indexed names where possible. Announces a pending table-size change
   ## first per §4.2.
   result = @[]
-  if ctx.maxTableSize != ctx.lastSignaledSize:
-    for b in encodeInt(ctx.maxTableSize, 5, 0x20'u8):
-      result.add(b)
-    ctx.lastSignaledSize = ctx.maxTableSize
-  for h in headers:
-    let full = ctx.findFullMatch(h.name, h.value)
-    if full > 0 and not h.neverIndexed:
-      for b in encodeInt(full, 7, 0x80'u8):
-        result.add(b)
-      continue
-    let nameIdx = ctx.findNameMatch(h.name)
-    if h.neverIndexed:
-      if nameIdx > 0:
-        for b in encodeInt(nameIdx, 4, 0x10'u8):
-          result.add(b)
-      else:
-        for b in encodeInt(0, 4, 0x10'u8):
-          result.add(b)
-        for b in encodeString(h.name, useHuffman):
-          result.add(b)
-      for b in encodeString(h.value, useHuffman):
-        result.add(b)
-    else:
-      if nameIdx > 0:
-        for b in encodeInt(nameIdx, 6, 0x40'u8):
-          result.add(b)
-      else:
-        for b in encodeInt(0, 6, 0x40'u8):
-          result.add(b)
-        for b in encodeString(h.name, useHuffman):
-          result.add(b)
-      for b in encodeString(h.value, useHuffman):
-        result.add(b)
-      ctx.insertEntry(h.name, h.value)
+  var scratch: seq[byte] = @[]
+  encodeInto(ctx, headers, result, scratch, useHuffman, true)

@@ -26,6 +26,15 @@ when not defined(windows):
   import ../types
   import ../net/common
   import ./httpserver
+  import ./http2conn
+  import ./hpack
+
+  const WarmWorkerPoolSize {.intdefine.} = 128
+    ## Entries pre-warmed per pool per worker when `-d:powpowWarmWorkers` is
+    ## set. Smaller than the single-loop default (256): workers multiply it by
+    ## core count, so the default trades a little first-request allocation for
+    ## faster boot and less idle RSS. Opt-in because it costs ~0.5MB per worker
+    ## up front and slows worker spawn.
 
   type
     WorkerCtxObj = object
@@ -92,6 +101,10 @@ when not defined(windows):
           if n < 0: break
       for p in ports:
         server.listen(address, p)
+      when defined(powpowWarmWorkers):
+        # Opt-in warmup AFTER listen, so the connPool warms the live bound
+        # server instead of a throwaway unbound one (see listen() migration).
+        server.populatePools(WarmWorkerPoolSize)
       loop.run()
       server.close()
       loop.close()
@@ -180,6 +193,97 @@ when not defined(windows):
     srv.listen(address, intPorts)
 
   proc close*(srv: MultiThreadHttpServer) =
+    srv.running = false
+    for ctx in srv.contexts:
+      if ctx.wakeWr >= 0:
+        discard posix.close(ctx.wakeWr)
+        ctx.wakeWr = -1
+
+  # ── Multi-threaded H2 (h2c) server ──────────────────────────────────────
+  #
+  # Same shape as the H1 workers: one event loop + H2Server per thread on a
+  # SO_REUSEPORT socket. All H2 connection state is per-connection (owned
+  # by the accepting thread's loop); the only shared global is the
+  # read-only Huffman decode tree, pre-built in `start` before spawning.
+
+  type
+    H2WorkerArgObj = object
+      ctx:     WorkerCtx
+      handler: OnH2RequestCallback
+      address: string
+      port:    int
+
+    H2WorkerArg = ptr H2WorkerArgObj
+
+    MultiThreadH2Server* = ref object
+      numThreads*: int
+      handler:     OnH2RequestCallback
+      threads:     seq[Thread[H2WorkerArg]]
+      contexts:    seq[WorkerCtx]
+      running:     bool
+
+  proc freeH2WorkerArg(arg: H2WorkerArg) =
+    reset(arg[])
+    dealloc(arg)
+
+  proc h2WorkerMain(arg: H2WorkerArg) {.thread.} =
+    {.gcsafe.}:
+      let ctx     = arg.ctx
+      let handler = arg.handler
+      let address = arg.address
+      let port    = arg.port
+      freeH2WorkerArg(arg)
+
+      let loop = newLoop()
+      let server = newH2Server(loop, handler)
+      server.listen(address, port)
+
+      loop.register(ctx.wakeRd.int, {Read}) do (fd: int, ev: set[EventType]):
+        var buf: array[256, byte]
+        while true:
+          let n = posix.read(fd.cint, cast[pointer](addr buf[0]), buf.len)
+          if n == 0:
+            loop.stop()
+            break
+          if n < 0: break
+      loop.run()
+      server.close()
+      loop.close()
+
+  proc newMultiThreadH2Server*(numThreads: int): MultiThreadH2Server =
+    let n = if numThreads > 0: numThreads else: countProcessors()
+    MultiThreadH2Server(
+      numThreads: n,
+      handler:    nil,
+      threads:    newSeq[Thread[H2WorkerArg]](n),
+      contexts:   @[],
+      running:    false,
+    )
+
+  proc start*(srv: MultiThreadH2Server, handler: OnH2RequestCallback,
+              address: string, port: int) =
+    ## Serve h2c on `address:port` with `numThreads` workers. Blocks until
+    ## `close` (like the H1 variant). The handler must be thread-safe
+    ## (capture-nothing closures are ideal).
+    srv.handler = handler
+    srv.running = true
+    initHuffman()  # pre-build shared decode tree before spawning workers
+    for i in 0 ..< srv.numThreads:
+      srv.contexts.add(newWorkerCtx())
+    for i in 0 ..< srv.numThreads:
+      let arg = cast[H2WorkerArg](alloc0(sizeof(H2WorkerArgObj)))
+      arg.ctx     = srv.contexts[i]
+      arg.handler = srv.handler
+      arg.address = address
+      arg.port    = port
+      createThread(srv.threads[i], h2WorkerMain, arg)
+    for i in 0 ..< srv.numThreads:
+      joinThread(srv.threads[i])
+    for ctx in srv.contexts:
+      freeWorkerCtx(ctx)
+    srv.contexts.setLen(0)
+
+  proc close*(srv: MultiThreadH2Server) =
     srv.running = false
     for ctx in srv.contexts:
       if ctx.wakeWr >= 0:

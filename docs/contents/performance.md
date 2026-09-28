@@ -29,9 +29,13 @@ them visible in the source and the benchmark numbers below.
   generation-counter stale-event detection; dead-watcher sweep.
 - **4-level hierarchical timer wheel.** O(1) timer insert/fire/cancel.
   ([event loop](core/event-loop.md))
-- **Object pooling.** Connections, parsers, responses and WebSockets are pooled
-  and reused; `newHttpServer` prewarms the pools by default
-  (`populatePools`, pool size 256).
+- **Object pooling.** Connections, read buffers, parsers, requests, responses,
+  per-connection sessions (`ConnHttp`) and WebSockets are pooled and reused;
+  `newHttpServer` prewarms the pools by default (`populatePools`, pool size
+  256). Multi-threaded workers start cold unless `-d:powpowWarmWorkers` is set
+  (warmup size via `-d:WarmWorkerPoolSize=128`). A `Connection: close`
+  connection is tracked in an unhashed pending list and never touches the
+  session table, so pool-miss teardown costs no hashing.
 - **Write buffering + corking.** TCP writes are buffered and corked
   (`TCP_CORK`/`TCP_NOPUSH`), flushed when the connection is writable.
 - **Scatter-gather writes.** `sendv` batches header + body into one `writev`.
@@ -189,6 +193,27 @@ wrk -t4 -c100 -d5s -H "Connection: close" http://127.0.0.1:9000/
 ```
 
 There is also a dedicated loop benchmark: `tests/test_bench_event_loop.nim`.
+
+## Pool sizing
+
+Keep-alive throughput is the pooling story: a reused connection costs no
+allocation and no session-table hashing. `Connection: close` is the pool-miss
+worst case — a full TCP handshake and teardown per request, bottlenecked by the
+kernel (TIME_WAIT recycling, ephemeral ports), typically 10–20x below
+keep-alive on loopback no matter the userspace code.
+
+Size the pools at or above the concurrent connections you serve, or excess
+connections allocate on demand (server-side pool starvation):
+
+- `MaxConnPoolSize` / `MaxBufPoolSize` (`net/tcp.nim`, `{.intdefine.}`, default
+  1024 each): connection wrappers + 4KB read buffers.
+- `MaxParserPoolSize` / `MaxReqPoolSize` / `MaxResPoolSize` /
+  `MaxConnHttpPoolSize` (`proto/httpserver.nim`, `{.intdefine.}`, defaults
+  2048/2048/4048/2048): parsers, requests, responses, sessions.
+- Override at compile time, e.g. `-d:MaxConnPoolSize=4096
+  -d:MaxConnHttpPoolSize=4096`. Past the caps the server stays correct and just
+  allocates; single-loop prewarm is 256 entries (`populatePools`), workers warm
+  up on demand unless `-d:powpowWarmWorkers` is set.
 
 ## API reference
 

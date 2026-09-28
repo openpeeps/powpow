@@ -81,7 +81,8 @@ proc close*(c: H2ClientConn) =
   c.failStreams("closed")
   if c.h2 != nil and not c.h2.goawaySent and not c.h2.h2Closed():
     c.h2.goawaySent = true
-    discard c.conn.send(encodeGoaway(c.h2.lastPeerSid, H2NoError))
+    c.h2.stageFrame(encodeGoaway(c.h2.lastPeerSid, H2NoError))
+    c.h2.flushSendBuf()  # close() follows: cannot wait for turn end
   c.conn.close()
 
 proc failWaiting(c: H2ClientConn, err: string) =
@@ -169,11 +170,21 @@ proc connectH2*(loop: Loop, host: string, port: int,
   var holder: H2ClientConn
   holder = H2ClientConn(loop: loop, host: host, port: port, tls: false,
                         ready: false, closed: false, waiting: @[])
+  loop.ensureH2FlushHook()
   let c = holder
   loop.connect(host, port,
     onConnect = proc(conn: Connection) =
       c.conn = conn
       c.h2 = newH2Conn(conn, H2ClientRole, nil)
+      c.h2.onConnDeath = proc(h: H2Conn) {.closure.} =
+        # Socket died under a turn-end flush: no further loop events will
+        # arrive, so fail pending work now. Idempotent with onClose via
+        # `c.closed` (checked first, set before failing).
+        if c.closed:
+          return
+        c.closed = true
+        c.failWaiting("closed")
+        c.failStreams("closed")
       c.h2.onSettingsApplied = proc(h: H2Conn) {.closure.} =
         c.tryWaiting()
       c.finishConnect()
@@ -208,12 +219,19 @@ proc connectH2Tls*(loop: Loop, host: string, port: int, tlsCtx: SslContext,
     var holder: H2ClientConn
     holder = H2ClientConn(loop: loop, host: host, port: port, tls: true,
                           ready: false, closed: false, waiting: @[])
+    loop.ensureH2FlushHook()
     let c = holder
     loop.connect(host, port,
       onConnect = proc(conn: Connection) =
         c.conn = conn
         conn.wrapTls(tlsCtx, serverName = host)
         c.h2 = newH2Conn(conn, H2ClientRole, nil)
+        c.h2.onConnDeath = proc(h: H2Conn) {.closure.} =
+          if c.closed:
+            return
+          c.closed = true
+          c.failWaiting("closed")
+          c.failStreams("closed")
         c.h2.onSettingsApplied = proc(h: H2Conn) {.closure.} =
           c.tryWaiting()
         c.finishConnect()

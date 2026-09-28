@@ -68,8 +68,11 @@ proc handler(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
     of HttpPost:
       if path == "/api/echo":
         let body = req.getBodyString()
-        let contentType = req.getHeaders().getOrDefault("Content-Type",
-                                                          @["application/octet-stream"].HttpHeaderValues)
+        # Zero-alloc header lookup: getHeaderValue scans the raw header bytes
+        # (no per-request header table). $ct copies once so the response
+        # header owns its bytes instead of aliasing parser scratch.
+        let ct = req.getHeaderValue("Content-Type")
+        let contentType = if ct.len > 0: $ct else: "application/octet-stream"
         res.status(Http200)
            .header("Content-Type", contentType)
            .send(body)

@@ -293,6 +293,52 @@ proc decodePriority*(f: H2Frame): tuple[exclusive: bool, depId: int32,
 
 # ── Encoders ────────────────────────────────────────────────────────────
 
+proc appendBytes*(buf: var seq[byte], data: openArray[byte]) {.inline.} =
+  ## Append raw bytes without an intermediate copy.
+  if data.len == 0:
+    return
+  let off = buf.len
+  buf.setLen(off + data.len)
+  copyMem(addr buf[off], unsafeAddr data[0], data.len)
+
+proc encodeFrameInto*(buf: var seq[byte], typ: int, flags: uint8,
+                      streamId: int32, payload: openArray[byte]) =
+  ## Append a complete frame to `buf` (single copy of `payload`).
+  let off = buf.len
+  buf.setLen(off + H2FrameHeaderLen + payload.len)
+  buf[off+0] = byte((payload.len shr 16) and 0xFF)
+  buf[off+1] = byte((payload.len shr 8) and 0xFF)
+  buf[off+2] = byte(payload.len and 0xFF)
+  buf[off+3] = byte(typ and 0xFF)
+  buf[off+4] = flags
+  buf[off+5] = byte((streamId shr 24) and 0x7F)  # reserved bit stays zero
+  buf[off+6] = byte((streamId shr 16) and 0xFF)
+  buf[off+7] = byte((streamId shr 8) and 0xFF)
+  buf[off+8] = byte(streamId and 0xFF)
+  if payload.len > 0:
+    copyMem(addr buf[off + H2FrameHeaderLen], unsafeAddr payload[0],
+            payload.len)
+
+proc reserveFrameHeader*(buf: var seq[byte]): int {.inline.} =
+  ## Reserve 9 bytes for a frame header whose length is not known yet;
+  ## returns the position for `patchFrameHeader`.
+  result = buf.len
+  buf.setLen(result + H2FrameHeaderLen)
+
+proc patchFrameHeader*(buf: var seq[byte], pos: int, typ: int, flags: uint8,
+                       streamId: int32) {.inline.} =
+  ## Backfill the header reserved by `reserveFrameHeader`.
+  let plen = buf.len - pos - H2FrameHeaderLen
+  buf[pos+0] = byte((plen shr 16) and 0xFF)
+  buf[pos+1] = byte((plen shr 8) and 0xFF)
+  buf[pos+2] = byte(plen and 0xFF)
+  buf[pos+3] = byte(typ and 0xFF)
+  buf[pos+4] = flags
+  buf[pos+5] = byte((streamId shr 24) and 0x7F)
+  buf[pos+6] = byte((streamId shr 16) and 0xFF)
+  buf[pos+7] = byte((streamId shr 8) and 0xFF)
+  buf[pos+8] = byte(streamId and 0xFF)
+
 proc encodeFrame*(typ: int, flags: uint8, streamId: int32,
                   payload: openArray[byte]): seq[byte] =
   result = newSeq[byte](H2FrameHeaderLen + payload.len)

@@ -793,6 +793,29 @@ test "test_parse_range_strict":
   check not parseRange("bytes=0-1,3-4", 100).ok
   check not parseRange("bytes=0- 5", 100).ok
 
+test "test_parse_range_case_insensitive_unit":
+  # The "bytes=" unit folds ASCII case inline (no toLowerAscii copy).
+  check parseRange("bytes=0-5", 100).ok
+  check parseRange("Bytes=0-5", 100).ok
+  check parseRange("BYTES=0-5", 100).ok
+  check parseRange("bYtEs=2-", 100).ok
+  check not parseRange("byte=0-5", 100).ok
+  check not parseRange("items=0-5", 100).ok
+  check isBytesUnit("bytes=")
+  check isBytesUnit("BYTES=")
+  check not isBytesUnit("byte=")
+  check not isBytesUnit("bytes")
+
+test "test_get_file_ext":
+  check getFileExt("/srv/site/index.html") == "html"
+  check getFileExt("/srv/site/IMAGE.PNG") == "png"
+  check getFileExt("archive.tar.gz") == "gz"
+  check getFileExt("/srv/noext") == ""
+  check getFileExt("/srv/trailing.") == ""
+  check getFileExt(".gitignore") == ""
+  check getFileExt("/srv/.gitignore") == ""
+  check getFileExt(".profile.bak") == "bak"
+
 # ══════════════════════════════════════════════════════════════════════
 # Section 3: WebSocket Security
 # ══════════════════════════════════════════════════════════════════════

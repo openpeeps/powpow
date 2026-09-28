@@ -851,3 +851,31 @@ test "test_firefox_post_regression":
   let headers = req.getHeaders()
   doAssert headers["Cookie"] == "ssid=FHsbnuNO2uBtpSxfEgQ9LI7YV4fC7u0mrItyJk5DAM"
   doAssert headers["Cache-Control"] == "no-cache"
+
+# ── Test 35: getHeaderValue zero-alloc lookup ─────────────────────────────────
+
+test "test_get_header_value":
+  let raw = "GET /x HTTP/1.1\r\nHost: example.com\r\nContent-Type: text/plain\r\nX-Empty:\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isComplete()
+  let req = parser.getRequest()
+  doAssert req.getHeaderValue("Content-Type") == "text/plain"
+  doAssert req.getHeaderValue("content-type") == "text/plain"
+  doAssert req.getHeaderValue("CONTENT-TYPE") == "text/plain"
+  doAssert req.getHeaderValue("Host") == "example.com"
+  doAssert req.getHeaderValue("X-Empty") == ""
+  doAssert req.getHeaderValue("X-Missing") == ""
+  doAssert req.getHeaderValue("") == ""
+  # Parity with the materialized table.
+  let headers = req.getHeaders()
+  doAssert headers["Content-Type"] == req.getHeaderValue("Content-Type")
+  doAssert headers["Host"] == req.getHeaderValue("host")
+
+test "test_get_header_value_last_wins":
+  let raw = "GET /x HTTP/1.1\r\nHost: a\r\nX-Dup: first\r\nX-Dup: second\r\n\r\n"
+  let parser = newHttpParser()
+  parser.feed(raw)
+  doAssert parser.isComplete()
+  let req = parser.getRequest()
+  doAssert req.getHeaderValue("x-dup") == "second"

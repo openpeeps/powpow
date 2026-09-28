@@ -120,7 +120,20 @@ type
     pending*: seq[H2PendingWrite]
     onRequest*: OnH2RequestCallback
     onSettingsApplied*: proc(h2: H2Conn) {.closure.}
+    onConnDeath*: proc(h2: H2Conn) {.closure.}
+      ## Fired by `flushStagedH2` when the socket dies under a turn-end
+      ## flush (e.g. peer vanished after bytes were staged). Owners that
+      ## track liveness above the frame layer (the H2 client with its
+      ## waiting queue) fail their pending work here — a dead socket
+      ## produces no further loop events, so without this the streams
+      ## would hang forever. Must be idempotent; must not stage.
     alpnChecked*: bool
+    sendBuf*: seq[byte]  ## Staged outbound frames, flushed once per loop
+      ## turn (see `flushStagedH2`). Batching many small frames into one
+      ## `conn.send` is the single biggest h2 throughput lever: without it
+      ## every HEADERS+DATA response costs 2 syscalls.
+    sendStaged*: bool    ## True while queued in `h2StagedConns`.
+    huffScratch*: seq[byte]  ## Reused Huffman scratch for response encodes.
 
   H2Server* = ref object
     loop*: Loop
@@ -142,6 +155,115 @@ const
   H2DefaultMaxBody* = 8 * 1024 * 1024
   H2WindowTopUpAt = 32768
   H2SniffCap = 8192
+  H2SendBufCap* {.intdefine.} = 65536
+    ## Per-connection staging cap: `stageFrame` flushes inline past this so
+    ## a bulk sender cannot grow `sendBuf` without bound. Tune with
+    ## `-d:H2SendBufCap=<bytes>`.
+
+var h2StagedConns {.threadvar.}: seq[H2Conn]
+  ## Conns with staged bytes, drained by `flushStagedH2` at turn end.
+  ## Thread-local: each loop/worker thread owns its conns, no locking.
+
+proc flushSendBuf*(h2: H2Conn) =
+  ## Emit staged bytes in a single `conn.send`. Partial writes fall back to
+  ## the connection's own `writeBuf` machinery, which preserves FIFO order
+  ## with later stages. Bytes are dropped only when the socket itself is
+  ## unusable — NOT on `CsClosed`: teardown paths (GOAWAY + close) stage
+  ## and flush inline after marking the conn closed.
+  if h2.sendBuf.len == 0:
+    return
+  if h2.conn.state != Connected:
+    stderr.writeLine("DBG flushSendBuf drop not-connected len=", h2.sendBuf.len)
+    h2.sendBuf.setLen(0)
+    return
+  let n = h2.conn.send(h2.sendBuf)
+  h2.sendBuf.setLen(0)  # keep capacity for the next turn
+
+proc flushStagedH2*() =
+  ## Turn-end hook: flush every conn that staged frames this turn. Conns
+  ## that closed mid-turn drop their staged bytes (teardown paths already
+  ## flushed inline). A conn whose socket dies under the flush fires
+  ## `onConnDeath` — it will see no further loop events. The batch is
+  ## moved out first so death callbacks cannot corrupt the queue.
+  if h2StagedConns.len == 0:
+    return
+  var batch = move(h2StagedConns)
+  for h2 in batch:
+    h2.sendStaged = false
+    if h2.state == CsClosed or h2.conn.state != Connected:
+      h2.sendBuf.setLen(0)
+    else:
+      h2.flushSendBuf()
+    if h2.conn.state != Connected and h2.onConnDeath != nil:
+      h2.onConnDeath(h2)
+
+proc ensureH2FlushHook*(loop: Loop) =
+  ## Register the turn-end flush on `loop` (once per loop, via tag dedupe).
+  loop.addTurnEndHook("h2flush", flushStagedH2)
+
+proc stageFrame*(h2: H2Conn, data: openArray[byte]) =
+  ## Buffer an encoded frame for the turn-end flush instead of a syscall.
+  if data.len == 0:
+    return
+  if not h2.sendStaged:
+    h2.sendStaged = true
+    h2StagedConns.add(h2)
+  let off = h2.sendBuf.len
+  h2.sendBuf.setLen(off + data.len)
+  copyMem(addr h2.sendBuf[off], unsafeAddr data[0], data.len)
+  if h2.sendBuf.len >= H2SendBufCap:
+    h2.flushSendBuf()
+
+proc stageFrame*(h2: H2Conn, s: string) =
+  ## String variant (H1 upgrade interim responses).
+  if s.len == 0:
+    return
+  if not h2.sendStaged:
+    h2.sendStaged = true
+    h2StagedConns.add(h2)
+  let off = h2.sendBuf.len
+  h2.sendBuf.setLen(off + s.len)
+  copyMem(addr h2.sendBuf[off], unsafeAddr s[0], s.len)
+  if h2.sendBuf.len >= H2SendBufCap:
+    h2.flushSendBuf()
+
+proc markStaged(h2: H2Conn) {.inline.} =
+  ## Enqueue `h2` for the turn-end flush ahead of direct `sendBuf` appends
+  ## (used by the Into-style encoders that stage without intermediaries).
+  if not h2.sendStaged:
+    h2.sendStaged = true
+    h2StagedConns.add(h2)
+
+proc checkSendCap(h2: H2Conn) {.inline.} =
+  ## Bound `sendBuf` for bulk senders: flush inline past the cap.
+  if h2.sendBuf.len >= H2SendBufCap:
+    h2.flushSendBuf()
+
+proc appendUint(buf: var seq[byte], v: int) =
+  ## Decimal digits, no `$` allocation.
+  if v == 0:
+    buf.add(byte('0'))
+    return
+  var tmp: array[20, byte]
+  var n = 0
+  var x = v
+  while x > 0:
+    tmp[n] = byte(ord('0') + x mod 10)
+    inc n
+    x = x div 10
+  for i in countdown(n - 1, 0):
+    buf.add(tmp[i])
+
+proc digitCount(v: int): int =
+  if v == 0:
+    return 1
+  var x = v
+  while x > 0:
+    inc result
+    x = x div 10
+
+const emptyH2Body*: seq[byte] = @[]
+  ## Typed empty body for header-only responses (no allocation).
 
 # ── Connection / stream teardown ────────────────────────────────────
 
@@ -158,7 +280,8 @@ proc connError(h2: H2Conn, code: H2ErrorCode) =
   h2.state = CsClosed
   if not h2.goawaySent:
     h2.goawaySent = true
-    discard h2.conn.send(encodeGoaway(h2.lastPeerSid, code))
+    h2.stageFrame(encodeGoaway(h2.lastPeerSid, code))
+    h2.flushSendBuf()  # teardown follows: cannot wait for turn end
   when iouEnabled:
     h2.conn.close()
   else:
@@ -171,7 +294,8 @@ proc maybeDrain(h2: H2Conn) =
   if h2.goawayReceived and h2.openCount <= 0 and not h2.goawaySent:
     h2.goawaySent = true
     if h2.state != CsClosed:
-      discard h2.conn.send(encodeGoaway(h2.lastPeerSid, H2NoError))
+      h2.stageFrame(encodeGoaway(h2.lastPeerSid, H2NoError))
+      h2.flushSendBuf()  # close() follows: cannot wait for turn end
     h2.state = CsClosed
     h2.conn.close()
 
@@ -181,7 +305,7 @@ proc streamError(h2: H2Conn, sid: int32, code: H2ErrorCode) =
     h2.streams.del(sid)
     dec h2.openCount
   if h2.state != CsClosed:
-    discard h2.conn.send(encodeRstStream(sid, code))
+    h2.stageFrame(encodeRstStream(sid, code))
   h2.maybeDrain()
 
 proc closeStream(h2: H2Conn, sid: int32) =
@@ -191,7 +315,7 @@ proc closeStream(h2: H2Conn, sid: int32) =
   h2.maybeDrain()
 
 proc sendWindowUpdate(h2: H2Conn, sid: int32, increment: uint32) =
-  discard h2.conn.send(encodeWindowUpdate(sid, increment))
+  h2.stageFrame(encodeWindowUpdate(sid, increment))
 
 proc topUpRecv(h2: H2Conn, sid: int32, stream: H2Stream) =
   ## Restore connection- and stream-level receive windows past the
@@ -255,7 +379,7 @@ proc handleSettings(h2: H2Conn, f: H2Frame) =
   h2.applyPeerSettings(settings)
   if h2.state == CsClosed:
     return
-  discard h2.conn.send(encodeSettingsAck())
+  h2.stageFrame(encodeSettingsAck())
   if h2.onSettingsApplied != nil:
     h2.onSettingsApplied(h2)
 
@@ -263,7 +387,8 @@ proc handleSettings(h2: H2Conn, f: H2Frame) =
 
 proc flushPending(h2: H2Conn) =
   ## Drain queued DATA while connection and stream windows allow.
-  ## Order is preserved: the head blocks the queue.
+  ## Order is preserved: the head blocks the queue. Frames are staged
+  ## straight into `sendBuf` (no per-chunk frame allocation).
   while h2.pending.len > 0:
     if h2.state == CsClosed:
       return
@@ -281,8 +406,9 @@ proc flushPending(h2: H2Conn) =
     var flags: uint8 = 0
     if last:
       flags = flags or H2FlagEndStream
-    discard h2.conn.send(encodeFrame(0, flags, head.sid,
-      head.data.toOpenArray(head.offset, head.offset + int(n) - 1)))
+    markStaged(h2)
+    encodeFrameInto(h2.sendBuf, 0, flags, head.sid,
+      head.data.toOpenArray(head.offset, head.offset + int(n) - 1))
     h2.sendWindow -= n
     stream.sendWindow -= n
     head.offset += int(n)
@@ -298,10 +424,15 @@ proc flushPending(h2: H2Conn) =
           h2.streams[head.sid].state = HsHalfClosedLocal
     else:
       h2.pending[0] = head
+      h2.checkSendCap()
       return
+  h2.checkSendCap()
 
-proc sendDataChunked(h2: H2Conn, sid: int32, body: seq[byte],
+proc sendDataChunked(h2: H2Conn, sid: int32, body: openArray[byte],
                      endStream: bool) =
+  ## Stage DATA frames straight into `sendBuf` (single copy). `body` is
+  ## borrowed — only the flow-control stall path copies the remainder into
+  ## an owned `pending` entry.
   var offset = 0
   while offset < body.len:
     if not h2.streams.hasKey(sid) or h2.state == CsClosed:
@@ -310,7 +441,10 @@ proc sendDataChunked(h2: H2Conn, sid: int32, body: seq[byte],
     let avail = min([h2.sendWindow, stream.sendWindow,
                      int32(h2.peerMaxFrame)])
     if avail <= 0:
-      h2.pending.add(H2PendingWrite(sid: sid, data: body, offset: offset,
+      var owned = newSeq[byte](body.len - offset)
+      if owned.len > 0:
+        copyMem(addr owned[0], unsafeAddr body[offset], owned.len)
+      h2.pending.add(H2PendingWrite(sid: sid, data: owned, offset: 0,
                                     endStream: endStream))
       return
     let n = min(avail, int32(body.len - offset))
@@ -318,8 +452,9 @@ proc sendDataChunked(h2: H2Conn, sid: int32, body: seq[byte],
     var flags: uint8 = 0
     if last:
       flags = flags or H2FlagEndStream
-    discard h2.conn.send(encodeFrame(0, flags, sid,
-      body.toOpenArray(offset, offset + int(n) - 1)))
+    markStaged(h2)
+    encodeFrameInto(h2.sendBuf, 0, flags, sid,
+      body.toOpenArray(offset, offset + int(n) - 1))
     h2.sendWindow -= n
     stream.sendWindow -= n
     offset += int(n)
@@ -328,6 +463,7 @@ proc sendDataChunked(h2: H2Conn, sid: int32, body: seq[byte],
       h2.closeStream(sid)
     else:
       h2.streams[sid].state = HsHalfClosedLocal
+  h2.checkSendCap()
 
 proc respond431(h2: H2Conn, sid: int32) =
   ## Oversize header block → HTTP 431 + close the stream (§10.5).
@@ -339,7 +475,7 @@ proc respond431(h2: H2Conn, sid: int32) =
     except HpackError:
       h2.streamError(sid, H2InternalError)
       return
-  discard h2.conn.send(encodeHeaders(sid, blk, endStream = false))
+  h2.stageFrame(encodeHeaders(sid, blk, endStream = false))
   var body = newSeq[byte]("Request Header Fields Too Large".len)
   const msg = "Request Header Fields Too Large"
   for i, c in msg:
@@ -357,27 +493,64 @@ proc header*(res: H2Response, name, value: string): H2Response {.discardable.} =
   res.headers.add((name.toLowerAscii(), value))
   res
 
-proc send*(res: H2Response, body: seq[byte]) =
+proc stageResponseHeaders(h2: H2Conn, sid: int32, status: uint16,
+                          contentLen: int,
+                          headers: openArray[(string, string)],
+                          endStream: bool) =
+  ## Encode response HEADERS straight into `sendBuf`: static-indexed
+  ## `:status` (no `$`), digit-written `content-length`, custom headers as
+  ## literals WITHOUT indexing (B3 — no dynamic-table insert/evict churn).
+  ## Single copy of every byte; zero allocations in steady state.
+  markStaged(h2)
+  let pos = reserveFrameHeader(h2.sendBuf)
+  case status
+  of 200: encodeIntInto(h2.sendBuf, 8, 7, 0x80'u8)
+  of 204: encodeIntInto(h2.sendBuf, 9, 7, 0x80'u8)
+  of 206: encodeIntInto(h2.sendBuf, 10, 7, 0x80'u8)
+  of 304: encodeIntInto(h2.sendBuf, 11, 7, 0x80'u8)
+  of 400: encodeIntInto(h2.sendBuf, 12, 7, 0x80'u8)
+  of 404: encodeIntInto(h2.sendBuf, 13, 7, 0x80'u8)
+  of 500: encodeIntInto(h2.sendBuf, 14, 7, 0x80'u8)
+  else:
+    # Literal without indexing, indexed `:status` name (static 8).
+    encodeIntInto(h2.sendBuf, 8, 4, 0x00'u8)
+    h2.huffScratch.setLen(0)
+    var tmp: array[8, byte]
+    var n = 0
+    var x = int(status)
+    if x == 0:
+      tmp[0] = byte('0')
+      n = 1
+    else:
+      while x > 0:
+        tmp[n] = byte(ord('0') + x mod 10)
+        inc n
+        x = x div 10
+    encodeIntInto(h2.sendBuf, n, 7, 0x00'u8)
+    for i in countdown(n - 1, 0):
+      h2.sendBuf.add(tmp[i])
+  # `content-length`, indexed name (static 28), literal value.
+  encodeIntInto(h2.sendBuf, 28, 4, 0x00'u8)
+  let dcnt = digitCount(contentLen)
+  encodeIntInto(h2.sendBuf, dcnt, 7, 0x00'u8)
+  appendUint(h2.sendBuf, contentLen)
+  for (n, v) in headers:
+    if n == ":status" or n == "content-length":
+      continue
+    let hh = HpackHeader(name: n, value: v)
+    h2.encCtx.encodeInto([hh], h2.sendBuf, h2.huffScratch, true, false)
+  var flags = H2FlagEndHeaders
+  if endStream:
+    flags = flags or H2FlagEndStream
+  patchFrameHeader(h2.sendBuf, pos, 1, flags, sid)
+
+proc send*(res: H2Response, body: openArray[byte]) =
   let h2 = res.h2
   if res.sent or not h2.streams.hasKey(res.streamId):
     return
   res.sent = true
-  var hs = @[HpackHeader(name: ":status", value: $res.status)]
-  hs.add(HpackHeader(name: "content-length", value: $body.len))
-  for (n, v) in res.headers:
-    if n == ":status" or n == "content-length":
-      continue
-    hs.add(HpackHeader(name: n, value: v))
-  let blk =
-    try:
-      h2.encCtx.encode(hs)
-    except HpackError:
-      h2.streamError(res.streamId, H2InternalError)
-      return
-  if h2.state == CsClosed or not h2.streams.hasKey(res.streamId):
-    return
-  discard h2.conn.send(encodeHeaders(res.streamId, blk,
-    endStream = body.len == 0))
+  h2.stageResponseHeaders(res.streamId, res.status, body.len, res.headers,
+                          body.len == 0)
   if body.len > 0:
     h2.sendDataChunked(res.streamId, body, endStream = true)
   elif h2.streams.hasKey(res.streamId):
@@ -385,12 +558,14 @@ proc send*(res: H2Response, body: seq[byte]) =
       h2.closeStream(res.streamId)
     else:
       h2.streams[res.streamId].state = HsHalfClosedLocal
+  h2.checkSendCap()
 
 proc send*(res: H2Response, body: string) =
-  var b = newSeq[byte](body.len)
-  for i, c in body:
-    b[i] = byte(c)
-  res.send(b)
+  ## Zero-copy string variant: the body is borrowed, never duplicated.
+  if body.len == 0:
+    res.send(emptyH2Body)
+  else:
+    res.send(body.toOpenArrayByte(0, body.high))
 
 proc reset*(res: H2Response, code = H2Cancelled) =
   ## Abort the stream with RST_STREAM (e.g. handler rejects the request).
@@ -450,8 +625,11 @@ proc splitRequestHeaders(hs: seq[HpackHeader]): tuple[ok: bool, req: H2Request] 
     return (false, req)
   (true, req)
 
-proc dispatchStream(h2: H2Conn, stream: H2Stream) =
-  let (ok, mutReq) = splitRequestHeaders(stream.reqHeaders)
+proc dispatchStream(h2: H2Conn, stream: H2Stream, hs: seq[HpackHeader]) =
+  ## `hs` is the complete header list: passed straight through for
+  ## single-block requests (no intermediate copy), or `stream.reqHeaders`
+  ## when headers arrived across fragments/trailers.
+  let (ok, mutReq) = splitRequestHeaders(hs)
   if not ok:
     h2.streamError(stream.id, H2ProtocolError)
     return
@@ -491,20 +669,20 @@ proc headerListSize(hs: seq[HpackHeader]): int =
   for h in hs:
     result += h.name.len + h.value.len
 
-proc decodeFragBlock(h2: H2Conn, sid: int32): bool =
-  ## HPACK-decode `fragBuf` into the stream's header list. Returns false
-  ## after raising a stream error.
+proc decodeFragBlock(h2: H2Conn, sid: int32,
+                     decoded: var seq[HpackHeader]): bool =
+  ## HPACK-decode `fragBuf`. Returns false after raising a stream error.
+  ## The caller owns `decoded`: single-block requests dispatch it directly
+  ## (no copy through `stream.reqHeaders`); fragmented/trailer blocks are
+  ## appended by the caller only when retention is needed.
   let stream = h2.streams.getOrDefault(sid)
   if stream == nil:
     return false
-  var decoded: seq[HpackHeader]
   try:
     decoded = h2.decCtx.decode(h2.fragBuf)
   except HpackError:
     h2.streamError(sid, H2CompressionError)
     return false
-  for h in decoded:
-    stream.reqHeaders.add(h)
   true
 
 proc handleHeaders(h2: H2Conn, f: H2Frame) =
@@ -531,13 +709,16 @@ proc handleHeaders(h2: H2Conn, f: H2Frame) =
       return
     if (f.flags and H2FlagEndHeaders) != 0:
       h2.fragBuf = fragment
-      if not h2.decodeFragBlock(sid):
+      var decoded: seq[HpackHeader]
+      if not h2.decodeFragBlock(sid, decoded):
         return
+      for h in decoded:
+        stream.reqHeaders.add(h)
       if headerListSize(stream.reqHeaders) > h2.maxHeaderList:
         h2.respond431(sid)
         return
       stream.state = HsClosed
-      h2.dispatchStream(stream)
+      h2.dispatchStream(stream, stream.reqHeaders)
     else:
       h2.fragStream = sid
       h2.fragBuf = fragment
@@ -562,14 +743,25 @@ proc handleHeaders(h2: H2Conn, f: H2Frame) =
   inc h2.openCount
   if (f.flags and H2FlagEndHeaders) != 0:
     h2.fragBuf = fragment
-    if not h2.decodeFragBlock(sid):
-      return
-    if headerListSize(stream.reqHeaders) > h2.maxHeaderList:
-      h2.respond431(sid)
+    var decoded: seq[HpackHeader]
+    if not h2.decodeFragBlock(sid, decoded):
       return
     if (f.flags and H2FlagEndStream) != 0:
+      # Complete single-block request: dispatch the decoded block
+      # directly, skipping the `reqHeaders` copy.
+      if headerListSize(decoded) > h2.maxHeaderList:
+        h2.respond431(sid)
+        return
       stream.state = HsHalfClosedRemote
-      h2.dispatchStream(stream)
+      h2.dispatchStream(stream, decoded)
+    else:
+      # Headers complete but the stream stays open (body to come):
+      # retain for dispatch at END_STREAM.
+      for h in decoded:
+        stream.reqHeaders.add(h)
+      if headerListSize(stream.reqHeaders) > h2.maxHeaderList:
+        h2.respond431(sid)
+        return
   else:
     h2.fragStream = sid
     h2.fragBuf = fragment
@@ -582,8 +774,7 @@ proc handleContinuation(h2: H2Conn, f: H2Frame) =
   let sid = f.streamId
   let wasTrailer = h2.streams.hasKey(sid) and
     h2.streams[sid].reqHeaders.len > 0
-  for b in f.payload:
-    h2.fragBuf.add(b)
+  appendBytes(h2.fragBuf, f.payload)
   if (f.flags and H2FlagEndHeaders) == 0:
     return
   let endStream = h2.fragEndStream
@@ -593,19 +784,31 @@ proc handleContinuation(h2: H2Conn, f: H2Frame) =
     h2.connError(H2ProtocolError)
     return
   let stream = h2.streams[sid]
-  if not h2.decodeFragBlock(sid):
-    return
-  if headerListSize(stream.reqHeaders) > h2.maxHeaderList:
-    h2.respond431(sid)
+  var decoded: seq[HpackHeader]
+  if not h2.decodeFragBlock(sid, decoded):
     return
   # CONTINUATION never carries END_STREAM; the flag arrived on the HEADERS
   # that opened the block. A trailer block always ends the stream.
   if wasTrailer:
+    for h in decoded:
+      stream.reqHeaders.add(h)
+    if headerListSize(stream.reqHeaders) > h2.maxHeaderList:
+      h2.respond431(sid)
+      return
     stream.state = HsClosed
-    h2.dispatchStream(stream)
+    h2.dispatchStream(stream, stream.reqHeaders)
   elif endStream:
+    if headerListSize(decoded) > h2.maxHeaderList:
+      h2.respond431(sid)
+      return
     stream.state = HsHalfClosedRemote
-    h2.dispatchStream(stream)
+    h2.dispatchStream(stream, decoded)
+  else:
+    for h in decoded:
+      stream.reqHeaders.add(h)
+    if headerListSize(stream.reqHeaders) > h2.maxHeaderList:
+      h2.respond431(sid)
+      return
 
 proc handleData(h2: H2Conn, f: H2Frame) =
   if h2.fragStream >= 0:
@@ -616,7 +819,7 @@ proc handleData(h2: H2Conn, f: H2Frame) =
     if sid <= h2.lastPeerSid:
       # Data for a closed stream.
       if h2.state != CsClosed:
-        discard h2.conn.send(encodeRstStream(sid, H2StreamClosed))
+        h2.stageFrame(encodeRstStream(sid, H2StreamClosed))
     else:
       h2.connError(H2ProtocolError)  # DATA on idle stream
     return
@@ -633,13 +836,12 @@ proc handleData(h2: H2Conn, f: H2Frame) =
   if stream.reqBody.len + f.payload.len > h2.maxBody:
     h2.streamError(sid, H2Cancelled)
     return
-  for b in f.payload:
-    stream.reqBody.add(b)
+  appendBytes(stream.reqBody, f.payload)
   h2.topUpRecv(sid, stream)
   if (f.flags and H2FlagEndStream) != 0:
     stream.state = HsHalfClosedRemote
     if h2.fragStream < 0:
-      h2.dispatchStream(stream)
+      h2.dispatchStream(stream, stream.reqHeaders)
 
 # ── Client role (M4) ────────────────────────────────────────────────
 #
@@ -652,11 +854,16 @@ proc handleData(h2: H2Conn, f: H2Frame) =
 proc sendHeaderBlock(h2: H2Conn, sid: int32, blk: seq[byte],
                      endStream: bool) =
   ## Emit HEADERS, fragmenting across CONTINUATION past `peerMaxFrame`.
+  ## Frames go straight into `sendBuf` (header reserve + patch, no copies).
+  markStaged(h2)
   if blk.len <= h2.peerMaxFrame:
     var flags = H2FlagEndHeaders
     if endStream:
       flags = flags or H2FlagEndStream
-    discard h2.conn.send(encodeFrame(1, flags, sid, blk))
+    let pos = reserveFrameHeader(h2.sendBuf)
+    appendBytes(h2.sendBuf, blk)
+    patchFrameHeader(h2.sendBuf, pos, 1, flags, sid)
+    h2.checkSendCap()
     return
   var off = 0
   var first = true
@@ -668,18 +875,20 @@ proc sendHeaderBlock(h2: H2Conn, sid: int32, blk: seq[byte],
       fl = fl or H2FlagEndStream
     if last:
       fl = fl or H2FlagEndHeaders
-    discard h2.conn.send(encodeFrame(if first: 1 else: 9, fl, sid,
-      blk.toOpenArray(off, off + n - 1)))
+    let pos = reserveFrameHeader(h2.sendBuf)
+    appendBytes(h2.sendBuf, blk.toOpenArray(off, off + n - 1))
+    patchFrameHeader(h2.sendBuf, pos, if first: 1 else: 9, fl, sid)
     off += n
     first = false
+  h2.checkSendCap()
 
 proc startClientPreface*(h2: H2Conn) =
   ## Switch a fresh `H2Conn` to the client role and emit the preface:
   ## magic + SETTINGS with push disabled. The peer's frames drive the rest.
   h2.state = CsReady
   h2.prefaceSettingsSeen = true
-  discard h2.conn.send(H2ConnMagic)
-  discard h2.conn.send(encodeSettings([H2Setting(id: 2, value: 0)]))
+  h2.stageFrame(H2ConnMagic)
+  h2.stageFrame(encodeSettings([H2Setting(id: 2, value: 0)]))
 
 proc openClientStream*(h2: H2Conn, headers: seq[HpackHeader],
                        body: seq[byte], endStream: bool,
@@ -723,7 +932,7 @@ proc failClientStream(h2: H2Conn, sid: int32, err: string,
   let cb = stream.clientCb
   stream.clientCb = nil
   if h2.state != CsClosed:
-    discard h2.conn.send(encodeRstStream(sid, code))
+    h2.stageFrame(encodeRstStream(sid, code))
   h2.closeStream(sid)
   if cb != nil:
     cb(H2ClientResponse(), err)
@@ -777,7 +986,7 @@ proc handleClientHeaders(h2: H2Conn, f: H2Frame) =
   if not h2.streams.hasKey(sid):
     if sid < h2.nextStreamId:
       if h2.state != CsClosed:
-        discard h2.conn.send(encodeRstStream(sid, H2StreamClosed))
+        h2.stageFrame(encodeRstStream(sid, H2StreamClosed))
     else:
       h2.connError(H2ProtocolError)  # response for an idle stream
     return
@@ -843,7 +1052,7 @@ proc handleClientData(h2: H2Conn, f: H2Frame) =
       h2.connError(H2ProtocolError)
     elif sid < h2.nextStreamId:
       if h2.state != CsClosed:
-        discard h2.conn.send(encodeRstStream(sid, H2StreamClosed))
+        h2.stageFrame(encodeRstStream(sid, H2StreamClosed))
     else:
       h2.connError(H2ProtocolError)  # DATA on idle stream
     return
@@ -897,7 +1106,7 @@ proc handlePing(h2: H2Conn, f: H2Frame) =
   except H2Error as e:
     h2.connError(e.code)
     return
-  discard h2.conn.send(encodePingAck(opaque))
+  h2.stageFrame(encodePingAck(opaque))
 
 proc handleWindowUpdate(h2: H2Conn, f: H2Frame) =
   var inc: uint32
@@ -969,7 +1178,7 @@ proc handleFrame(h2: H2Conn, f: H2Frame) =
 # ── Preface: prior knowledge + Upgrade ────────────────────────────────
 
 proc sendServerPreface(h2: H2Conn) =
-  discard h2.conn.send(encodeSettings(newSeq[H2Setting]()))
+  h2.stageFrame(encodeSettings(newSeq[H2Setting]()))
 
 proc b64urlDecode(s: string): seq[byte] =
   ## HTTP2-Settings is base64url without padding (§3.2).
@@ -1039,8 +1248,9 @@ proc handleUpgrade(h2: H2Conn): bool =
       return true
     return false
   proc reject(statusLine: string) =
-    discard h2.conn.send(statusLine & "Content-Length: 0\r\n" &
+    h2.stageFrame(statusLine & "Content-Length: 0\r\n" &
       "Connection: close\r\n\r\n")
+    h2.flushSendBuf()  # close() follows: cannot wait for turn end
     h2.conn.close()
     h2.state = CsClosed
   let upgrade = headers.getOrDefault("upgrade", "").toLowerAscii()
@@ -1092,7 +1302,7 @@ proc handleUpgrade(h2: H2Conn): bool =
              (uint32(settingsRaw[pos+4]) shl 8) or
              uint32(settingsRaw[pos+5])))
     pos += 6
-  discard h2.conn.send("HTTP/1.1 101 Switching Protocols\r\n" &
+  h2.stageFrame("HTTP/1.1 101 Switching Protocols\r\n" &
     "Connection: Upgrade\r\nUpgrade: h2c\r\n\r\n")
   h2.sendServerPreface()
   h2.applyPeerSettings(embedded)
@@ -1104,7 +1314,7 @@ proc handleUpgrade(h2: H2Conn): bool =
   h2.sniffBuf.setLen(0)
   h2.state = CsPreface  # upgraded conns still open with the client magic
   h2.prefaceSettingsSeen = true  # embedded settings replace the frame
-  h2.dispatchStream(stream)
+  h2.dispatchStream(stream, stream.reqHeaders)
   true
 
 proc feedReady(h2: H2Conn, data: openArray[byte]) =
@@ -1227,10 +1437,11 @@ proc newH2Conn*(conn: Connection, role: H2Role,
          peerInitWindow: H2DefaultWindowSize,
          peerMaxFrame: H2DefaultMaxFrameSize,
          peerMaxConcurrent: high(int), nextStreamId: 1,
-         maxConcurrentLocal: maxConcurrent, maxHeaderList: maxHeaderList,
-         maxBody: maxBody, peerAckedSettings: false,
-         goawayReceived: false, goawaySent: false, pending: @[],
-         onRequest: onRequest, onSettingsApplied: nil, alpnChecked: false)
+          maxConcurrentLocal: maxConcurrent, maxHeaderList: maxHeaderList,
+          maxBody: maxBody, peerAckedSettings: false,
+          goawayReceived: false, goawaySent: false, pending: @[],
+          onRequest: onRequest, onSettingsApplied: nil, alpnChecked: false,
+          sendBuf: @[], sendStaged: false, huffScratch: @[])
 
 # ── H2Server ──────────────────────────────────────────────────────────
 
@@ -1247,6 +1458,7 @@ proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
                    conns: initTable[int, H2Conn](64),
                    maxConcurrent: maxConcurrent,
                    maxHeaderList: maxHeaderList, maxBody: maxBody)
+  loop.ensureH2FlushHook()
   when not defined(windows):
     if sslCtx != nil:
       sslCtx.setAlpnProtocols(["h2"])
@@ -1293,7 +1505,8 @@ proc close*(s: H2Server) =
   for _, h2 in s.conns:
     if not h2.goawaySent and h2.state != CsClosed:
       h2.goawaySent = true
-      discard h2.conn.send(encodeGoaway(h2.lastPeerSid, H2NoError))
+      h2.stageFrame(encodeGoaway(h2.lastPeerSid, H2NoError))
+      h2.flushSendBuf()  # close() follows: cannot wait for turn end
     h2.state = CsClosed
     h2.conn.close()
   s.conns.clear()

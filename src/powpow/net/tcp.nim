@@ -30,6 +30,14 @@ when iouEnabled:
 
 export loop.acquireBuf, loop.releaseBuf
 
+when defined(linux):
+  proc c_accept4(s: SocketHandle; a: ptr Sockaddr;
+                 l: ptr SockLen; flags: cint): SocketHandle {.
+    importc: "accept4", header: "<sys/socket.h>".}
+  const
+    Accept4Nonblock = 2048.cint   # SOCK_NONBLOCK
+    Accept4Cloexec = 524288.cint  # SOCK_CLOEXEC
+
 const
   maxWriteBufferSize* {.intdefine.} = 32
   maxBufPoolSize* {.intdefine.} = 1024
@@ -1409,6 +1417,11 @@ when iouEnabled:
       conn.closeAfterFlush = true
       conn.armWrite()
 
+  proc closeAfterSend*(conn: Connection) {.inline, gcsafe.} =
+    ## io_uring backend: same as closeAfterDrain (the FIN+close fast path is
+    ## readiness-only; op-driven teardown already drains via the ring).
+    conn.closeAfterDrain()
+
   proc closeAndRelease*(conn: Connection) {.inline, gcsafe.} =
     conn.close()
     if conn.retiring:
@@ -1992,7 +2005,7 @@ when iouEnabled:
       onData:   onData,
       onClose:  onClose,
       connPool: @[],
-      fdConn:   initTable[int, Connection](64),
+      fdConn:   initTable[int, Connection](1024),
       unixPath: "",
       maxConnections: 0,
     )
@@ -2765,6 +2778,40 @@ else:
     conn.state = Closing
     sockShutdown(conn.fd, shutWrVal())
 
+  proc finCloseNow*(conn: Connection) =
+    ## FIN + immediate close for `Connection: close` small responses.
+    ## `shutdown(WR)` queues FIN after the already-flushed response bytes, so
+    ## delivery stays reliable (unlike `SO_LINGER=0` RST, which discards the
+    ## kernel send queue). The fd is freed right away instead of waiting for
+    ## the peer FIN in a second event-loop turn: no extra `modify()` + `recv`,
+    ## no `Closing` state held in `fdConn`/sweep tables, no in-process
+    ## TIME_WAIT hold (the peer's later FIN gets RST once the socket is gone).
+    ## Pooling is preserved — the `Connection` wrapper + `readBuf` are
+    ## recycled by the outer `releaseConnection`; only the fd is torn down.
+    if conn.state == Closed: return
+    if conn.state != Connected: return
+    if conn.sendFileFd >= 0:
+      if not conn.sendFileKeepOpen:
+        closeFile(conn.sendFileFd)
+      conn.sendFileFd = -1
+    if conn.corked:
+      setTcpCork(conn.fd, false)
+      conn.corked = false
+    conn.state = Closed
+    if conn.server != nil:
+      conn.server.fdConn.del(conn.fd.int)
+    conn.loop.unregisterFd(conn.fd.int)
+    if conn.ssl != nil:
+      conn.tlsFree()
+    # NOTE: no setLinger0 here — RST would discard queued response bytes.
+    # Plain close lets the kernel deliver data + FIN in the background while
+    # the fd number is immediately reusable.
+    sockShutdown(conn.fd, shutWrVal())
+    sockClose(conn.fd)
+    conn.fd = SocketHandle(-1)   # never close/register a reused fd via stale state
+    conn.writeBuf.setLen(0)
+    conn.writePos = 0
+
   proc closeAfterDrain*(conn: Connection) {.inline.} =
     if conn.state == Closed: return
     if conn.writeBuf.len == 0:
@@ -2788,6 +2835,18 @@ else:
         conn.close()
     else:
       conn.closeAfterFlush = true
+
+  proc closeAfterSend*(conn: Connection) {.inline.} =
+    ## Fast teardown for `Connection: close` responses sent via `send/sendv`.
+    ## Takes the FIN+close path when the response fully flushed (user-space
+    ## buffer empty, no sendfile/TLS in flight); otherwise falls back to the
+    ## existing `closeAfterDrain` (buffered-close / graceful) path.
+    if conn.state == Closed: return
+    if conn.writeBuf.len == 0 and conn.sendFileFd < 0 and
+       conn.tlsState == TlsOff:
+      conn.finCloseNow()
+    else:
+      conn.closeAfterDrain()
 
   proc closeAndRelease*(conn: Connection) {.inline.} =
     conn.close()
@@ -3028,7 +3087,7 @@ else:
           continue
         server.fdConn[clientFd.int] = conn
         conn.loop.register(clientFd.int, {Read}, edgeTriggered = true,
-                           callback = server.sharedCb)
+                           callback = server.sharedCb, freshFd = true)
         conn.handleClientRead(server.onData, server.onClose)
         if conn.state == Closed:
           server.releaseConnection(conn)
@@ -3037,12 +3096,28 @@ else:
       while true:
         var clientAddr {.noInit.}: Sockaddr_storage
         var addrLen: SockLen = sizeof(clientAddr).SockLen
-        let clientFd = accept(server.fd,
+        when defined(linux):
+          # Single-syscall accept + nonblock + cloexec. Falls back to
+          # accept()+ioctl() when the kernel lacks accept4 (ENOSYS).
+          var clientFd = c_accept4(server.fd,
+                            cast[ptr Sockaddr](addr clientAddr),
+                            addr addrLen,
+                            Accept4Nonblock or Accept4Cloexec)
+          if clientFd.int < 0 and errno == ENOSYS:
+            clientFd = accept(server.fd,
                               cast[ptr Sockaddr](addr clientAddr),
                               addr addrLen)
-        if clientFd.int >= 0:
-          setNonBlocking(clientFd)
-          setTcpNoDelay(clientFd)
+            if clientFd.int >= 0:
+              setNonBlocking(clientFd)
+          if clientFd.int >= 0:
+            setTcpNoDelay(clientFd)
+        else:
+          let clientFd = accept(server.fd,
+                                cast[ptr Sockaddr](addr clientAddr),
+                                addr addrLen)
+          if clientFd.int >= 0:
+            setNonBlocking(clientFd)
+            setTcpNoDelay(clientFd)
 
         if clientFd.int < 0:
           if sockWouldBlock():
@@ -3063,7 +3138,7 @@ else:
 
         server.fdConn[clientFd.int] = conn
         conn.loop.register(clientFd.int, {Read}, edgeTriggered = true,
-                           callback = server.sharedCb)
+                           callback = server.sharedCb, freshFd = true)
         conn.handleClientRead(server.onData, server.onClose)
         if conn.state == Closed:
           server.releaseConnection(conn)
@@ -3171,7 +3246,7 @@ else:
       onData:   onData,
       onClose:  onClose,
       connPool: @[],
-      fdConn:   initTable[int, Connection](64),
+      fdConn:   initTable[int, Connection](1024),
       sharedCb: nil,
       unixPath: "",
       maxConnections: 0,

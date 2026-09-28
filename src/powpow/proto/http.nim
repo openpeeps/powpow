@@ -119,6 +119,7 @@ type
     pathCache:     string
     queryCache:    string
     contentTypeVal: string
+    headerValCache: string  ## Scratch for getHeaderValue (single value reuse)
 
     phase*:     ParsePhase
     errorCode:  HttpCode
@@ -189,13 +190,22 @@ func parseMethod(buf: ptr UncheckedArray[byte], len: int): HttpMethod {.inline.}
     case char(buf[0])
     of 'G': return HttpGet
     of 'P':
-      if len >= 3 and char(buf[1]) == 'O': return HttpPost
-      elif len >= 3 and char(buf[1]) == 'U': return HttpPut
-      elif len >= 5 and char(buf[1]) == 'A': return HttpPatch
-      else:
+      # Second byte selects the verb (jump table, not a compare chain).
+      # Length guards stay per-branch: POST/PUT need 3 bytes, PATCH needs 5.
+      if len < 3:
         # Extension point for `P*` verbs (PROPFIND, PROPPATCH, ...).
         # Register with `injectSnippet("powpow.parseMethod.P")` before
         # importing this module. Snippet must `return` on match.
+        placeholderSnippet("powpow.parseMethod.P")
+        return HttpPost  # fallback
+      case char(buf[1])
+      of 'O': return HttpPost
+      of 'U': return HttpPut
+      of 'A':
+        if len >= 5: return HttpPatch
+        placeholderSnippet("powpow.parseMethod.P")
+        return HttpPost  # fallback
+      else:
         placeholderSnippet("powpow.parseMethod.P")
         return HttpPost  # fallback
     of 'D': return HttpDelete
@@ -258,6 +268,7 @@ proc newHttpParser*(initialBufSize = 4096): HttpParser =
     pathCache:     "",
     queryCache:    "",
     contentTypeVal:"",
+    headerValCache: "",
     contentTypeStart: -1,
     contentTypeLen: 0,
     expectContinue: false,
@@ -308,6 +319,7 @@ proc reset*(p: HttpParser) =
   p.pathCache.setLen(0)
   p.queryCache.setLen(0)
   p.contentTypeVal.setLen(0)
+  p.headerValCache.setLen(0)
   p.contentTypeStart = -1
   p.contentTypeLen = 0
   p.statusCode    = Http200
@@ -318,8 +330,6 @@ proc reset*(p: HttpParser) =
   p.respHeadersReady = false
   p.respBody.setLen(0)
   p.respBodyReady = false
-  if p.buf.len > 8192:
-    p.buf.setLen(4096)
 
 proc resetForNext*(p: HttpParser) =
   ## Reset the parser for the next pipelined request, preserving any
@@ -372,6 +382,7 @@ proc resetForNext*(p: HttpParser) =
   p.pathCache.setLen(0)
   p.queryCache.setLen(0)
   p.contentTypeVal.setLen(0)
+  p.headerValCache.setLen(0)
   p.contentTypeStart = -1
   p.contentTypeLen = 0
   p.statusCode    = Http200
@@ -1313,6 +1324,70 @@ proc peekContentType*(p: HttpParser): lent string {.inline.} =
     copyMem(addr p.contentTypeVal[0], addr buf[p.contentTypeStart], p.contentTypeLen)
   p.contentTypeVal
 
+proc getHeaderValue*(p: HttpParser, name: string): lent string =
+  ## Value of header `name` (case-insensitive ASCII), or "" when absent.
+  ## Zero-alloc lookup: scans the raw header bytes and copies only the matched
+  ## value into reused per-parser scratch — no table, no per-header strings
+  ## (compare `getHeaders`, which materializes every header). Last-wins on
+  ## duplicates, same as `peekContentType`. The result aliases parser
+  ## scratch: copy it before calling this again or resetting the parser.
+  p.headerValCache.setLen(0)
+  if name.len == 0 or p.headerEnd < 0:
+    return p.headerValCache
+  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+  var i = 0
+  # Same first-line skip as materializeHeaders (cached request-line offset,
+  # with the walk fallback for response-mode parsers).
+  if not p.responseMode and p.reqLineEnd >= 2 and p.reqLineEnd <= p.headerEnd - 1 and
+     char(buf[p.reqLineEnd - 2]) == '\r' and char(buf[p.reqLineEnd - 1]) == '\n':
+    i = p.reqLineEnd
+  else:
+    while i < p.headerEnd - 1:
+      if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+        i += 2
+        break
+      inc i
+  var matchStart = -1
+  var matchLen = 0
+  while i < p.headerEnd - 1:
+    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+      inc i, 2
+      continue
+    let lineStart = i
+    while i < p.headerEnd - 1:
+      if char(buf[i]) == '\r':
+        break
+      inc i
+    var colonPos = lineStart
+    while colonPos < i and char(buf[colonPos]) != ':':
+      inc colonPos
+    if colonPos < i and colonPos > lineStart and
+       colonPos - lineStart == name.len:
+      # Length pre-check, then ASCII case-insensitive compare (no alloc).
+      var eq = true
+      for k in 0 ..< name.len:
+        var a = buf[lineStart + k]
+        var b = byte(name[k])
+        if a >= byte('A') and a <= byte('Z'): a += byte('a') - byte('A')
+        if b >= byte('A') and b <= byte('Z'): b += byte('a') - byte('A')
+        if a != b:
+          eq = false
+          break
+      if eq:
+        var valStart = colonPos + 1
+        while valStart < i and char(buf[valStart]) == ' ':
+          inc valStart
+        matchStart = valStart  # last-wins: keep scanning for duplicates
+        matchLen = i - valStart
+    if i < p.headerEnd - 1 and char(buf[i]) == '\r':
+      inc i
+    inc i
+  if matchStart >= 0:
+    p.headerValCache.setLen(matchLen)
+    if matchLen > 0:
+      copyMem(addr p.headerValCache[0], addr buf[matchStart], matchLen)
+  p.headerValCache
+
 # ── HttpRequest: lazy accessors ──────────────────────────────────────────────
 
 proc getRequest*(p: HttpParser): HttpRequest =
@@ -1421,6 +1496,11 @@ proc getHeaders*(req: HttpRequest): HttpHeaders =
     req.parser.materializeHeaders(req.headersVal)
     req.headersReady = true
   return req.headersVal
+
+proc getHeaderValue*(req: HttpRequest, name: string): lent string {.inline.} =
+  ## Zero-alloc single-header lookup (see the parser twin). Prefer this over
+  ## `getHeaders()` when a handler needs one header value.
+  req.parser.getHeaderValue(name)
 
 proc hasTrailers*(p: HttpParser): bool {.inline.} =
   ## True when the chunked message carried a non-empty trailer section.
