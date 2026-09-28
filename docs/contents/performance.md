@@ -29,9 +29,13 @@ them visible in the source and the benchmark numbers below.
   generation-counter stale-event detection; dead-watcher sweep.
 - **4-level hierarchical timer wheel.** O(1) timer insert/fire/cancel.
   ([event loop](core/event-loop.md))
-- **Object pooling.** Connections, parsers, responses and WebSockets are pooled
-  and reused; `newHttpServer` prewarms the pools by default
-  (`populatePools`, pool size 256).
+- **Object pooling.** Connections, read buffers, parsers, requests, responses,
+  per-connection sessions (`ConnHttp`) and WebSockets are pooled and reused;
+  `newHttpServer` prewarms the pools by default (`populatePools`, pool size
+  256). Multi-threaded workers start cold unless `-d:powpowWarmWorkers` is set
+  (warmup size via `-d:WarmWorkerPoolSize=128`). A `Connection: close`
+  connection is tracked in an unhashed pending list and never touches the
+  session table, so pool-miss teardown costs no hashing.
 - **Write buffering + corking.** TCP writes are buffered and corked
   (`TCP_CORK`/`TCP_NOPUSH`), flushed when the connection is writable.
 - **Scatter-gather writes.** `sendv` batches header + body into one `writev`.
@@ -180,6 +184,60 @@ Requests/sec:  52687.29
 Transfer/sec:     26.98MB
 ```
 
+### Event loop concurrency (Linux epoll, release build)
+
+From `tests/bench_concurrent_events.nim` (`nim c -d:release -r
+tests/bench_concurrent_events.nim`, median of 3 runs). Pipe file
+descriptors registered on the loop, all fired at once — measures dispatch
+scalability, not HTTP throughput.
+
+Capacity scaling:
+
+| N | throughput | p50 | p99 |
+|---|-----------|-----|-----|
+| 100 | 307k/s | 100µs | 198µs |
+| 500 | 304k/s | 504µs | 1.0ms |
+| 1k | 277k/s | 1.0ms | 2.1ms |
+| 2k | 252k/s | 2.4ms | 4.8ms |
+| 4k | 231k/s | 5.2ms | 10.2ms |
+| 8k | 233k/s | 10.5ms | 20.5ms |
+| 12k | 231k/s | 15.8ms | 30.6ms |
+
+Head-of-line blocking (1024 fast + 64 slow at 200µs):
+
+| | p50 | p99 |
+|---|-----|-----|
+| baseline (0 slow) | 1.1ms | 2.2ms |
+| with 64 slow | 1.3ms | 2.3ms |
+| penalty | ~146µs | ~164µs |
+
+### Event loop concurrency (Linux io_uring)
+
+Same harness with `-d:powpowIoUring` (`nim c -d:release -d:powpowIoUring
+-r tests/bench_concurrent_events.nim`, median of 3 runs). Raw `register`
+maps to `IORING_OP_POLL_ADD`, so this measures completion-queue dispatch
+rather than `epoll_wait` batches.
+
+Capacity scaling:
+
+| N | throughput | p50 | p99 |
+|---|-----------|-----|-----|
+| 100 | 255k/s | 100µs | 209µs |
+| 500 | 254k/s | 554µs | 1.1ms |
+| 1k | 232k/s | 1.1ms | 2.1ms |
+| 2k | 220k/s | 2.5ms | 4.9ms |
+| 4k | 206k/s | 5.4ms | 10.5ms |
+| 8k | 208k/s | 10.5ms | 23.8ms |
+| 12k | 195k/s | 21.2ms | 40.7ms |
+
+Head-of-line blocking (1024 fast + 64 slow at 200µs):
+
+| | p50 | p99 |
+|---|-----|-----|
+| baseline (0 slow) | 1.3ms | 2.5ms |
+| with 64 slow | 1.2ms | 2.3ms |
+| penalty | ~0µs | ~0µs |
+
 ## Benchmarking it yourself
 
 ```bash
@@ -188,7 +246,28 @@ wrk -t4 -c100 -d5s http://127.0.0.1:9000/
 wrk -t4 -c100 -d5s -H "Connection: close" http://127.0.0.1:9000/
 ```
 
-There is also a dedicated loop benchmark: `tests/test_bench_event_loop.nim`.
+There is also a dedicated loop benchmark: `tests/bench_concurrent_events.nim`.
+
+## Pool sizing
+
+Keep-alive throughput is the pooling story: a reused connection costs no
+allocation and no session-table hashing. `Connection: close` is the pool-miss
+worst case — a full TCP handshake and teardown per request, bottlenecked by the
+kernel (TIME_WAIT recycling, ephemeral ports), typically 10–20x below
+keep-alive on loopback no matter the userspace code.
+
+Size the pools at or above the concurrent connections you serve, or excess
+connections allocate on demand (server-side pool starvation):
+
+- `MaxConnPoolSize` / `MaxBufPoolSize` (`net/tcp.nim`, `{.intdefine.}`, default
+  1024 each): connection wrappers + 4KB read buffers.
+- `MaxParserPoolSize` / `MaxReqPoolSize` / `MaxResPoolSize` /
+  `MaxConnHttpPoolSize` (`proto/httpserver.nim`, `{.intdefine.}`, defaults
+  2048/2048/4048/2048): parsers, requests, responses, sessions.
+- Override at compile time, e.g. `-d:MaxConnPoolSize=4096
+  -d:MaxConnHttpPoolSize=4096`. Past the caps the server stays correct and just
+  allocates; single-loop prewarm is 256 entries (`populatePools`), workers warm
+  up on demand unless `-d:powpowWarmWorkers` is set.
 
 ## API reference
 

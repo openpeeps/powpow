@@ -276,12 +276,56 @@ Transfer/sec:     26.98MB
   | with 64 slow | 415µs | 820µs |
   | penalty | ~0µs | ~0µs |
 
+- Event loop concurrency (Linux epoll, release build)
+
+  Capacity scaling:
+
+  | N | throughput | p50 | p99 |
+  |---|-----------|-----|-----|
+  | 100 | 307k/s | 100µs | 198µs |
+  | 500 | 304k/s | 504µs | 1.0ms |
+  | 1k | 277k/s | 1.0ms | 2.1ms |
+  | 2k | 252k/s | 2.4ms | 4.8ms |
+  | 4k | 231k/s | 5.2ms | 10.2ms |
+  | 8k | 233k/s | 10.5ms | 20.5ms |
+  | 12k | 231k/s | 15.8ms | 30.6ms |
+
+  Head-of-line blocking (1024 fast + 64 slow at 200µs):
+
+  | | p50 | p99 |
+  |---|-----|-----|
+  | baseline (0 slow) | 1.1ms | 2.2ms |
+  | with 64 slow | 1.3ms | 2.3ms |
+  | penalty | ~146µs | ~164µs |
+
+- Event loop concurrency (Linux io_uring, release build)
+
+  Capacity scaling:
+
+  | N | throughput | p50 | p99 |
+  |---|-----------|-----|-----|
+  | 100 | 255k/s | 100µs | 209µs |
+  | 500 | 254k/s | 554µs | 1.1ms |
+  | 1k | 232k/s | 1.1ms | 2.1ms |
+  | 2k | 220k/s | 2.5ms | 4.9ms |
+  | 4k | 206k/s | 5.4ms | 10.5ms |
+  | 8k | 208k/s | 10.5ms | 23.8ms |
+  | 12k | 195k/s | 21.2ms | 40.7ms |
+
+  Head-of-line blocking (1024 fast + 64 slow at 200µs):
+
+  | | p50 | p99 |
+  |---|-----|-----|
+  | baseline (0 slow) | 1.3ms | 2.5ms |
+  | with 64 slow | 1.2ms | 2.3ms |
+  | penalty | ~0µs | ~0µs |
+
 ### Security roadmap
 
 - [ ] Coverage-guided fuzzing of the HTTP / WebSocket / multipart parsers
       (libFuzzer & nim-drchaos adapters in `smuggler`)
 - [ ] ASan/UBSan sanitizer build wired into CI
-- [ ] Stream body bytes before first-packet buffering (avoid peak RAM on large
+- [x] Stream body bytes before first-packet buffering (avoid peak RAM on large
       single-packet uploads)
 - [x] Multipart per-file size limits wired to server configuration
 - [x] Symlink-safe static serving (realpath checks)

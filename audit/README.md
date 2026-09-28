@@ -39,3 +39,13 @@ we actually patch (not a stale nimble-installed copy).
 | `udp_empty_send.nim` | R2 — UDP empty payload `unsafeAddr data[0]` | OOB read on empty send |
 | `request_line_strict.nim` | R2 — strict request line + SSE2 `\r\n` boundary bug | pipelined requests misparse (400) |
 | `size_backstop.nim` | R2 — configurable `maxStreamBodySize` hard cap | 512 MB backstop not tunable |
+| `h2_hpack_hostile.nim` | H2 pin — HPACK hostile ints/strings/indexes all raise `HpackError` | (all green; guards `decodeInt`/`decodeString`/`lookupIndex`) |
+| `h2_hpack_bad_huffman.nim` | H2 pin — Huffman EOS/invalid-code/bad-padding all raise | (all green; ones-padding acceptance pinned as RFC-mandated) |
+| `h2_hpack_table_accounting.nim` | H2 pin — dynamic-table eviction/index/size-update exact | (all green; mid-block size update pinned as accepted leniency) |
+| `h2_continuation_bomb.nim` | H2 P1 — unbounded `fragBuf` across CONTINUATIONs (fixed: incremental cap, COMPRESSION_ERROR) | RSS +35 MB for 8 MB of fragments |
+| `h2_stream_machine.nim` | H2 pin — idle/closed DATA/RST/WU, trailers, post-GOAWAY refusal | (all green) |
+| `h2_flood_policy.nim` | H2 finding — no generic rate limiter (bounded 1:1 per vector; limits proposed) | PING/SETTINGS/RST/open-RST floods measured, no superlinear cost |
+| `h2_upgrade_strict.nim` | H2 pin — h2c upgrade validation (bad b64, hostile settings, CL, sniff cap, TE fail-closed) | (all green) |
+| `h2_flow_control.nim` | H2 pin — window accounting under burst, IWS=0 stall/release | (all green; conn-level backstop unreachable by design) |
+| `h2_frame_size.nim` | H2 pin — fixed-length violations, split/incomplete reassembly, padding, extensions | (all green) |
+| `h2_goaway_drain.nim` | H2 pin — lastStreamId accuracy, in-flight counting, post-teardown silence | (all green) |

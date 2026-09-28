@@ -14,7 +14,7 @@ testresults/
 !/examples/*.html
 !/examples/www/
 !/examples/www/*
-nimble.develop
+/examples/*.binnimble.develop
 nimble.paths
 nimbledeps
 .cache/

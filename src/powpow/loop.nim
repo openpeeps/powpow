@@ -150,6 +150,10 @@ type
     cleanupCbs:    seq[Callback]                # invoked from close(), for sub-systems
       ## that own loop-thread state (e.g. the DNS resolver) and need to free it
       ## when the loop shuts down.
+    turnEndCbs:    seq[Callback]                # run at the end of every poll()
+      ## turn, after I/O callbacks and timers (e.g. the H2 send-staging
+      ## flush in proto/http2conn). Idempotent callbacks only.
+    turnHookTags:  HashSet[string]              # dedupe tags for addTurnEndHook
     closed*:       bool                         # set once close() runs
     postedLock:    Lock                         # guards postedCbs (cross-thread)
     postedCbs:     seq[Callback]                # callbacks posted from other threads
@@ -451,7 +455,7 @@ when iouEnabled:
 
 proc newLoop*(entries = 4096): Loop =
   result = Loop(
-    fdWatchers:  initTable[int, FdWatcher](256),
+    fdWatchers:  initTable[int, FdWatcher](1024),
     nextGen:     1,
     wheelBase:   monoMs(),
     totalTimers: 0,
@@ -652,7 +656,8 @@ proc cascade(loop: Loop; level: int) {.inline.} =
 # ── fd watchers ──────────────────────────────────────────────────────────────
 
 proc register*(loop: Loop, fd: int, events: set[EventType],
-               callback: FdCallback, edgeTriggered = false) =
+               callback: FdCallback, edgeTriggered = false,
+               freshFd = false) =
   let gen = loop.nextGen
   inc loop.nextGen
   if fd in loop.fdWatchers:
@@ -698,7 +703,9 @@ proc register*(loop: Loop, fd: int, events: set[EventType],
       # A stale path can register an fd that was already closed and reused (a
       # closed fd is EBADF to kevent/epoll). Tolerate it: leave the watcher
       # dormant instead of raising and killing the whole loop.
-      if fcntl(fd.cint, F_GETFD, 0) < 0:
+      # Fresh accept4/accept fds skip the extra fcntl syscall (one saved
+      # syscall per accepted connection).
+      if not freshFd and fcntl(fd.cint, F_GETFD, 0) < 0:
         watcher.alive = false
         return
     loop.platform.add(fd, events, edgeTriggered, cast[pointer](watcher))
@@ -903,6 +910,19 @@ proc addIdle*(loop: Loop, cb: Callback): int {.inline.} =
 
 proc removeIdle*(loop: Loop, id: int) {.inline.} =
   loop.idleCbs.del(id)
+
+# ── turn-end handlers ─────────────────────────────────────────────────────────
+
+proc addTurnEndHook*(loop: Loop, tag: string, cb: Callback) {.inline.} =
+  ## Run `cb` at the end of every `poll()` turn. For idempotent,
+  ## queue-draining work (e.g. flushing staged socket bytes). `tag` dedupes
+  ## per loop (pointer-identity must NOT be used: loop objects are recycled
+  ## by the allocator, so a new loop can share a dead loop's address).
+  ## The callback must tolerate an empty queue.
+  if tag in loop.turnHookTags:
+    return
+  loop.turnHookTags.incl(tag)
+  loop.turnEndCbs.add(cb)
 
 # ── observers ─────────────────────────────────────────────────────────────────
 
@@ -1230,6 +1250,10 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
     if loop.obsDead > 64:
       loop.observers.keepItIf(it.alive)
       loop.obsDead = 0
+
+  if loop.turnEndCbs.len > 0:
+    for cb in loop.turnEndCbs:
+      cb()
 
   if nEvents == 0 and loop.idleCbs.len > 0:
     var batch = 0

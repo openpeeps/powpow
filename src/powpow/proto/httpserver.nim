@@ -61,6 +61,9 @@ type
     sessionStreamPath: string
     streamer: MultipartStreamerRef
     conn: Connection            ## back-reference used by the timeout sweep
+    fd: int                     ## key used in connRoots (conn.fd is -1 after close)
+    inRoots: bool               ## true once promoted from pendingConns to connRoots
+    pendingIdx: int             ## index in pendingConns while not promoted (-1 after)
     lastActive: int64            ## monoMs of the last data/activity
     idleAfter: int64             ## monoMs when the last request completed (idle)
 
@@ -69,10 +72,15 @@ type
     loop:      Loop
     handler*:  OnRequestCallback
     sslCtx*:   tls.SslContext
-    connRoots: Table[int, ConnHttp]
+    connRoots*: Table[int, ConnHttp]
+    pendingConns*: seq[ConnHttp]  ## Sessions before their first completed
+      ## request (never hashed): pure append + swap-remove. A `Connection:
+      ## close` connection lives and dies here without ever touching
+      ## `connRoots`, and the sweep still applies readTimeoutMs to it.
     parserPool: seq[HttpParser]
     reqPool:   seq[HttpRequest]
     resPool:   seq[HttpResponse]
+    connHttpPool*: seq[ConnHttp]  ## Idle per-connection sessions (HTTP/1.1 only)
     wsPool:    seq[ref RootObj]   ## Idle WsConnection refs recycled by websocketUpgrade
       ## Typed as `ref RootObj` (not `pointer`) so ARC-family memory managers
       ## retain the pooled WsConnection — a raw pointer does not hold a ref, so
@@ -115,9 +123,18 @@ type
 
 const
   DefaultKeepAliveMs* = 5_000
-  MaxParserPoolSize = 2048
-  MaxResPoolSize = 4048
-  MaxReqPoolSize = 2048
+  MaxParserPoolSize {.intdefine.} = 2048
+    ## Idle HTTP parsers recycled across connections. Override at compile time
+    ## (`-d:MaxParserPoolSize=4096`) when serving more concurrent connections
+    ## than the default holds; see the sizing guide in docs/contents/performance.md.
+  MaxResPoolSize {.intdefine.} = 4048
+    ## Idle HTTP responses recycled per request (same tuning as above).
+  MaxReqPoolSize {.intdefine.} = 2048
+    ## Idle HTTP requests recycled per request (same tuning as above).
+  MaxConnHttpPoolSize {.intdefine.} = 2048
+    ## Idle per-connection HTTP sessions recycled across connections. Reusing
+    ## the object removes the last per-connection allocation on the hot path
+    ## (parsers, requests and responses were already pooled).
   MaxWsPoolSize* = 2048
     ## Idle WebSocket connections recycled by websocketUpgrade. Reusing the
     ## object keeps its 64KB frame-parser payload and assembly buffer alive, so
@@ -152,12 +169,44 @@ proc cachedHttpDate(): string {.inline.} =
 func getFileExt*(path: string): string {.inline.} =
   ## Return the lowercased file extension without the leading dot
   ## (e.g. `png`), or "" when the path has no extension.
-  result = splitFile(Path(path)).ext
-  if result.len > 0:
-    result = result[1..^1].toLowerAscii()
+  ## Single reverse scan: no `splitFile` temporaries, one result alloc.
+  ## A dot that opens the file name (`.gitignore`) is not an extension.
+  var i = path.len - 1
+  while i >= 0:
+    let c = path[i]
+    when defined(windows):
+      if c == '/' or c == '\\': break
+    else:
+      if c == '/': break
+    if c == '.':
+      if i == path.len - 1 or i == 0: return ""
+      let prev = path[i - 1]
+      when defined(windows):
+        if prev == '/' or prev == '\\': return ""
+      else:
+        if prev == '/': return ""
+      result = newString(path.len - i - 1)
+      for k in 0 ..< result.len:
+        var ch = path[i + 1 + k]
+        if ch >= 'A' and ch <= 'Z': ch = chr(ord(ch) + (ord('a') - ord('A')))
+        result[k] = ch
+      return
+    dec i
+  ""
+
+func isBytesUnit*(s: string): bool {.inline.} =
+  ## ASCII case-insensitive "bytes=" prefix check without allocating
+  ## (replaces `s.toLowerAscii().startsWith("bytes=")` on hot paths).
+  if s.len < 6: return false
+  const unit = "bytes="
+  for i in 0 ..< 6:
+    var a = s[i]
+    if a >= 'A' and a <= 'Z': a = chr(ord(a) + (ord('a') - ord('A')))
+    if a != unit[i]: return false
+  true
 
 func parseRange*(rangeHeader: string; fileSize: int64): tuple[ok: bool; start, length: int64] =
-  if not rangeHeader.startsWith("bytes="): return (false, 0, 0)
+  if not isBytesUnit(rangeHeader): return (false, 0, 0)
   if fileSize <= 0: return (false, 0, 0)
 
   var i = 6
@@ -396,7 +445,7 @@ template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
       discard res.conn.sendv(parts.toOpenArray(0, count - 1))
 
   if res.closeConn:
-    res.conn.closeAfterDrain()
+    res.conn.closeAfterSend()
 
 proc send*(res: HttpResponse, body: string = "") =
   if res.sent: return
@@ -478,15 +527,16 @@ proc sendFile*(res: HttpResponse, path: string;
     var status = Http200
 
     if not skipRange and req != default(HttpRequest):
-      let headers = req.getHeaders()
-      if headers.hasKey("range"):
-        let rangeVal = headers["range"].toLowerAscii()
+      # Zero-alloc range lookup: no header-table materialization, and
+      # parseRange folds case inline (no toLowerAscii copy).
+      let rangeVal = req.getHeaderValue("range")
+      if rangeVal.len > 0:
         let r = parseRange(rangeVal, fileSize)
         if r.ok:
           rangeStart = r.start
           rangeLen = r.length
           status = Http206
-        elif rangeVal.startsWith("bytes="):
+        elif rangeVal.isBytesUnit():
           closeFile(fileFd)
           res.status(Http416).send("Range Not Satisfiable")
           return
@@ -641,15 +691,14 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
     var rangeLen = min(chunkSize.int64, fileSize)
     var status = Http206
 
-    let headers = req.getHeaders()
-    if headers.hasKey("range"):
-      let rangeVal = headers["range"].toLowerAscii()
+    let rangeVal = req.getHeaderValue("range")
+    if rangeVal.len > 0:
       let r = parseRange(rangeVal, fileSize)
       if r.ok:
         rangeStart = r.start
         rangeLen = min(r.length, chunkSize.int64)
         status = Http206
-      elif rangeVal.startsWith("bytes="):
+      elif rangeVal.isBytesUnit():
         closeFile(fileFd)
         res.status(Http416).send("Range Not Satisfiable")
         return
@@ -820,7 +869,7 @@ proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
     tcpServers: @[],
     loop:      loop,
     handler:   nil,
-    connRoots: initTable[int, ConnHttp](64),
+    connRoots: initTable[int, ConnHttp](1024),
     parserPool: @[],
     reqPool:   @[],
     resPool:   @[],
@@ -878,6 +927,11 @@ proc stop*(server: HttpServer) =
   server.close()
   server.loop.close()
 
+proc maybeArmBodyStream(server: HttpServer, ctx: ConnHttp, p: HttpParser)
+  ## Forward declaration (defined near handleConnectionData): choose the body
+  ## strategy at header time. Needed here because acquireConnHttp wires it as
+  ## the parser's onHeadersComplete hook.
+
 proc acquireParser(server: HttpServer): HttpParser =
   if server.parserPool.len > 0:
     result = server.parserPool.pop()
@@ -906,10 +960,87 @@ proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
   ## Set the keep-alive idle timeout in milliseconds. 0 disables it.
   server.keepAliveMs = ms
 
+proc acquireConnHttp(server: HttpServer, conn: Connection): ConnHttp =
+  ## Take a per-connection session from the pool (or allocate). The parser is
+  ## always freshly acquired: pooled sessions hold no parser while idle, so
+  ## ownership never doubles. The session starts in `pendingConns` (unhashed);
+  ## `markIdle` promotes it to `connRoots` once its first request completes.
+  if server.connHttpPool.len > 0:
+    result = server.connHttpPool.pop()
+    result.parser = acquireParser(server)
+    result.conn = conn
+    result.fd = conn.fd.int
+    result.lastActive = monoMs()
+    result.idleAfter = 0
+  else:
+    result = ConnHttp(parser: acquireParser(server))
+    result.conn = conn
+    result.fd = conn.fd.int
+    result.lastActive = monoMs()
+  # Pre-arm body streaming: when this connection's parser finishes a request's
+  # headers, decide the body strategy before the first body byte is consumed
+  # (see maybeArmBodyStream). Set once per connection — pooled parsers arrive
+  # with hooks cleared (reset), and the per-request fired flag is cleared by
+  # resetForNext so pipelined requests re-arm independently.
+  let srv = server
+  let session = result
+  result.parser.onHeadersComplete = proc(p: HttpParser) {.closure.} =
+    srv.maybeArmBodyStream(session, p)
+  result.inRoots = false
+  result.pendingIdx = server.pendingConns.len
+  server.pendingConns.add(result)
+
+proc pendingRemove(server: HttpServer, ctx: ConnHttp) {.inline.} =
+  ## O(1) swap-remove from `pendingConns`. No-op when already removed.
+  let i = ctx.pendingIdx
+  if i < 0 or i >= server.pendingConns.len: return
+  if server.pendingConns[i] != ctx:
+    # Index went stale without going through the helpers — linear fallback
+    # so the entry can never leak (should be unreachable).
+    for j in 0 ..< server.pendingConns.len:
+      if server.pendingConns[j] == ctx:
+        server.pendingConns.del(j)
+        for k in j ..< server.pendingConns.len:
+          server.pendingConns[k].pendingIdx = k
+        break
+    ctx.pendingIdx = -1
+    return
+  let last = server.pendingConns.len - 1
+  if i != last:
+    server.pendingConns[i] = server.pendingConns[last]
+    server.pendingConns[i].pendingIdx = i
+  server.pendingConns.setLen(last)
+  ctx.pendingIdx = -1
+
+proc releaseConnHttp(server: HttpServer, ctx: ConnHttp) {.inline.} =
+  ## Return a session to the pool after full reset. Callers must have already
+  ## removed it from `connRoots`/`pendingConns` and cleaned streaming state.
+  ctx.conn = nil
+  ctx.fd = 0
+  ctx.inRoots = false
+  ctx.pendingIdx = -1
+  ctx.lastActive = 0
+  ctx.idleAfter = 0
+  ctx.sessionStreamPath = ""
+  ctx.streamer = nil
+  # NOTE: parser released by the caller (removeSession) before this runs;
+  # sessionStreamFile was closed with its path and is unreachable while
+  # sessionStreamPath is empty.
+  if server.connHttpPool.len < MaxConnHttpPoolSize:
+    server.connHttpPool.add(ctx)
+
 proc removeSession*(server: HttpServer, conn: Connection) =
   let ctx = cast[ConnHttp](conn.data)
   if ctx == nil: return
-  server.connRoots.del(conn.fd.int)
+  if ctx.inRoots:
+    # conn.fd is already -1 when called after conn.close() (EOF/Error/
+    # fast-close paths), so delete by the fd stored at session creation.
+    server.connRoots.del(ctx.fd)
+    if conn.fd.int != ctx.fd:
+      server.connRoots.del(conn.fd.int)
+    ctx.inRoots = false
+  else:
+    server.pendingRemove(ctx)
   if ctx.sessionStreamPath.len > 0:
     ctx.sessionStreamFile.close()
     removeFile(ctx.sessionStreamPath)
@@ -917,8 +1048,11 @@ proc removeSession*(server: HttpServer, conn: Connection) =
   if ctx.streamer != nil:
     ctx.streamer[].cleanup()
     ctx.streamer = nil
-  releaseParser(server, ctx.parser)
+  if ctx.parser != nil:
+    releaseParser(server, ctx.parser)
+    ctx.parser = nil
   conn.data = nil
+  server.releaseConnHttp(ctx)
 
 proc markIdle(server: HttpServer, conn: Connection) =
   ## Mark a connection idle: a request just completed, so the keep-alive
@@ -938,13 +1072,20 @@ proc markIdle(server: HttpServer, conn: Connection) =
   let now = if pollNowMs != 0: pollNowMs else: monoMs()
   ctx.lastActive = now
   ctx.idleAfter = now
+  if not ctx.inRoots:
+    # First completed request: promote from the unhashed pending list to
+    # `connRoots`, where the sweep applies keepAliveMs from now on.
+    server.pendingRemove(ctx)
+    server.connRoots[ctx.fd] = ctx
+    ctx.inRoots = true
 
 proc closeStale(server: HttpServer, ctx: ConnHttp) =
   ## Close a connection that exceeded its read/keep-alive timeout.
-  if ctx.conn == nil or ctx.conn.state == Closed: return
-  if ctx.conn.state == Connected and ctx.conn.sendFileFd >= 0: return  # zero-copy response in flight
-  server.removeSession(ctx.conn)
-  ctx.conn.close()
+  let c = ctx.conn
+  if c == nil or c.state == Closed: return
+  if c.state == Connected and c.sendFileFd >= 0: return  # zero-copy response in flight
+  server.removeSession(c)
+  c.close()
 
 proc sweepTimeouts(server: HttpServer) =
   ## Lazy timeout enforcement: a single periodic pass over active connections.
@@ -954,6 +1095,14 @@ proc sweepTimeouts(server: HttpServer) =
     return
   let now = monoMs()
   server.sweepStale.setLen(0)
+  if server.readTimeoutMs > 0:
+    # Sessions before their first completed request: only the read timeout
+    # applies (they never went idle). This preserves the slowloris bound that
+    # the eager `connRoots` insert used to provide.
+    for ctx in server.pendingConns:
+      if ctx.conn != nil and ctx.conn.state != Closed and
+         now - ctx.lastActive > server.readTimeoutMs:
+        server.sweepStale.add(ctx)
   for ctx in server.connRoots.values:
     if ctx.conn != nil and ctx.conn.state == Closing:
       # Graceful close in progress (response sent, FIN sent): reclaim if the
@@ -996,20 +1145,98 @@ proc dispatchRequest(server: HttpServer, conn: Connection,
   releaseHttpResponse(server, res)
 
 
+proc openStreamFile(server: HttpServer, ctx: ConnHttp, p: HttpParser): bool =
+  ## Create the private temp file for a streamed body and install the
+  ## file-writing onBodyData. Returns false (with p in PhaseError/500) when
+  ## no temp file could be created.
+  let dir = getTempDir()
+  discard existsOrCreateDir(dir)
+  for attempt in 0 ..< 8:
+    ctx.sessionStreamPath = dir / $genOid()
+    try:
+      ctx.sessionStreamFile = openPrivateFile(ctx.sessionStreamPath)
+      p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+        if data.len > 0:
+          discard ctx.sessionStreamFile.writeBuffer(unsafeAddr data[0], data.len)
+        if done:
+          ctx.sessionStreamFile.close()
+      return true
+    except IOError:
+      ctx.sessionStreamPath = ""
+  p.setError(Http500)
+  return false
+
+proc maybeArmBodyStream(server: HttpServer, ctx: ConnHttp, p: HttpParser) =
+  ## Choose the body strategy as soon as the headers are known. Invoked via
+  ## onHeadersComplete (before any body byte is consumed — including bytes
+  ## already sitting in the same packet), and once defensively after feed.
+  ## Small bodies stay buffered so getBody*/bodyView keep working; large or
+  ## unknown-size bodies stream, keeping p.buf at ~headers:
+  ##   - multipart/form-data (any Content-Length, or chunked) → incremental
+  ##     MultipartStreamerRef from the first body byte; handlers keep using
+  ##     getMultipart() unchanged (it returns req.streamer directly when
+  ##     pre-populated). Eager arming also rejects over-limit file parts
+  ##     early, without waiting for the rest of the body.
+  ##   - Content-Length >= minStreamBodySize → temp file (req.streamPath).
+  ##   - chunked, other types → spill to temp file once decoded bytes reach
+  ##     minStreamBodySize (threshold hook); small chunked stays buffered.
+  if p.onBodyData != nil or p.streamingBody: return
+  if p.phase != PhaseBody or p.isComplete(): return
+  var isMultipart = false
+  if p.contentLength > 0 or p.transferChunked:
+    isMultipart = p.peekContentType().startsWith("multipart/form-data")
+  # Bound auto-streamed uploads: server.maxBodySize when set, otherwise a
+  # hard cap — a client must not be able to fill the disk/temp dir with an
+  # unbounded upload. (Previously maxBodySize=0 meant unlimited disk writes.)
+  let uploadCap = if server.maxBodySize > 0: server.maxBodySize
+                  elif server.maxStreamBodySize > 0: server.maxStreamBodySize
+                  else: int64(MaxStreamBodySize)
+  let streamThreshold = if server.minStreamBodySize > 0: server.minStreamBodySize
+                        else: int64(MinStreamBodySize)
+  # Multipart of any size streams from the first body byte: the streamer
+  # enforces per-file/per-field/total caps inline, so over-limit parts are
+  # rejected early without waiting for the rest of the body (and a large
+  # single-packet upload never sits in p.buf). Handlers are unaffected:
+  # getMultipart() returns the pre-populated req.streamer directly.
+  if isMultipart and (p.contentLength > 0 or p.transferChunked):
+    let ct = p.peekContentType()  # cache hit from the check above: no copy
+    let fileCap = if server.maxFileSize > 0: server.maxFileSize
+                  else: uploadCap
+    let fieldCap = if server.maxFieldSize > 0: server.maxFieldSize
+                   else: uploadCap
+    # bodySize 0 (chunked): total unknown; the parser-level streamCap still
+    # bounds total decoded bytes, and per-file/per-field limits apply inline.
+    ctx.streamer = newMultipartStreamerRef(ct,
+      bodySize = if p.contentLength > 0: p.contentLength.int64 else: 0,
+      sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
+                                     maxFileSize: fileCap,
+                                     maxFieldSize: fieldCap))
+    let ms = ctx.streamer
+    p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
+      ms[].feed(data)  # empty-safe no-op; completion detected via boundary
+  elif p.contentLength >= streamThreshold:
+    discard server.openStreamFile(ctx, p)
+  elif p.transferChunked:
+    # Unknown size: stay buffered until the decoded bytes prove large.
+    p.bodyThreshold = streamThreshold
+    p.onBodyThreshold = proc(pp: HttpParser) {.closure.} =
+      discard server.openStreamFile(ctx, pp)
+
 proc handleConnectionData(server: HttpServer, conn: Connection,
                           data: openArray[byte]) =
   ## Feed incoming bytes into the per-connection parser.
   ## Supports HTTP/1.1 pipelining: if multiple complete requests arrive
   ## in the same TCP read, all of them are processed in order.
-  ## Multipart/form-data is NOT auto-streamed — handlers must call
-  ## `req.getMultipart()` to process it explicitly.
+  ## Large bodies never sit in the parser buffer: the onHeadersComplete hook
+  ## (wired per connection) pre-arms tempfile/multipart streaming before the
+  ## first body byte is consumed, so a large single-packet upload peaks at
+  ## ~headers. Handlers read big bodies via `req.streamPath`/`streamToFile`
+  ## (raw) or `req.getMultipart()` (multipart); small bodies stay buffered
+  ## for `getBodyString`/`bodyView`.
   let ctx = if conn.data != nil: cast[ConnHttp](conn.data)
             else:
-              let c = ConnHttp(parser: acquireParser(server))
-              c.conn = conn
-              c.lastActive = monoMs()
+              let c = server.acquireConnHttp(conn)
               conn.data = cast[pointer](c)
-              server.connRoots[conn.fd.int] = c
               c
   let p = ctx.parser
   try:
@@ -1022,78 +1249,24 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
   except MultipartInvalidHeader:
     # Malformed multipart part headers — same handling, respond 400.
     p.setError(Http400)
+  except MultipartConfigError:
+    # Garbage multipart boundary in Content-Type — same handling, 400.
+    p.setError(Http400)
+  except IOError, OSError:
+    # Temp-file write failed mid-stream (disk full/unlinked tmp) — reply 500;
+    # the shared error handling below closes and removes the partial file.
+    p.setError(Http500)
 
   if p.expectContinue and p.phase == PhaseBody:
     let continueResp = "HTTP/1.1 100 Continue\r\n\r\n"
     discard conn.send(continueResp.toOpenArrayByte(0, continueResp.len - 1))
     p.expectContinue = false
 
-  # Auto-detect body streaming for large uploads.
-  # If the body is still incoming (not yet complete) and no streaming is set up,
-  # check Content-Type to decide the streaming strategy:
-  #   - multipart/form-data → feed body directly into a MultipartStreamerRef
-  #   - any other Content-Type with Content-Length → stream raw body to a temp file
-  # This keeps p.buf small (~headers only) regardless of total body size.
-  #
-  # peekContentType() copies the value on first touch, but both branches below
-  # are dead when contentLength <= 0 (multipart needs CL > 0, file streaming
-  # needs CL >= minStreamBodySize), so chunked/empty bodies skip the copy.
-  if p.phase == PhaseBody and p.onBodyData == nil and not p.streamingBody and not p.isComplete():
-    var isMultipart = false
-    if p.contentLength > 0:
-      isMultipart = p.peekContentType().startsWith("multipart/form-data")
-    # Bound auto-streamed uploads: server.maxBodySize when set, otherwise a
-    # hard cap — a client must not be able to fill the disk/temp dir with an
-    # unbounded upload. (Previously maxBodySize=0 meant unlimited disk writes.)
-    let uploadCap = if server.maxBodySize > 0: server.maxBodySize
-                    elif server.maxStreamBodySize > 0: server.maxStreamBodySize
-                    else: int64(MaxStreamBodySize)
-    if isMultipart and p.contentLength > 0:
-      let ct = p.peekContentType()  # cache hit from the check above: no copy
-      let fileCap = if server.maxFileSize > 0: server.maxFileSize
-                     else: uploadCap
-      let fieldCap = if server.maxFieldSize > 0: server.maxFieldSize
-                     else: uploadCap
-      ctx.streamer = newMultipartStreamerRef(ct,
-        bodySize = p.contentLength.int64,
-        sizeLimit = MultipartSizeLimit(maxBodySize: uploadCap,
-                                       maxFileSize: fileCap,
-                                       maxFieldSize: fieldCap))
-      let ms = ctx.streamer
-      p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
-        ms[].feed(data)
-      try:
-        p.tryAdvance()
-      except MultipartSizeLimitError:
-        p.setError(Http413)
-      except MultipartInvalidHeader:
-        p.setError(Http400)
-    elif p.contentLength >= (if server.minStreamBodySize > 0:
-                               server.minStreamBodySize
-                             else:
-                               int64(MinStreamBodySize)):
-      let dir = getTempDir()
-      discard existsOrCreateDir(dir)
-      ctx.sessionStreamPath = dir / $genOid()
-      var f: File
-      var opened = false
-      for attempt in 0 ..< 8:
-        ctx.sessionStreamPath = dir / $genOid()
-        try:
-          f = openPrivateFile(ctx.sessionStreamPath)
-          opened = true
-          break
-        except IOError:
-          ctx.sessionStreamPath = ""
-      if not opened:
-        p.setError(Http500)
-      else:
-        ctx.sessionStreamFile = f
-        p.onBodyData = proc(data: openArray[byte]; done: bool) {.closure.} =
-          discard ctx.sessionStreamFile.writeBuffer(unsafeAddr data[0], data.len)
-          if done:
-            ctx.sessionStreamFile.close()
-        p.tryAdvance()
+  # Defensive re-arm: headers normally complete inside feed (firing
+  # onHeadersComplete synchronously), but any path that reached PhaseBody
+  # with no strategy yet gets one here before dispatch below.
+  if p.phase == PhaseBody and not p.isComplete():
+    server.maybeArmBodyStream(ctx, p)
 
   var pipelineCount = 0
   while p.isComplete():
@@ -1112,6 +1285,13 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     server.dispatchRequest(conn, req)
     releaseRequest(server, req)
     if conn.data == nil:
+      return
+    if conn.state != Connected:
+      # Fast close (`Connection: close` via closeAfterSend) tore the fd down
+      # inline. Stop: session cleanup + pool release run once in the outer
+      # handleClientRead/sharedCb. Parsing further pipelined bytes on a dead
+      # fd would only burn cycles (and a second dispatch would send on a
+      # closed connection).
       return
     ctx.parser.resetForNext()
     p.tryAdvance()
@@ -1172,13 +1352,14 @@ proc listen*(server: HttpServer, address: string, port: int) =
   ## leaking an idle server.
   if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
     # `populatePools` pre-created an unbound TcpServer (fd == -1) solely to
-    # hold the pre-warmed connPool. Discard it and replace with a fresh
-    # server that has up-to-date sslCtx/maxConnections closures. The old
-    # pool's Connections are freed with the old server (same as the old
-    # single-port `server.tcpServer = buildTcpServer()` overwrite did) —
-    # the loop's bufPool retains the pre-warmed read buffers.
-    server.tcpServers.setLen(0)
+    # hold the pre-warmed connPool. Migrate the warmed pool into the fresh
+    # server (which has up-to-date sslCtx/maxConnections closures) instead of
+    # dropping it: each pooled Connection owns a dedicated read buffer that
+    # would otherwise leak, and re-warming would redo the allocations.
+    # Stale `server` back-pointers are rebound lazily by acquireConnection.
     let ts = server.buildTcpServer()
+    ts.connPool = move server.tcpServers[0].connPool
+    server.tcpServers.setLen(0)
     ts.listen(address, port)
     server.tcpServers.add(ts)
   else:
@@ -1193,8 +1374,10 @@ when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =
     ## Listen on a Unix domain socket. `mode` is the file permission bits for the socket.
     if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
-      server.tcpServers.setLen(0)
+      # Same connPool migration as in listen() above (see comment there).
       let ts = server.buildTcpServer()
+      ts.connPool = move server.tcpServers[0].connPool
+      server.tcpServers.setLen(0)
       ts.listenUnix(path, mode)
       server.tcpServers.add(ts)
     else:
@@ -1212,6 +1395,7 @@ proc close*(server: HttpServer) =
     ts.close()
   server.tcpServers.setLen(0)
   server.connRoots.clear()
+  server.pendingConns.setLen(0)
   server.parserPool.setLen(0)
 
 proc ensureTcpServer*(server: HttpServer) =
@@ -1243,15 +1427,25 @@ proc populatePools*(server: HttpServer; poolSize = 256) =
       server.resPool.add(HttpResponse(
         conn: nil, statusCode: uint16(Http200), sent: false, closeConn: false,
         headers: @[], bodyBytes: @[]))
+    if server.connHttpPool.len < MaxConnHttpPoolSize:
+      # Pre-warm session shells (no parser while idle; acquireConnHttp assigns
+      # one, so pooled sessions never double-own a parser).
+      server.connHttpPool.add(ConnHttp())
     # Pre-warm the connection pool on the primary TcpServer. Additional
     # listeners share the loop's bufPool; they allocate connections on demand.
+    # Each pooled connection owns a DEDICATED read buffer: sharing one pointer
+    # between bufPool and a pooled Connection would hand the same 4KB to two
+    # live connections (data corruption), so the spare and the dedicated bufs
+    # are allocated separately.
     let primary = server.tcpServers[0]
     if primary.connPool.len < MaxConnPoolSize:
-      var buf = cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize))
-      if server.loop.bufPool.len < MaxBufPoolSize:
-        server.loop.bufPool.add(buf)
       primary.connPool.add(newConnection(
-        SocketHandle(-1), server.loop, primary, buf, DefaultBufSize))
+        SocketHandle(-1), server.loop, primary,
+        cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize)),
+        DefaultBufSize))
+    if server.loop.bufPool.len < MaxBufPoolSize:
+      server.loop.bufPool.add(
+        cast[ptr UncheckedArray[byte]](allocShared(DefaultBufSize)))
 
 proc addConnection*(server: HttpServer, fd: SocketHandle) {.inline.} =
   ## Add an existing TCP connection to the server

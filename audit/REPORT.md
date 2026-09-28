@@ -120,6 +120,81 @@ OID retry on `EEXIST`.
 connection. Added `HttpServer.maxFieldSize*` and threaded it into the limit.
 **Regression test:** covered by the existing multipart size-limit tests.
 
+## HTTP/2 audit (server-side; `http2client.nim` out of scope)
+
+Harnesses: `audit/h2_*.nim` (live h2c server + raw frame peer, plus
+white-box HPACK decoder tests). Prior coverage in
+`tests/test_http2_security.nim` (13 cases) was taken as given; the audits
+below close the remaining gaps.
+
+### P1 — Confirmed & fixed
+
+**9. CONTINUATION bomb: unbounded `fragBuf` per stream.**
+`handleContinuation` appended every fragment until END_HEADERS; the
+`maxHeaderList` (16 KB) check ran only after full HPACK decode — 8 MB of
+fragments grew server RSS ~35 MB with no gate engaged (slow-dripped, held
+indefinitely). Fix (`http2conn.nim`): CONTINUATION bytes are accounted
+against `maxHeaderList` + one frame of framing slop incrementally, at the
+fragment-open points and before every append; excess refuses the stream
+with `COMPRESSION_ERROR` (RFC 7540 §4.3) and resets the fragment state.
+Single-block oversize still takes the existing 431 path.
+**Regression test:** `audit/h2_continuation_bomb.nim` (was: +35 MB RSS;
+now: +120 KB, early RST, follow-up 200).
+
+### Pins (verified secure, locked by harness)
+
+- **HPACK decoder** (`audit/h2_hpack_hostile.nim`, 13 cases): overlong/
+  truncated/too-large integers, reserved/huge indexes, truncated and
+  4 MB+ string lengths (raises *before* allocating), empty block — all
+  `HpackError`, never `IndexDefect`.
+- **Huffman decoder** (`audit/h2_hpack_bad_huffman.nim`, 10 cases): EOS,
+  invalid codes, zero/overlong padding all raise. Ones-padding acceptance
+  (e.g. `0x1F` → `"a"`) is RFC 7541 §5.2-mandated leniency, pinned.
+- **Dynamic table** (`audit/h2_hpack_table_accounting.nim`, 8 cases):
+  eviction shifting, size-update lowering/zeroing/over-limit, oversized
+  entry drain, never-indexed privacy. Mid-block size updates accepted
+  (§4.2 says they must open the block) — harmless decoder leniency, pinned.
+- **Stream machine** (`audit/h2_stream_machine.nim`, 6 cases): RST/DATA/
+  WINDOW_UPDATE on idle → `PROTOCOL_ERROR` GOAWAY; on closed → silent/RST;
+  DATA after END_STREAM → stream RST, conn healthy; trailers without
+  END_STREAM → GOAWAY; post-client-GOAWAY streams REFUSED, old streams work.
+- **Upgrade strictness** (`audit/h2_upgrade_strict.nim`, 7 cases): garbage
+  or mis-sized base64 → close, no dispatch; hostile embedded
+  `INITIAL_WINDOW_SIZE` → close; upgrade with body → 400; 10 KB headers
+  hit the 8 KB sniff cap; valid upgrade 101s. `Transfer-Encoding` on the
+  upgrade 101s but fails closed at dispatch (`PROTOCOL_ERROR`, handler
+  never runs) — correct.
+- **Flow control** (`audit/h2_flow_control.nim`): 128 KB burst absorbed
+  with byte-exact accounting; `INITIAL_WINDOW_SIZE=0` stalls responses
+  until WINDOW_UPDATE. Note: the connection-level `FLOW_CONTROL_ERROR`
+  backstop is unreachable under the eager top-up policy (minimum window
+  at the check is 32767 > max frame 16384) — defense in depth, not a live
+  path.
+- **Frame layer** (`audit/h2_frame_size.nim`, 7 cases): oversize DATA,
+  short PING, non-empty SETTINGS ACK → `FRAME_SIZE_ERROR`; split arrival
+  reassembles byte-exact; incomplete frames stall per-connection only
+  (second conn unaffected) and complete exactly later; valid padding
+  accepted, over-pad → `PROTOCOL_ERROR`; unknown extension types ignored.
+  Harness lesson: frame bytes must be contiguous on the wire — the
+  `h2peer` auto-SETTINGS-ACK interleaved a split DATA frame during
+  development and correctly produced `FRAME_SIZE_ERROR` (server right,
+  test wrong).
+- **GOAWAY discipline** (`audit/h2_goaway_drain.nim`, 3 cases):
+  `lastStreamId` exact for completed and in-flight streams; post-teardown
+  frames discarded, no resurrection.
+
+### Finding with proposed limits (not implemented)
+
+- **No generic H2 rate limiter** (`audit/h2_flood_policy.nim`): 5k PINGs
+  acked 1:1 in 97 ms, 5k empty SETTINGS acked, 5k closed-stream RSTs
+  silent, 512-stream open/RST churn drains `openCount` to zero — all
+  bounded, no superlinear cost, follow-ups healthy. Residual risk is
+  CPU-for-packets at line rate (same profile as an H1 GET flood),
+  bounded per vector by existing caps (128 concurrent streams, 16 KB
+  header list, 16 KB frames, 8 MB bodies). Proposed: lifetime budgets
+  per connection (~10k PINGs/SETTINGS) → `ENHANCE_YOUR_CALM` GOAWAY;
+  RSTs need nothing (already O(1)).
+
 ## Previously-reported findings verified already fixed (from security-improvements.md)
 
 - Content-Length overflow off-by-one (`http.nim` saturating parse + `contentEnd`) — fixed, tested.

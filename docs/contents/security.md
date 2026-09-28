@@ -92,7 +92,7 @@ smuggler -g tests/fuzz/request-line.cfg -t 127.0.0.1:9000 -n 1000
 - [ ] Coverage-guided fuzzing of the HTTP / WebSocket / multipart parsers
       (libFuzzer & nim-drchaos adapters in `smuggler`)
 - [ ] ASan/UBSan sanitizer build wired into CI
-- [ ] Stream body bytes before first-packet buffering (avoid peak RAM on large
+- [x] Stream body bytes before first-packet buffering (avoid peak RAM on large
       single-packet uploads)
 - [x] Multipart per-file size limits wired to server configuration
 - [x] Symlink-safe static serving (realpath checks)
