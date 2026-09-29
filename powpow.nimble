@@ -15,7 +15,7 @@ requires "mimedb >= 0.1.1"
 requires "openparser >= 0.3.6"
 requires "multipart >= 0.1.4"
 requires "checksums >= 0.2.2"
-requires "https://github.com/nimbase/ktls-nim >= 0.1.0"
+requires "ktls >= 0.1.0"
 
 # Features
 
