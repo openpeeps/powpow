@@ -284,6 +284,12 @@ proc close*(res: HttpResponse): HttpResponse {.inline, discardable.} =
   res.closeConn = true
   return res
 
+proc ktlsTxActive*(res: HttpResponse): bool {.inline.} =
+  ## True when this response's connection has kTLS TX offload engaged (the
+  ## kernel encrypts the transmit path, so `serveFile` uses zero-copy
+  ## `sendfile(2)` even over TLS). See `enableKtls` (net/tls).
+  res.conn.ktlsTxActive()
+
 func statusText(code: HttpCode): string {.inline.} =
   ## Return the HTTP reason phrase for a status code.
   ## Returns a string literal (no heap allocation).
@@ -602,8 +608,10 @@ proc sendFile*(res: HttpResponse, path: string;
 
     discard seekFile(fileFd, rangeStart)
 
-    if res.conn.isTlsActive():
-      # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+    if res.conn.isTlsActive() and not res.conn.ktlsTxActive():
+      # No zero-copy sendfile over userspace TLS: read the file and send via
+      # SSL_write. With kTLS TX offload the kernel frames the TLS records
+      # itself, so the plain sendfile path below is safe to use instead.
       # Reuse the pooled res.bodyBytes as the chunk buffer.
       const TlsChunk = 65536
       res.bodyBytes.setLen(TlsChunk)
@@ -750,8 +758,10 @@ proc streamFile*(res: HttpResponse, path: string, req: HttpRequest;
 
     discard seekFile(fileFd, rangeStart)
 
-    if res.conn.isTlsActive():
-      # No zero-copy sendfile over TLS: read the file and send via SSL_write.
+    if res.conn.isTlsActive() and not res.conn.ktlsTxActive():
+      # No zero-copy sendfile over userspace TLS: read the file and send via
+      # SSL_write. With kTLS TX offload the kernel frames the TLS records
+      # itself, so the plain sendfile path below is safe to use instead.
       # Reuse the pooled res.bodyBytes as the chunk buffer.
       const TlsChunk = 65536
       res.bodyBytes.setLen(TlsChunk)

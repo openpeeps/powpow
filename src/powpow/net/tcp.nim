@@ -31,6 +31,7 @@ when iouEnabled:
 export loop.acquireBuf, loop.releaseBuf
 
 when defined(linux):
+  import ktls/raw as ktlsRaw
   proc c_accept4(s: SocketHandle; a: ptr Sockaddr;
                  l: ptr SockLen; flags: cint): SocketHandle {.
     importc: "accept4", header: "<sys/socket.h>".}
@@ -180,6 +181,11 @@ type
     clientAddr:       Sockaddr_storage
     ssl*:             pointer
     tlsState*:        TlsState
+    ktlsTx*:          bool
+      ## True when the kernel encrypts this connection's transmit path
+      ## (kTLS TX offload engaged at handshake end; snapshot by the
+      ## readiness backend — always false on io_uring/memory-BIO and on
+      ## non-Linux platforms). Read via `ktlsTxActive` (net/tls).
     when iouEnabled:
       connectAddr:    Sockaddr_storage   # persistent IORING_OP_CONNECT target
       closeAfterDrain: bool
@@ -332,6 +338,7 @@ when iouEnabled:
       SSL_free(cast[SslPtr](conn.ssl))
       conn.ssl = nil
     conn.tlsState = TlsOff
+    conn.ktlsTx = false
 
   # Forward declarations (TLS + write paths, defined below `close`).
   proc driveHandshake*(conn: Connection): bool {.gcsafe.}
@@ -1684,6 +1691,7 @@ when iouEnabled:
       result.state = Connected
       result.ssl = nil
       result.tlsState = TlsOff
+      result.ktlsTx = false
       result.readToken = 0
       result.writeToken = 0
       result.connectToken = 0
@@ -1745,6 +1753,7 @@ when iouEnabled:
     conn.clientIp = ""
     conn.ssl = nil
     conn.tlsState = TlsOff
+    conn.ktlsTx = false
     conn.fixedFd = false
     conn.zcPending = false
     conn.zcFixedActive = false
@@ -2434,6 +2443,14 @@ else:
       let r = SSL_do_handshake(cast[SslPtr](conn.ssl))
       if r == 1:
         conn.tlsState = TlsActive
+        when defined(linux):
+          # Snapshot kTLS TX engagement: with `SSL_OP_ENABLE_KTLS` set,
+          # OpenSSL installs the kernel record layer itself when the kernel
+          # and cipher cooperate. A 4-byte-header getsockopt read-back tells
+          # whether TX state is installed (fails when it is not).
+          var hdr: ktlsRaw.TlsCryptoInfo
+          var optLen = SockLen(sizeof(hdr))
+          conn.ktlsTx = ktlsRaw.rawGetTx(conn.fd, addr hdr, optLen) == 0
         return hsDone
       let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
       if e == SSL_ERROR_WANT_READ: return hsWantRead
@@ -2495,6 +2512,7 @@ else:
         SSL_free(cast[SslPtr](conn.ssl))
         conn.ssl = nil
       conn.tlsState = TlsOff
+      conn.ktlsTx = false
   else:
     proc driveHandshake*(conn: Connection): bool = true
     proc tlsRead*(conn: Connection, buf: pointer, count: int): int = -1
@@ -2937,12 +2955,13 @@ else:
     ## again once `sendFileActive` turns false, or react to onComplete.
     ##
     ## Returns false when another transfer is active, the connection is not
-    ## connected, or TLS is enabled (sendfile over TLS is unsupported).
+    ## connected, or TLS is enabled without kTLS TX offload (only a
+    ## kernel-encrypted socket can take raw sendfile(2) bytes).
     ## On success the transfer self-pumps across Write events on both server
     ## and client connections.
     if conn.state != Connected:
       return false
-    if conn.tlsState != TlsOff:
+    if conn.tlsState != TlsOff and not conn.ktlsTx:
       return false
     if conn.sendFileActive():
       return false
@@ -2974,6 +2993,7 @@ else:
       result.state = Connected
       result.ssl = nil
       result.tlsState = TlsOff
+      result.ktlsTx = false
     else:
       result = Connection(
         fd:        fd,
@@ -3001,6 +3021,7 @@ else:
     conn.clientIp = ""
     conn.ssl = nil
     conn.tlsState = TlsOff
+    conn.ktlsTx = false
     if server.connPool.len < MaxConnPoolSize:
       server.connPool.add(conn)
     else:

@@ -68,7 +68,7 @@ proc SSL_read*(s: SslPtr; buf: pointer; num: cint): cint {.importc: "SSL_read".}
 proc SSL_write*(s: SslPtr; buf: pointer; num: cint): cint {.importc: "SSL_write".}
 proc SSL_shutdown*(s: SslPtr): cint {.importc: "SSL_shutdown".}
 proc SSL_get_error*(s: SslPtr; ret: cint): cint {.importc: "SSL_get_error".}
-proc SSL_ctrl*(s: SslPtr; cmd: cint; larg: cint; parg: pointer): cint {.
+proc SSL_ctrl*(s: SslPtr; cmd: cint; larg: clong; parg: pointer): cint {.
   importc: "SSL_ctrl".}
 proc SSL_set1_host*(s: SslPtr; hostname: cstring): cint {.
   importc: "SSL_set1_host".}
@@ -76,6 +76,27 @@ proc SSL_set1_host*(s: SslPtr; hostname: cstring): cint {.
 const SSL_CTRL_SET_TLSEXT_HOSTNAME* = 55
   ## `SSL_set_tlsext_host_name` is a macro over `SSL_ctrl` in OpenSSL 1.1.1+/3,
   ## so it is not linkable; use SSL_ctrl with this command for SNI.
+
+# ── Kernel TLS offload (RFC-less; OpenSSL ≥ 3.0 built with `enable-ktls`) ────
+#
+# `SSL_OP_ENABLE_KTLS` permits OpenSSL to move the record layer into the
+# kernel once the handshake negotiates a kTLS-capable cipher (AES-GCM/CCM,
+# ChaCha20-Poly1305, …) on a socket-BIO connection. When the kernel or the
+# cipher does not cooperate, OpenSSL silently stays in userspace — setting
+# the option never fails the handshake. Declared here (statically linked
+# via `-lssl -lcrypto`) rather than taken from the `ktls` package, whose
+# `openssl` module binds `libssl.so` through `dynlib` (see module docstring
+# above about not mixing TLS libraries).
+
+const
+  SslCtrlOptions* = 32
+    ## `SSL_CTRL_OPTIONS` control code (`SSL_CTX_ctrl`/`SSL_ctrl`).
+  SslOpEnableKtls* = 8'u64
+    ## `SSL_OP_ENABLE_KTLS` = `SSL_OP_BIT(3)`.
+  SslOpEnableKtlsTxZerocopySendfile* = 17179869184'u64
+    ## `SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE` = `SSL_OP_BIT(34)`.
+    ## Lets `sendfile(2)` on the kTLS fd skip the in-kernel copy when a
+    ## capable NIC owns the crypto; the file must not change while sending.
 
 # ── ALPN (RFC 7301, used by HTTP/2 RFC 7540 section 3.3) ─────────────────────
 #
