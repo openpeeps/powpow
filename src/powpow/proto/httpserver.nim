@@ -549,7 +549,11 @@ proc sendFile*(res: HttpResponse, path: string;
 
     if closeConn:
       res.closeConn = true
-    let connHeader = if closeConn: "close" else: "keep-alive"
+    # Honor a close requested by the dispatcher (client sent
+    # `Connection: close`) even when this call passes closeConn = false
+    # (e.g. via serveFile): the header must match the actual lifetime,
+    # otherwise a keep-alive header is followed by a close.
+    let connHeader = if res.closeConn: "close" else: "keep-alive"
 
     res.sent = true
     var hdrBuf = res.bodyBytes

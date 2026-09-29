@@ -178,10 +178,9 @@ suite "kTLS opt-in":
       # Exercises the kTLS sendfile path in `sendFile` (zero-copy file
       # bytes straight onto the TLS socket). Requires an engaged kernel
       # TX — without kTLS this falls back to the userspace chunk loop,
-      # which has a pre-existing stall for file bodies (headers flush,
-      # body never drains; fails identically on main without this change),
-      # so the download half is skipped there. The echo test above covers
-      # the fallback path's correctness.
+      # which must produce byte-identical output (regression cover for
+      # the read-drain/close truncation fixes); the echo test above covers
+      # the fallback path's round-trip correctness.
       if kernelHasKtls():
         let (cert, key) = writeTestCert()
         let dir = getTempDir() / "powpow-ktls-test"

@@ -2843,7 +2843,16 @@ else:
           conn.shutdown()
           conn.loop.modify(conn.fd.int, {Read})
         else:
-          conn.close()
+          # TLS: same graceful FIN. An RST here (conn.close) discards the
+          # kernel send queue and truncates multi-write responses whose
+          # tail was just SSL_written (e.g. sendFile headers + body
+          # chunks). A best-effort close_notify goes first so peers see a
+          # clean shutdown rather than a truncation-style EOF.
+          when not defined(windows):
+            if conn.ssl != nil:
+              discard SSL_shutdown(cast[SslPtr](conn.ssl))
+          conn.shutdown()
+          conn.loop.modify(conn.fd.int, {Read})
       else:
         # macOS/BSD/Windows: a graceful FIN close collapses `Connection: close`
         # throughput ~8x under a wrk-style load generator on macOS/kqueue (even
@@ -3050,13 +3059,17 @@ else:
           # The write side was shut down (graceful close); discard any straggler
           # data and keep waiting for the peer's FIN.
           continue
+        let tlsWasOff = conn.tlsState == TlsOff
         onData(conn, conn.readBuf.toOpenArray(0, n - 1))
         if conn.state != Connected:
           if onClose != nil: onClose(conn)
           return
-        if conn.tlsState != TlsOff:
+        if tlsWasOff and conn.tlsState != TlsOff:
           # TLS was enabled during onData (STARTTLS-style upgrade); the
-          # handshake is now driven from the event loop.
+          # handshake is now driven from the event loop. Already-active TLS
+          # connections must keep draining here — returning unconditionally
+          # delivers only one TLS record per Read event and stalls
+          # multi-record responses under edge-triggered watchers.
           return
         when not defined(windows):
           # Short-read fast exit: a stream recv() returns every byte available
