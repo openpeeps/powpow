@@ -6,4 +6,4 @@ jobs:
     with:
       cache: 'false'
       nim-version: stable
-      pre-test-command: 'sudo modprobe tls'
+      pre-test-command: 'if [ "$RUNNER_OS" = "Linux" ]; then sudo modprobe tls; fi'
