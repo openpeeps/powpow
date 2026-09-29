@@ -6,8 +6,12 @@
 ## - `ktls_https_file_download`: `HttpServer` + `serveFile` over TLS with
 ##   `enableKtls`; the downloaded bytes must match the file exactly.
 ## - Both tests assert engagement consistency: `ktlsTxActive` on the live
-##   connection must equal a direct kernel probe (attach the `"tls"` ULP on
-##   a loopback pair). On kernels without kTLS (e.g. `tls` module not
+##   connection implies a direct kernel probe (attach the `"tls"` ULP on
+##   a loopback pair) succeeds. The converse does not hold: the probe only
+##   checks the kernel `tls` module, while engagement additionally needs
+##   OpenSSL built with `enable-ktls`, a kTLS-capable cipher, and the
+##   socket-BIO (readiness) backend — so engaged => probe, but probe =/=>
+##   engaged. On kernels without kTLS (e.g. `tls` module not
 ##   loaded) the probe fails and the flag must be false — the fallback path.
 
 import ../src/powpow
@@ -159,11 +163,15 @@ suite "kTLS opt-in":
 
       doAssert gotEcho, "kTLS echo should have completed"
       doAssert received == "hello powpow ktls", "echo mismatch: " & received
-      # Engagement must match the kernel probe on both ends.
-      doAssert serverKtls == kernelHasKtls(),
-        "server kTLS flag disagrees with kernel probe"
-      doAssert clientKtls == kernelHasKtls(),
-        "client kTLS flag disagrees with kernel probe"
+      # Engagement is best-effort: kernel ULP support is necessary but not
+      # sufficient (also needs OpenSSL with enable-ktls, a kTLS-capable
+      # cipher, and the socket-BIO backend). So engaged must imply the
+      # probe passes, but a passing probe need not imply engaged (e.g. CI
+      # libssl without enable-ktls).
+      doAssert (not serverKtls) or kernelHasKtls(),
+        "server kTLS engaged without kernel support"
+      doAssert (not clientKtls) or kernelHasKtls(),
+        "client kTLS engaged without kernel support"
       loop.close()
 
     test "ktls_https_file_download":
@@ -227,8 +235,8 @@ suite "kTLS opt-in":
         loop.run()
 
         doAssert gotResponse, "HTTPS file download should have completed"
-        doAssert serverKtls == kernelHasKtls(),
-          "server kTLS flag disagrees with kernel probe"
+        doAssert (not serverKtls) or kernelHasKtls(),
+          "server kTLS engaged without kernel support"
         let text = cast[string](body)
         let sep = text.find("\r\n\r\n")
         doAssert sep >= 0, "response has no header/body separator"

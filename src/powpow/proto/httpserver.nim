@@ -21,7 +21,7 @@
 ##   ```
 
 import std/httpcore except HttpMethod
-import std/[tables, options, net, strutils, os, times, oids, paths]
+import std/[tables, options, net, strutils, os, times, oids]
 
 import ../net/tcp
 import ../net/tls
