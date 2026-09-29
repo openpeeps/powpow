@@ -4,6 +4,6 @@ jobs:
   test:
     uses: nimbase/setup-nim-action/.github/workflows/test.yml@main
     with:
-      cache: 'false'
+      cache: false
       nim-version: stable
       pre-test-command: 'if [ "$RUNNER_OS" = "Linux" ]; then sudo modprobe tls; fi'
