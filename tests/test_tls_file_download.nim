@@ -134,23 +134,24 @@ proc checkBody(body: seq[byte], tag: string) =
   doAssert cast[string](got) == want, tag & ": downloaded bytes differ (" &
     $got.len & " vs " & $want.len & " bytes)"
 
-suite "tls file download":
-  test "serveFile over userspace TLS":
-    let (_, _, file) = writeFixture("serve")
-    proc serve(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
-      {.gcsafe.}:
-        if req.getPath() == "/payload":
-          discard serveFile(res, req, file)
-        else:
-          res.sendError(Http404, "not found")
-    checkBody(download(29883, "serve", serve), "serveFile")
+when not defined(windows):
+  suite "tls file download":
+    test "serveFile over userspace TLS":
+      let (_, _, file) = writeFixture("serve")
+      proc serve(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+        {.gcsafe.}:
+          if req.getPath() == "/payload":
+            discard serveFile(res, req, file)
+          else:
+            res.sendError(Http404, "not found")
+      checkBody(download(29883, "serve", serve), "serveFile")
 
-  test "sendFile with close over userspace TLS":
-    let (_, _, file) = writeFixture("close")
-    proc serve(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
-      {.gcsafe.}:
-        if req.getPath() == "/payload":
-          res.sendFile(file, req)
-        else:
-          res.sendError(Http404, "not found")
-    checkBody(download(29884, "close", serve), "sendFile")
+    test "sendFile with close over userspace TLS":
+      let (_, _, file) = writeFixture("close")
+      proc serve(req: HttpRequest, res: HttpResponse) {.gcsafe.} =
+        {.gcsafe.}:
+          if req.getPath() == "/payload":
+            res.sendFile(file, req)
+          else:
+            res.sendError(Http404, "not found")
+      checkBody(download(29884, "close", serve), "sendFile")
