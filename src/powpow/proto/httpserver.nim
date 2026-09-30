@@ -1390,25 +1390,35 @@ proc listen*(server: HttpServer, address: string, port: int) =
     server.tcpServers.add(ts)
   server.startTimeoutSweep()
 
-proc adoptListenFd*(server: HttpServer, fd: SocketHandle) =
-  ## Serve on an already-bound listen socket (see `createListenSocket`),
-  ## adding one `TcpServer` per call just like `listen`. Intended for
-  ## multi-worker servers, where a single listen socket is created once and
-  ## adopted by every worker's loop; ownership stays with the creator, so
-  ## `close()` never sockCloses it.
-  if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
-    # `populatePools` pre-created an unbound TcpServer; migrate its pool as
-    # in listen() above so the warmed Connection buffers are not leaked.
-    let ts = server.buildTcpServer()
-    ts.connPool = move server.tcpServers[0].connPool
-    server.tcpServers.setLen(0)
-    ts.adoptListenFd(fd)
-    server.tcpServers.add(ts)
-  else:
-    let ts = server.buildTcpServer()
-    ts.adoptListenFd(fd)
-    server.tcpServers.add(ts)
-  server.startTimeoutSweep()
+when not iouEnabled:
+  proc adoptListenFd*(server: HttpServer, fd: SocketHandle) =
+    ## Serve on an already-bound listen socket (see `createListenSocket`),
+    ## adding one `TcpServer` per call just like `listen`. Intended for
+    ## multi-worker servers, where a single listen socket is created once and
+    ## adopted by every worker's loop; ownership stays with the creator, so
+    ## `close()` never sockCloses it.
+    ##
+    ## Availability: the readiness backends only. `TcpServer.adoptListenFd`
+    ## lives in the non-io_uring branch of `net/tcp.nim` because its only
+    ## caller is `MultiThreadHttpServer`'s shared-listener path, which exists
+    ## solely for Darwin — Linux and FreeBSD load-balance a SO_REUSEPORT group,
+    ## but Darwin does not (there is no `SO_REUSEPORT_LB`), so there every
+    ## worker would otherwise share one member and leave the rest idle.
+    ## `iouEnabled` is Linux-only, so the two can never both hold and this
+    ## gate removes no reachable code.
+    if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
+      # `populatePools` pre-created an unbound TcpServer; migrate its pool as
+      # in listen() above so the warmed Connection buffers are not leaked.
+      let ts = server.buildTcpServer()
+      ts.connPool = move server.tcpServers[0].connPool
+      server.tcpServers.setLen(0)
+      ts.adoptListenFd(fd)
+      server.tcpServers.add(ts)
+    else:
+      let ts = server.buildTcpServer()
+      ts.adoptListenFd(fd)
+      server.tcpServers.add(ts)
+    server.startTimeoutSweep()
 
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =

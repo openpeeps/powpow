@@ -39,7 +39,16 @@ when not defined(windows):
   # 12-socket group all landed on one socket. Sharing one fd means every worker
   # registers it in its own loop and whichever accepts first wins.
   const SharedListenFd = when defined(macosx): true
-                        else: false
+                          else: false
+
+  const sharedFdPath = SharedListenFd and not iouEnabled
+    ## Single compile-time gate for the shared-listener path, so the runtime
+    ## decision and the availability of `createListenSocket`/`adoptListenFd`
+    ## cannot drift apart — a runtime `if` over a missing proc does not
+    ## compile, and a `when` over an unreachable branch is dead code. These
+    ## procs are part of the readiness backends only; the io_uring backend
+    ## (Linux-only) does not define them, while `SharedListenFd` requires
+    ## macOS, so the conjunction drops nothing reachable.
 
   const WarmWorkerPoolSize {.intdefine.} = 128
     ## Entries pre-warmed per pool per worker when `-d:powpowWarmWorkers` is
@@ -113,11 +122,15 @@ when not defined(windows):
             loop.stop()
             break
           if n < 0: break
-      if listenFds.len > 0:
-        # Shared-socket mode: adopt the parent's listener in this loop. Every
-        # worker registers the same fd; one accept() wins per connection.
-        for fd in listenFds:
-          server.adoptListenFd(fd)
+      when sharedFdPath:
+        if listenFds.len > 0:
+          # Shared-socket mode: adopt the parent's listener in this loop. Every
+          # worker registers the same fd; one accept() wins per connection.
+          for fd in listenFds:
+            server.adoptListenFd(fd)
+        else:
+          for p in ports:
+            server.listen(address, p)
       else:
         for p in ports:
           server.listen(address, p)
@@ -151,16 +164,17 @@ when not defined(windows):
       srv.running = true
 
       var sharedFds: seq[SocketHandle]
-      if SharedListenFd:
-        # Bind here, in the parent, so every worker adopts the same fd. On a
-        # failure close whatever already succeeded rather than leaking.
-        try:
-          for p in ports:
-            sharedFds.add(createListenSocket(address, p))
-        except CatchableError:
-          for fd in sharedFds:
-            discard posix.close(fd)
-          raise
+      when sharedFdPath:
+        if SharedListenFd:
+          # Bind here, in the parent, so every worker adopts the same fd. On a
+          # failure close whatever already succeeded rather than leaking.
+          try:
+            for p in ports:
+              sharedFds.add(createListenSocket(address, p))
+          except CatchableError:
+            for fd in sharedFds:
+              discard posix.close(fd)
+            raise
 
       for i in 0 ..< srv.numThreads:
         srv.contexts.add(newWorkerCtx())
@@ -171,7 +185,7 @@ when not defined(windows):
         arg.idx     = i
         arg.address = address
         arg.ports   = @ports
-        arg.listenFds = if SharedListenFd: sharedFds else: @[]
+        arg.listenFds = if sharedFdPath: sharedFds else: @[]
         createThread(srv.threads[i], workerMain, arg)
 
       if srv.onStartCb != nil: srv.onStartCb(srv.numThreads)
