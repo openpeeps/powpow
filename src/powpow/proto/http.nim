@@ -367,7 +367,7 @@ proc resetForNext*(p: HttpParser) =
   let leftover = p.bufLen - consumed
 
   if leftover > 0 and consumed >= 0:
-    copyMem(addr p.buf[0], addr p.buf[consumed], leftover)
+    moveMem(addr p.buf[0], addr p.buf[consumed], leftover)
 
   p.bufLen        = max(leftover, 0)
   # Reuse the slab across requests instead of churn: the streaming steady
@@ -972,7 +972,7 @@ proc parseChunkedBody(p: HttpParser): bool =
     if consumed > 0 and p.bodyStart <= p.bufLen:
       let pending = p.bufLen - p.bodyStart
       if pending > 0:
-        copyMem(addr p.buf[p.headerEnd], addr p.buf[p.bodyStart], pending)
+        moveMem(addr p.buf[p.headerEnd], addr p.buf[p.bodyStart], pending)
       p.bodyStart = p.headerEnd
       p.bufLen = p.headerEnd + pending
     pos = p.bodyStart  # compaction moved the frontier
@@ -1121,9 +1121,11 @@ proc parseChunkedBody(p: HttpParser): bool =
           p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
           buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])  # setLen may realloc
 
-        # Copy chunk data to body area
+        # Copy chunk data to body area. `buf` aliases `p.buf` (see the setLen
+        # re-cast above), so source and destination can overlap — this is a
+        # memmove, not a memcpy.
         if remaining > 0:
-          copyMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], remaining)
+          moveMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], remaining)
 
       if not p.maybeSpillChunked():
         return false
@@ -1175,8 +1177,8 @@ proc parseChunkedBody(p: HttpParser): bool =
           p.buf.setLen(max(p.buf.len * 2, p.headerEnd + p.chunkBodyLen))
           buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])  # setLen may realloc
 
-        # Copy partial chunk data
-        copyMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], available)
+        # Copy partial chunk data — memmove: `buf` aliases `p.buf`.
+        moveMem(addr p.buf[p.headerEnd + oldBodyLen], addr buf[pos], available)
 
         p.chunkParsed += available
       pos = p.bufLen
@@ -1229,7 +1231,7 @@ proc streamBodyBytes(p: HttpParser, data: openArray[byte]) =
   let leftover = data.len - bodyBytes
   if leftover > 0:
     p.ensureCapacity(leftover)
-    copyMem(addr p.buf[p.bufLen], unsafeAddr data[bodyBytes], leftover)
+    moveMem(addr p.buf[p.bufLen], unsafeAddr data[bodyBytes], leftover)
     p.bufLen += leftover
 
 proc streamBufferedBody(p: HttpParser) =
@@ -1252,7 +1254,7 @@ proc streamBufferedBody(p: HttpParser) =
     let leftoverStart = bodyStart + bytesToStream
     let leftover = p.bufLen - leftoverStart
     if leftover > 0:
-      copyMem(addr p.buf[0], addr p.buf[leftoverStart], leftover)
+      moveMem(addr p.buf[0], addr p.buf[leftoverStart], leftover)
       p.bufLen = leftover
     else:
       p.bufLen = 0
@@ -1304,7 +1306,7 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
       let headRoom = HeaderBufCap - p.bufLen
       if headRoom > 0:
         p.ensureCapacity(headRoom)
-        copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], headRoom)
+        moveMem(addr p.buf[p.bufLen], unsafeAddr data[0], headRoom)
         p.bufLen += headRoom
       if p.phase == PhaseRequestLine:
         let ok = if p.responseMode: p.parseResponseLine()
@@ -1327,7 +1329,7 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
         # Headers completed inside the capped prefix — buffer the rest as body.
         if data.len - offset > 0:
           p.ensureCapacity(data.len - offset)
-          copyMem(addr p.buf[p.bufLen], unsafeAddr data[offset], data.len - offset)
+          moveMem(addr p.buf[p.bufLen], unsafeAddr data[offset], data.len - offset)
           p.bufLen += data.len - offset
         # Fall through so the PhaseBody completion check below runs.
       elif p.phase != PhaseError:
@@ -1338,12 +1340,12 @@ proc feed*(p: HttpParser, data: openArray[byte]): ParsePhase {.discardable.} =
     else:
       p.ensureCapacity(data.len)
       if data.len > 0:
-        copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], data.len)
+        moveMem(addr p.buf[p.bufLen], unsafeAddr data[0], data.len)
         p.bufLen += data.len
   else:
     p.ensureCapacity(data.len)
     if data.len > 0:
-      copyMem(addr p.buf[p.bufLen], unsafeAddr data[0], data.len)
+      moveMem(addr p.buf[p.bufLen], unsafeAddr data[0], data.len)
       p.bufLen += data.len
 
   # State machine advancement
