@@ -1384,6 +1384,26 @@ proc listen*(server: HttpServer, address: string, port: int) =
     server.tcpServers.add(ts)
   server.startTimeoutSweep()
 
+proc adoptListenFd*(server: HttpServer, fd: SocketHandle) =
+  ## Serve on an already-bound listen socket (see `createListenSocket`),
+  ## adding one `TcpServer` per call just like `listen`. Intended for
+  ## multi-worker servers, where a single listen socket is created once and
+  ## adopted by every worker's loop; ownership stays with the creator, so
+  ## `close()` never sockCloses it.
+  if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
+    # `populatePools` pre-created an unbound TcpServer; migrate its pool as
+    # in listen() above so the warmed Connection buffers are not leaked.
+    let ts = server.buildTcpServer()
+    ts.connPool = move server.tcpServers[0].connPool
+    server.tcpServers.setLen(0)
+    ts.adoptListenFd(fd)
+    server.tcpServers.add(ts)
+  else:
+    let ts = server.buildTcpServer()
+    ts.adoptListenFd(fd)
+    server.tcpServers.add(ts)
+  server.startTimeoutSweep()
+
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =
     ## Listen on a Unix domain socket. `mode` is the file permission bits for the socket.

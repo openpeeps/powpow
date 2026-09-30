@@ -25,9 +25,21 @@ when not defined(windows):
   import ../loop
   import ../types
   import ../net/common
+  import ../net/tcp
   import ./httpserver
   import ./http2conn
   import ./hpack
+
+  # Workers share ONE listen socket instead of each binding its own. Linux and
+  # FreeBSD load-balance a SO_REUSEPORT group in the kernel, so one socket per
+  # worker scales with no shared state. Darwin permits the shared bind but
+  # hands every connection to a single member of the group (and has no
+  # SO_REUSEPORT_LB to change that), so per-worker sockets there leave every
+  # worker but one idle. Verified on macOS 14/15: 240 connections across a
+  # 12-socket group all landed on one socket. Sharing one fd means every worker
+  # registers it in its own loop and whichever accepts first wins.
+  const SharedListenFd = when defined(macosx): true
+                        else: false
 
   const WarmWorkerPoolSize {.intdefine.} = 128
     ## Entries pre-warmed per pool per worker when `-d:powpowWarmWorkers` is
@@ -49,6 +61,7 @@ when not defined(windows):
       idx:     int
       address: string
       ports:   seq[int]
+      listenFds: seq[SocketHandle]  # shared-socket mode; empty = bind per worker
 
     WorkerArg = ptr WorkerArgObj
 
@@ -85,6 +98,7 @@ when not defined(windows):
       let handler = arg.handler
       let address = arg.address
       let ports   = arg.ports
+      let listenFds = arg.listenFds
       freeWorkerArg(arg)
 
       let loop = newLoop()
@@ -99,8 +113,14 @@ when not defined(windows):
             loop.stop()
             break
           if n < 0: break
-      for p in ports:
-        server.listen(address, p)
+      if listenFds.len > 0:
+        # Shared-socket mode: adopt the parent's listener in this loop. Every
+        # worker registers the same fd; one accept() wins per connection.
+        for fd in listenFds:
+          server.adoptListenFd(fd)
+      else:
+        for p in ports:
+          server.listen(address, p)
       when defined(powpowWarmWorkers):
         # Opt-in warmup AFTER listen, so the connPool warms the live bound
         # server instead of a throwaway unbound one (see listen() migration).
@@ -122,11 +142,26 @@ when not defined(windows):
   proc listenMulti(srv: MultiThreadHttpServer, address: string, ports: openArray[int]) =
     ## Internal helper shared by single- and multi-port overloads.
     ## Listen on multiple ports (same address). Additive: each worker binds
-    ## all `ports` with SO_REUSEPORT, sharing the same handler.
+    ## all `ports` with SO_REUSEPORT, sharing the same handler — or adopts one
+    ## shared listener per port where the kernel does not load-balance a
+    ## SO_REUSEPORT group (see `SharedListenFd`).
     if ports.len == 0:
       raise newException(ValueError, "listen: at least one port is required")
     {.gcsafe.}:
       srv.running = true
+
+      var sharedFds: seq[SocketHandle]
+      if SharedListenFd:
+        # Bind here, in the parent, so every worker adopts the same fd. On a
+        # failure close whatever already succeeded rather than leaking.
+        try:
+          for p in ports:
+            sharedFds.add(createListenSocket(address, p))
+        except CatchableError:
+          for fd in sharedFds:
+            discard posix.close(fd)
+          raise
+
       for i in 0 ..< srv.numThreads:
         srv.contexts.add(newWorkerCtx())
       for i in 0 ..< srv.numThreads:
@@ -136,12 +171,17 @@ when not defined(windows):
         arg.idx     = i
         arg.address = address
         arg.ports   = @ports
+        arg.listenFds = if SharedListenFd: sharedFds else: @[]
         createThread(srv.threads[i], workerMain, arg)
 
       if srv.onStartCb != nil: srv.onStartCb(srv.numThreads)
 
       for i in 0 ..< srv.numThreads:
         joinThread(srv.threads[i])
+      # Workers only registered the shared listener, so the parent still owns
+      # it; close it once every worker has stopped.
+      for fd in sharedFds:
+        discard posix.close(fd)
       for ctx in srv.contexts:
         freeWorkerCtx(ctx)
       srv.contexts.setLen(0)

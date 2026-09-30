@@ -261,6 +261,14 @@ proc setReuseAddr*(fd: SocketHandle) =
 
 proc setReusePort*(fd: SocketHandle) =
   ## Enable SO_REUSEPORT on a socket (macOS/Linux). No-op on Windows.
+  ##
+  ## Note: this only permits the shared bind. On Linux and FreeBSD the kernel
+  ## also load-balances the group, so one listen socket per worker works. On
+  ## Darwin it does NOT: every connection is delivered to a single member of
+  ## the group, and there is no SO_REUSEPORT_LB to change that (the option does
+  ## not exist, so setting it fails with ENOPROTOOPT). Multi-worker servers on
+  ## Darwin must therefore share one listen socket across workers instead —
+  ## see `proto/multithread.nim`.
   when not defined(windows):
     var val: cint = 1
     if setsockopt(fd, SOL_SOCKET, SO_REUSEPORT,

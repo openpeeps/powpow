@@ -261,6 +261,9 @@ type
     fdConn:    Table[int, Connection]
     unixPath:  string
     maxConnections*: int
+    sharedFd:  bool   # fd was adopted via adoptListenFd and is owned by the
+                      # caller (a multi-worker server shares one listen socket);
+                      # close() must not sockClose it. False = we own it.
     when iouEnabled:
       acceptTokens: array[AcceptBatch, uint64]
       acceptAddrs:  array[AcceptBatch, Sockaddr_storage]
@@ -3178,7 +3181,13 @@ else:
           server.releaseConnection(conn)
           continue
 
-  proc listen*(server: TcpServer, address: string, port: int) =
+  proc createListenSocket*(address: string, port: int): SocketHandle =
+    ## Create a bound, listening TCP socket. Exposed so a multi-worker server
+    ## can create one listener in the parent thread and hand the fd to every
+    ## worker via `adoptListenFd`, rather than one SO_REUSEPORT socket per
+    ## worker. Darwin permits the shared bind under plain SO_REUSEPORT but
+    ## does NOT load-balance the group (every connection goes to one member),
+    ## so per-worker sockets there leave all workers but one idle.
     let addrBuf = resolveAddr(address, port, SOCK_STREAM)
     let fd = socket(cast[ptr Sockaddr](addr addrBuf).sa_family.cint,
                     SOCK_STREAM, 0)
@@ -3198,7 +3207,30 @@ else:
       sockClose(fd)
       raise newException(NetError, "listen() failed")
 
+    return fd
+
+  proc adoptListenFd*(server: TcpServer, fd: SocketHandle) =
+    ## Serve on an already-bound listen socket (see `createListenSocket`).
+    ## Registers the fd in *this* server's loop. Ownership stays with the
+    ## caller: `close()` will not sockClose it.
+    ##
+    ## Registering one fd in several independent loops is intentional — each
+    ## loop observes the shared listener as readable and whichever accepts
+    ## first wins, so all workers take connections without cross-thread
+    ## traffic. The cost is a thundering herd on accept, which is amortized
+    ## under keep-alive.
+    if fd.int < 0:
+      raise newException(NetError, "adoptListenFd: invalid listen fd")
     server.fd = fd
+    server.sharedFd = true
+    server.loop.register(fd.int, {Read}) do (listenFd: int, ev: set[EventType]):
+      server.acceptClients()
+
+  proc listen*(server: TcpServer, address: string, port: int) =
+    ## Create and serve on a new, owned SO_REUSEPORT listen socket.
+    let fd = createListenSocket(address, port)
+    server.fd = fd
+    server.sharedFd = false
 
     server.loop.register(fd.int, {Read}) do (listenFd: int, ev: set[EventType]):
       server.acceptClients()
@@ -3249,7 +3281,8 @@ else:
     server.connPool.setLen(0)
     if server.fd.int >= 0:
       server.loop.unregister(server.fd.int)
-      sockClose(server.fd)
+      if not server.sharedFd:
+        sockClose(server.fd)
       server.fd = SocketHandle(-1)
     if server.unixPath.len > 0:
       when not defined(windows):
