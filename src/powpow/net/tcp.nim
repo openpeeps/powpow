@@ -31,7 +31,6 @@ when iouEnabled:
 export loop.acquireBuf, loop.releaseBuf
 
 when defined(linux):
-  import ktls/raw as ktlsRaw
   proc c_accept4(s: SocketHandle; a: ptr Sockaddr;
                  l: ptr SockLen; flags: cint): SocketHandle {.
     importc: "accept4", header: "<sys/socket.h>".}
@@ -181,11 +180,25 @@ type
     clientAddr:       Sockaddr_storage
     ssl*:             pointer
     tlsState*:        TlsState
+    ktlsMode*:        KtlsMode
+      ## Requested kTLS policy, copied from the `SslContext` at `wrapTls`
+      ## time. `KtlsRequired` makes the connection fail closed if offload
+      ## does not engage.
     ktlsTx*:          bool
-      ## True when the kernel encrypts this connection's transmit path
-      ## (kTLS TX offload engaged at handshake end; snapshot by the
-      ## readiness backend — always false on io_uring/memory-BIO and on
-      ## non-Linux platforms). Read via `ktlsTxActive` (net/tls).
+      ## Whether the kernel encrypts this connection's transmit path. False
+      ## on io_uring/memory-BIO backends and off Linux. Only meaningful
+      ## once `ktlsTxFinal` — read via `ktlsTxActive` (net/tls), never
+      ## directly.
+    ktlsRx*:          bool
+      ## Receive-side counterpart of `ktlsTx`. Installed during the
+      ## handshake, so it is final almost immediately.
+    ktlsTxFinal*:     bool
+      ## True once `ktlsTx` can no longer change: either the kernel is
+      ## already encrypting, or a TLS write has gone out. Until then
+      ## `ktlsTx` is re-read on demand, because a "not yet" answer is
+      ## normal and a cached one would be wrong for good. See
+      ## `refreshKtlsState`.
+    ktlsRxFinal*:     bool
     when iouEnabled:
       connectAddr:    Sockaddr_storage   # persistent IORING_OP_CONNECT target
       closeAfterDrain: bool
@@ -284,6 +297,22 @@ proc newConnection*(fd: SocketHandle, loop: Loop, server: TcpServer,
   when iouEnabled:
     result.splicePipe = [-1.cint, -1.cint]
 
+proc resetTlsState(conn: Connection) {.inline.} =
+  ## Forget every scrap of TLS/kTLS state so a pooled `Connection` can be
+  ## handed to a new socket. Kept as one proc on purpose: `ktlsTx` gates the
+  ## raw `sendfile(2)` path, so a connection recycled with a stale
+  ## a stale `ktlsTx` would put unencrypted file bytes on the wire of a
+  ## userspace-TLS session. Every reset site must go through here.
+  conn.ssl = nil
+  conn.tlsState = TlsOff
+  conn.ktlsMode = KtlsOff
+  conn.ktlsTx = false
+  conn.ktlsRx = false
+  # Marked final so a recycled connection is never re-probed: a new
+  # `wrapTls` reopens both in `progressHandshake`.
+  conn.ktlsTxFinal = true
+  conn.ktlsRxFinal = true
+
 proc shutWrVal(): cint {.inline.} =
   when defined(windows): 1 else: SHUT_WR
 
@@ -339,9 +368,7 @@ when iouEnabled:
     if conn.ssl != nil:
       discard SSL_shutdown(cast[SslPtr](conn.ssl))
       SSL_free(cast[SslPtr](conn.ssl))
-      conn.ssl = nil
-    conn.tlsState = TlsOff
-    conn.ktlsTx = false
+    resetTlsState(conn)
 
   # Forward declarations (TLS + write paths, defined below `close`).
   proc driveHandshake*(conn: Connection): bool {.gcsafe.}
@@ -1482,6 +1509,10 @@ when iouEnabled:
     if written != n.cint:
       conn.close()
 
+  proc ktlsTxOffloaded*(conn: Connection): bool = false
+  proc ktlsRxOffloaded*(conn: Connection): bool = false
+  proc refreshKtlsState*(conn: Connection) = discard
+
   proc tlsRead*(conn: Connection, buf: pointer, count: int): int {.gcsafe.} =
     if conn.ssl == nil: return -1
     let r = SSL_read(cast[SslPtr](conn.ssl), cast[cstring](buf), count.cint)
@@ -1692,9 +1723,7 @@ when iouEnabled:
       result.loop = server.loop
       result.server = server
       result.state = Connected
-      result.ssl = nil
-      result.tlsState = TlsOff
-      result.ktlsTx = false
+      result.resetTlsState()
       result.readToken = 0
       result.writeToken = 0
       result.connectToken = 0
@@ -1754,9 +1783,7 @@ when iouEnabled:
     conn.tlsCoalesce.setLen(0)
     conn.tlsCoalesce.trimRetainedBuffer()
     conn.clientIp = ""
-    conn.ssl = nil
-    conn.tlsState = TlsOff
-    conn.ktlsTx = false
+    resetTlsState(conn)
     conn.fixedFd = false
     conn.zcPending = false
     conn.zcFixedActive = false
@@ -2440,20 +2467,72 @@ else:
       HandshakeState = enum
         hsDone, hsWantRead, hsWantWrite, hsError
 
+    proc queryKtlsState(conn: Connection) =
+      ## Ask the kernel where each direction's record layer terminates.
+      conn.ktlsTx = ktlsTxInstalled(conn.fd)
+      conn.ktlsRx = ktlsRxInstalled(conn.fd)
+
+    proc refreshKtlsState*(conn: Connection) =
+      ## Re-read TX offload while the answer is still open.
+      ##
+      ## "Not offloaded" is not a final answer on the transmit path, and
+      ## caching it as one is the whole bug this proc exists to avoid.
+      ## OpenSSL installs kTLS RX during the handshake but does not set up
+      ## kTLS TX until it first records application data, so a probe taken
+      ## before that legitimately answers "no" and a connection would then
+      ## be locked out of the zero-copy `sendfile(2)` path for good — which
+      ## is exactly what an HTTP server does first thing on every connection.
+      ##
+      ## So: re-read on demand, settle as soon as the kernel is encrypting,
+      ## and let `tlsWrite` settle the negative case once a record has
+      ## actually gone out. That bounds this to a couple of `getsockopt`s per
+      ## connection, all of them before the hot path.
+      if conn.ktlsTxFinal or conn.tlsState != TlsActive:
+        return
+      conn.ktlsTx = ktlsTxInstalled(conn.fd)
+      if conn.ktlsTx:
+        conn.ktlsTxFinal = true
+
+    proc enforceKtlsMode(conn: Connection): bool =
+      ## `KtlsRequired` gate: drop the connection rather than serve it with
+      ## the kernel doing no crypto at all. Returns false once closed.
+      if conn.ktlsMode == KtlsRequired and
+         not conn.ktlsTx and not conn.ktlsRx:
+        conn.close()
+        return false
+      true
+
+    proc settleKtlsAfterWrite(conn: Connection) =
+      ## Called once a TLS record has been written. OpenSSL has necessarily
+      ## been through its record layer by now, so whatever TX says is final.
+      if not conn.ktlsTxFinal:
+        conn.ktlsTx = ktlsTxInstalled(conn.fd)
+        conn.ktlsTxFinal = true
+
+    proc ktlsTxOffloaded*(conn: Connection): bool =
+      ## True when the kernel encrypts this connection's transmit path.
+      ## Single source of truth for the zero-copy `sendfile(2)` gate here and
+      ## for the public `ktlsTxActive` in `net/tls`; the two must not drift.
+      conn.refreshKtlsState()
+      conn.state != Closed and conn.ktlsTx
+
+    proc ktlsRxOffloaded*(conn: Connection): bool =
+      ## True when the kernel decrypts this connection's receive path.
+      ## Installed during the handshake, so this needs no re-probing.
+      conn.state != Closed and conn.ktlsRx
+
     proc progressHandshake(conn: Connection): HandshakeState =
       ## Progress the non-blocking TLS handshake one step.
       if conn.ssl == nil: return hsDone
       let r = SSL_do_handshake(cast[SslPtr](conn.ssl))
       if r == 1:
         conn.tlsState = TlsActive
-        when defined(linux):
-          # Snapshot kTLS TX engagement: with `SSL_OP_ENABLE_KTLS` set,
-          # OpenSSL installs the kernel record layer itself when the kernel
-          # and cipher cooperate. A 4-byte-header getsockopt read-back tells
-          # whether TX state is installed (fails when it is not).
-          var hdr: ktlsRaw.TlsCryptoInfo
-          var optLen = SockLen(sizeof(hdr))
-          conn.ktlsTx = ktlsRaw.rawGetTx(conn.fd, addr hdr, optLen) == 0
+        # RX is installed during the handshake, so it is readable now and
+        # final. TX is not (see `refreshKtlsState`), so leave it open.
+        conn.ktlsRx = ktlsRxInstalled(conn.fd)
+        conn.ktlsRxFinal = true
+        conn.ktlsTx = ktlsTxInstalled(conn.fd)
+        conn.ktlsTxFinal = conn.ktlsTx
         return hsDone
       let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
       if e == SSL_ERROR_WANT_READ: return hsWantRead
@@ -2491,7 +2570,15 @@ else:
       ## block, 0 on clean EOF or error (connection is closed by caller).
       if conn.ssl == nil: return -1
       let r = SSL_read(cast[SslPtr](conn.ssl), cast[cstring](buf), count.cint)
-      if r > 0: return r
+      if r > 0:
+        # A successful read means the record layer is live. This is where a
+        # TLS 1.3 server has consumed the client's Finished, so a
+        # `KtlsRequired` connection can be rejected before the application
+        # is handed anything. Callers already check `conn.state` before
+        # delivering to `onData`, so a rejection here drops the connection
+        # rather than serving it.
+        if not conn.enforceKtlsMode(): return 0
+        return r
       let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
       if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
         return -2
@@ -2501,8 +2588,16 @@ else:
       ## SSL_write wrapper. Returns bytes written or -2 when the operation
       ## would block (caller buffers and waits for a Write event).
       if conn.ssl == nil: return -1
+      # By the time a response is being written the peer's Finished has been
+      # consumed, so this is the last point at which a `KtlsRequired`
+      # connection can be closed before it emits application data. No-op
+      # once offload is engaged, and on pre-handshake writes.
+      conn.refreshKtlsState()
+      if not conn.enforceKtlsMode(): return -1
       let r = SSL_write(cast[SslPtr](conn.ssl), cast[cstring](buf), count.cint)
-      if r > 0: return r
+      if r > 0:
+        conn.settleKtlsAfterWrite()
+        return r
       let e = SSL_get_error(cast[SslPtr](conn.ssl), r)
       if e == SSL_ERROR_WANT_READ or e == SSL_ERROR_WANT_WRITE:
         return -2
@@ -2516,11 +2611,22 @@ else:
         conn.ssl = nil
       conn.tlsState = TlsOff
       conn.ktlsTx = false
+      conn.ktlsRx = false
+      conn.ktlsTxFinal = true
+      conn.ktlsRxFinal = true
   else:
     proc driveHandshake*(conn: Connection): bool = true
     proc tlsRead*(conn: Connection, buf: pointer, count: int): int = -1
     proc tlsWrite*(conn: Connection, buf: pointer, count: int): int = -1
     proc tlsFree*(conn: Connection) = discard
+    proc queryKtlsState(conn: Connection) =
+      conn.ktlsTx = false
+      conn.ktlsRx = false
+    proc refreshKtlsState*(conn: Connection) = discard
+    proc enforceKtlsMode(conn: Connection): bool = true
+    proc settleKtlsAfterWrite(conn: Connection) = discard
+    proc ktlsTxOffloaded*(conn: Connection): bool = false
+    proc ktlsRxOffloaded*(conn: Connection): bool = false
 
   proc watchWritable(conn: Connection) {.inline.} =
     ## Watch for writability so a partially-buffered write can flush.
@@ -2973,8 +3079,12 @@ else:
     ## and client connections.
     if conn.state != Connected:
       return false
-    if conn.tlsState != TlsOff and not conn.ktlsTx:
-      return false
+    if conn.tlsState != TlsOff:
+      # Only a socket the *kernel* encrypts may be handed raw file bytes.
+      # `ktlsTxOffloaded` re-reads the state if the handshake-end snapshot
+      # was still provisional, so a connection that offloaded late (TLS 1.3
+      # server) is not permanently locked out of the fast path.
+      if conn.ktlsTxOffloaded(): discard else: return false
     if conn.sendFileActive():
       return false
     if length <= 0:
@@ -3003,9 +3113,7 @@ else:
       result.loop = server.loop
       result.server = server
       result.state = Connected
-      result.ssl = nil
-      result.tlsState = TlsOff
-      result.ktlsTx = false
+      result.resetTlsState()
     else:
       result = Connection(
         fd:        fd,
@@ -3031,9 +3139,7 @@ else:
     conn.tlsCoalesce.setLen(0)
     conn.tlsCoalesce.trimRetainedBuffer()
     conn.clientIp = ""
-    conn.ssl = nil
-    conn.tlsState = TlsOff
-    conn.ktlsTx = false
+    resetTlsState(conn)
     if server.connPool.len < MaxConnPoolSize:
       server.connPool.add(conn)
     else:

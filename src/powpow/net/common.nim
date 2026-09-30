@@ -312,6 +312,136 @@ proc setIpv6Only*(fd: SocketHandle) =
     discard setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
                        addr one, sizeof(one).SockLen)
 
+# ── Kernel TLS (kTLS) state query ────────────────────────────────────────────
+#
+# kTLS is a Linux kernel feature: the `tls` ULP terminates the TLS record
+# layer on a TCP socket. The question powpow needs answered is per direction
+# and per connection — "is the kernel encrypting this yet?" — because that is
+# what unlocks handing raw file bytes to `sendfile(2)`, and answering it wrong
+# in the optimistic direction puts plaintext on a TLS connection.
+#
+# Getting there took three wrong turns worth recording, since the obvious
+# options are all traps:
+#
+#   1. `getsockopt(SOL_TCP, TLS_INFO_TXCONF)`, a 1-byte option that is *meant*
+#      to answer this question. Measured on Linux 7.0: it returns 0 even on a
+#      socket where OpenSSL has demonstrably installed both TX and RX keys.
+#      `TLS_INFO_RXCONF` (4) additionally collides with `TCP_KEEPIDLE`, so on
+#      a socket with no ULP at all it returns the keepalive value — a
+#      confident false positive. Unusable; not used.
+#   2. `getsockopt(SOL_TLS, TLS_TX)` with a 4-byte `tls_crypto_info` header.
+#      The kernel validates the buffer length against the *negotiated cipher's*
+#      struct size, so this returns `EINVAL` even when TX is offloaded — i.e.
+#      "not offloaded" for every connection, forever.
+#   3. Same option, one fixed size. `EINVAL` again for whichever half of the
+#      cipher set you did not guess.
+#
+# What works: the `TCP_ULP` read-back to confirm the ULP is actually attached,
+# then `getsockopt(SOL_TLS, TLS_TX|TLS_RX)` tried at each cipher struct size
+# until one is accepted. Two syscalls worst case, once per connection.
+#
+# `KtlsMode` lives here rather than in `net/tls` so `net/tcp` can hold it on a
+# `Connection` without importing `net/tls` (which imports `net/tcp`).
+
+type
+  KtlsMode* = enum
+    ## How hard a `SslContext` tries to move TLS into the kernel. See
+    ## `configureKtls` in `net/tls`.
+    KtlsOff,        ## Never request offload; all crypto stays in userspace.
+    KtlsAuto,       ## Request offload, silently fall back when unavailable.
+    KtlsRequired    ## Request offload and reject connections where it does
+                    ## not engage, so a silent regression to userspace crypto
+                    ## cannot masquerade as a working deployment.
+
+when defined(linux):
+  # Hardcoded, then re-checked against the real headers at C compile time by
+  # the `{.emit.}` block below. These are values from the kernel uapi, and a
+  # wrong one is not a crash but a plausible-looking wrong answer.
+  const
+    SolTls      = 282.cint   ## `SOL_TLS` — its own sockopt level, not SOL_TCP.
+    TlsTxOpt    = 1.cint     ## `TLS_TX` — read back the installed TX state.
+    TlsRxOpt    = 2.cint     ## `TLS_RX` — read back the installed RX state.
+    TcpUlpOpt   = 31.cint    ## `TCP_ULP` — attach / read back a ULP.
+
+    TlsCryptoInfoSmall = 40  ## aes_gcm_128, aes_ccm_128, sm4_gcm, sm4_ccm,
+                           ## aria_gcm_128
+    TlsCryptoInfoLarge = 56  ## aes_gcm_256, chacha20_poly1305, aria_gcm_256
+
+  {.emit: """
+#if defined(__linux__) && defined(__has_include)
+#if __has_include(<linux/tls.h>) && __has_include(<linux/tcp.h>) && \
+    __has_include(<sys/socket.h>)
+#include <sys/socket.h>   /* SOL_TLS */
+/* <linux/tcp.h> alone: it redefines tcphdr/tcp_info against <netinet/tcp.h> */
+#include <linux/tcp.h>
+#include <linux/tls.h>
+#define POWPOW_KTLS_ASSERT(sym, val) \
+  typedef char powpow_ktls_assert_##sym[(sym) == (val) ? 1 : -1]
+#define POWPOW_KTLS_ASSERT_SIZED(tag, sz, val) \
+  typedef char powpow_ktls_size_##tag[(sz) == (val) ? 1 : -1]
+POWPOW_KTLS_ASSERT(SOL_TLS, 282);
+POWPOW_KTLS_ASSERT(TLS_TX, 1);
+POWPOW_KTLS_ASSERT(TLS_RX, 2);
+POWPOW_KTLS_ASSERT(TCP_ULP, 31);
+POWPOW_KTLS_ASSERT_SIZED(gcm128, sizeof(struct tls12_crypto_info_aes_gcm_128), 40);
+POWPOW_KTLS_ASSERT_SIZED(chacha,
+                         sizeof(struct tls12_crypto_info_chacha20_poly1305), 56);
+#endif
+#endif
+""".}
+
+  proc tlsUlpAttached(fd: SocketHandle): bool {.inline.} =
+    ## True when the `tls` ULP is attached to this socket. The read-back
+    ## returns a zero length (with rc 0) when no ULP is attached, and the
+    ## ULP's NUL-terminated name otherwise. Cheap, and it keeps the
+    ## size-probing below off the hot path for ordinary (userspace) TLS.
+    var name: array[8, char]
+    var len = SockLen(sizeof(name))
+    if posix.getsockopt(fd, IpProtoTcp.cint, TcpUlpOpt, addr name[0],
+                        addr len) != 0:
+      return false
+    if len < 4: return false
+    name[0] == 't' and name[1] == 'l' and name[2] == 's'
+
+  proc ktlsDirectionInstalled(fd: SocketHandle, opt: cint): bool {.inline.} =
+    ## True when the kernel has crypto state installed for this direction.
+    var buf: array[TlsCryptoInfoLarge, byte]
+    # The kernel accepts the read-back only at the negotiated cipher's exact
+    # struct size, so both published sizes have to be offered.
+    for size in [TlsCryptoInfoLarge, TlsCryptoInfoSmall]:
+      var len = SockLen(size)
+      if posix.getsockopt(fd, SolTls, opt, addr buf[0], addr len) == 0:
+        return true
+    false
+
+  proc ktlsTxInstalled*(fd: SocketHandle): bool {.inline.} =
+    ## True when the kernel encrypts this socket's transmit path. Only such a
+    ## socket may be handed raw `sendfile(2)` bytes.
+    tlsUlpAttached(fd) and ktlsDirectionInstalled(fd, TlsTxOpt)
+
+  proc ktlsRxInstalled*(fd: SocketHandle): bool {.inline.} =
+    ## True when the kernel decrypts this socket's receive path.
+    tlsUlpAttached(fd) and ktlsDirectionInstalled(fd, TlsRxOpt)
+
+  proc ktlsUlpAttach*(fd: SocketHandle): bool {.inline.} =
+    ## Whether the `tls` ULP can be attached to this socket. False when the
+    ## kernel module is absent (`ENOENT`) — the common case on a stock
+    ## kernel, where `modprobe tls` is required.
+    var ulpName: array[4, char] = ['t', 'l', 's', '\0']
+    posix.setsockopt(fd, IpProtoTcp.cint, TcpUlpOpt, addr ulpName[0],
+                     SockLen(ulpName.len)) == 0
+else:
+  # kTLS is a Linux kernel feature. These stay visible everywhere with an
+  # honest "nothing is offloaded" answer rather than being hidden, so
+  # cross-platform code can branch on the result instead of on the platform.
+  proc ktlsTxInstalled*(fd: SocketHandle): bool {.inline.} =
+    discard
+    false
+
+  proc ktlsRxInstalled*(fd: SocketHandle): bool {.inline.} =
+    discard
+    false
+
 # ── Address resolution ───────────────────────────────────────────────────────
 
 proc resolveAddrAll*(address: string, port: int,

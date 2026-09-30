@@ -287,8 +287,14 @@ proc close*(res: HttpResponse): HttpResponse {.inline, discardable.} =
 proc ktlsTxActive*(res: HttpResponse): bool {.inline.} =
   ## True when this response's connection has kTLS TX offload engaged (the
   ## kernel encrypts the transmit path, so `serveFile` uses zero-copy
-  ## `sendfile(2)` even over TLS). See `enableKtls` (net/tls).
+  ## `sendfile(2)` even over TLS). See `configureKtls` (net/tls).
   res.conn.ktlsTxActive()
+
+proc ktlsActive*(res: HttpResponse): bool {.inline.} =
+  ## True when the kernel terminates TLS on this response's connection in
+  ## either direction. When false, file bodies take the userspace chunk loop
+  ## rather than zero-copy `sendfile(2)`. See `ktlsTxActive` (net/tls).
+  res.conn.ktlsActive()
 
 func statusText(code: HttpCode): string {.inline.} =
   ## Return the HTTP reason phrase for a status code.

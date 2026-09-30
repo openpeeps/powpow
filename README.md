@@ -178,6 +178,9 @@ Most web servers out there are all rainbows and flowers, until you upload or str
 - `uds_server.nim` HTTP over a Unix domain socket, no TCP stack involved. The whole request stays on the machine, which is great if you and your microservice have agreed to never speak over the network again. `curl --unix-socket /tmp/powpow.sock http://localhost/hello`
 - `tls_server.nim` an HTTPS server with an embedded self-signed certificate. `curl -k https://localhost:9443/hello` and the TLS handshake happens before your coffee does
 
+- `httpserver_ktls.nim` the same idea with **kernel TLS**: `sudo modprobe tls`, then file bodies leave through a real `sendfile(2)` onto the TLS socket and never enter userspace. `curl -k https://localhost:9444/ktls` reports whether *this* connection actually offloaded. Falls back to ordinary userspace TLS wherever kTLS doesn't exist, with no branching in your handler
+- `stream_server_ktls.nim` the streaming/download routes of `stream_server.nim` over TLS — `streamFile`, `sendFile`, resume-aware `serveFile` — showing which of them actually reach the zero-copy path and which never would
+
 - `signal_bus.nim` an in-process pub/sub event bus (`SignalRelay`): an HTTP endpoint emits named events and subscribers react to them, including `listenOnce` and manual `unlisten`. Server-side events without a server-side framework
 
 - `timers_scheduler.nim` a guided tour of the timer wheel: one-shot timers, repeating intervals, deferred callbacks, and idle handlers, all ticking on the same loop for ~8 seconds before politely stopping

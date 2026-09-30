@@ -132,8 +132,24 @@
 ## - Platform-agnostic socket API and address resolution (IPv4 + IPv6)
 ## - Socket options: non-blocking, SO_REUSEADDR, SO_REUSEPORT, TCP_NODELAY
 ## - sendfile zero-copy file transmission
+## - Kernel-TLS (kTLS) state queries — Linux only, `ktlsSupported`
 ## - Cross-platform error handling (EAGAIN, EINPROGRESS, etc.)
 ## - Auto-initialization (WSAStartup on Windows, SIGPIPE ignore on POSIX)
+##
+## ### TLS (`net/tls.nim`)
+## - OpenSSL 3.x, non-blocking handshake driven by the event loop; server
+##   (implicit or STARTTLS-style) and client, implicit TLS and ALPN
+## - Opt-in kernel-TLS offload via `configureKtls`: `KtlsOff` (default),
+##   `KtlsAuto` (request, fall back silently) or `KtlsRequired` (drop the
+##   connection rather than quietly serve in userspace crypto)
+## - With TX offload engaged, `sendFile`/`serveFile` reach a real
+##   `sendfile(2)` on the TLS socket instead of a read + `SSL_write` loop.
+##   `ktlsTxActive`/`ktlsRxActive`/`ktlsActive` report what a live connection
+##   is actually doing
+## - Offload needs the `tls` kernel module (`modprobe tls`), OpenSSL built
+##   with `enable-ktls`, a kTLS-capable cipher, and the socket-BIO backend
+##   (not io_uring, which runs TLS over memory BIOs). Everywhere else, and
+##   whenever anything is missing, powpow uses userspace TLS unchanged
 
 
 import powpow/types
