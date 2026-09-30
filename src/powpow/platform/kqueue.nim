@@ -9,7 +9,7 @@
 ## Uses Nim's std/kqueue for high-performance I/O event multiplexing
 ## with a wake mechanism for cross-thread loop interruption.
 ##
-## Three backend-specific optimisations are layered on top of plain kqueue(2):
+## Four backend-specific optimisations are layered on top of plain kqueue(2):
 ##
 ## 1. **Per-fd filter state.** Every knote's currently-registered filters are
 ##    tracked in a direct-indexed table, so `add`/`modify`/`remove` emit only
@@ -30,12 +30,23 @@
 ##    The invariant is that changes are only ever flushed at the top of `poll()`,
 ##    never after the wait, so nothing is deferred past a blocking point.
 ##
-## 3. **EVFILT_USER wake.** Where the platform has `EVFILT_USER`, the wake pipe
+## 3. **EVFILT_USER wake.** Where std/kqueue exposes EVFILT_USER, the wake pipe
 ##    is replaced by a user knote: no fds consumed, and nothing to drain in the
 ##    poll path. The pipe drain also had a lost-wakeup edge — it read 8 bytes
 ##    while `wake()` writes 1 byte per call, and `EV_CLEAR` deactivates the
 ##    knote after the first report, so 9+ piled-up wake bytes left the pipe
 ##    readable with no edge left to re-fire on.
+##
+## 4. **Allocation-free event decode.** `poll()` walks the kernel's event array
+##    in place — one hoisted `addr` per event, so no 32-byte `KEvent` is copied —
+##    and decodes the filter with a `case`. That is one bounds check per event
+##    instead of four and no allocations, which matters more than it looks
+##    because Nim's `-d:release` keeps bound checks *on* (only `-d:danger` drops
+##    them). The remaining per-event work is one `EV_ERROR` test (not two) and
+##    no `uint -> int` range check on `ident`. Note what is deliberately *not*
+##    done here: hoisting the seq headers and counter into locals. It removes
+##    five heap loads per event from the generated C and measures ~3% slower —
+##    see the long comment on the decode loop.
 
 import ../types
 import std/[kqueue, posix, monotimes]
@@ -48,17 +59,12 @@ const
   ## Stage registration changes in a changelist flushed with the next wait.
   ## macOS only — FreeBSD/NetBSD/OpenBSD keep the immediate `kevent()` path.
   changelistBatched = defined(macosx)
-  ## EVFILT_USER replaces the pipe-based wake mechanism where it exists.
+  ## std/kqueue declares EVFILT_USER and NOTE_TRIGGER for exactly these
+  ## platforms (its own comment notes OpenBSD and NetBSD lack EVFILT_USER), so
+  ## this guard must not be widened: the filter number differs per BSD, which is
+  ## why the constant is taken from std/kqueue instead of hardcoded.
   userFilterAvailable =
-    defined(macosx) or defined(freebsd) or defined(netbsd) or defined(openbsd)
-
-when userFilterAvailable:
-  # Not exported by std/kqueue. Verified against <sys/event.h>:
-  #   #define EVFILT_USER  (-10)
-  #   #define NOTE_TRIGGER 0x01000000
-  const
-    EvFilterUser = -10
-    NoteTrigger  = 0x01000000.cuint
+    defined(macosx) or defined(freebsd) or defined(dragonfly)
 
 # ── Per-fd knote state ────────────────────────────────────────────────────────
 
@@ -67,6 +73,9 @@ const
   FiltWrite = 2'u8   ## EVFILT_WRITE is registered
   FiltClear = 4'u8   ## registered edge-triggered (EV_CLEAR)
   FiltAny    = FiltRead or FiltWrite
+
+  FiltReadK  = cshort(EVFILT_READ)
+  FiltWriteK = cshort(EVFILT_WRITE)
 
 type
   FilterSlot = object
@@ -89,11 +98,19 @@ type
     wakeReadFd: cint         ## pipe wake, or -1 when EVFILT_USER is in use
     wakeWriteFd: cint
     fslots:     seq[FilterSlot]  ## direct-indexed by fd
-    scratch:    FilterSlot       ## slot used for out-of-range fds
-    pending:    seq[KEvent]      ## staged changelist (macOS)
-    pendingFd:  seq[int]         ## fd owning each staged change
+    scratch:    FilterSlot       ## slot used for fds outside the table
     pendErrFd:  int              ## fd of the last rejected change, -1 when none
     pendErrNo:  int
+    when changelistBatched:
+      ## `pending` is handed to `kevent()` as a contiguous `struct kevent[]`,
+      ## so it MUST be a plain seq[KEvent] with nothing interleaved between
+      ## entries. An earlier revision stored `{ev: KEvent, fd: int}` per entry
+      ## to halve the seq headers touched per append — but that struct is 40
+      ## bytes against kqueue's 32, so the kernel read the fd as part of the
+      ## next event and every staged batch after the first was garbage.
+      ## `pendingFd` is a parallel array purely for error reporting.
+      pending: seq[KEvent]
+      pendingFd: seq[int]
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -122,17 +139,14 @@ proc init*(T: typedesc[Platform]): T =
   result.wakeWriteFd = -1
   result.pendErrFd = -1
   result.fslots  = newSeqOfCap[FilterSlot](256)
-  result.pending = newSeqOfCap[KEvent](32)
-  result.pendingFd = newSeqOfCap[int](32)
+  when changelistBatched:
+    result.pending = newSeqOfCap[KEvent](32)
+    result.pendingFd = newSeqOfCap[int](32)
 
   when userFilterAvailable:
-    var wev: KEvent
-    wev.ident  = 0                      ## ident is ignored for EVFILT_USER
-    wev.filter = EvFilterUser.cshort
-    wev.flags  = (EV_ADD or EV_CLEAR).cushort
-    wev.fflags = 0
-    wev.data   = 0
-    wev.udata  = nil
+    # `ident` is ignored for EVFILT_USER.
+    var wev = KEvent(ident: 0, filter: EVFILT_USER, flags: EV_ADD or EV_CLEAR,
+                      fflags: 0, data: 0, udata: nil)
     if kevent(result.kqFd, addr wev, 1, nil, 0, nil) < 0:
       discard posix.close(result.kqFd)
       raise newException(OSError, "powpow: kevent ADD failed for EVFILT_USER wake")
@@ -146,17 +160,14 @@ proc init*(T: typedesc[Platform]): T =
     result.wakeReadFd.raiseFd()
     result.wakeWriteFd.raiseFd()
     let flags = fcntl(result.wakeReadFd, F_GETFL, 0)
-    if flags >= 0: discard fcntl(result.wakeReadFd, F_SETFL, flags or O_NONBLOCK)
+    if flags >= 0:
+      discard fcntl(result.wakeReadFd, F_SETFL, flags or O_NONBLOCK)
     let wflags = fcntl(result.wakeWriteFd, F_GETFL, 0)
-    if wflags >= 0: discard fcntl(result.wakeWriteFd, F_SETFL, wflags or O_NONBLOCK)
+    if wflags >= 0:
+      discard fcntl(result.wakeWriteFd, F_SETFL, wflags or O_NONBLOCK)
 
-    var wev: KEvent
-    wev.ident  = result.wakeReadFd.csize_t
-    wev.filter = EVFILT_READ
-    wev.flags  = EV_ADD or EV_CLEAR
-    wev.fflags = 0
-    wev.data   = 0
-    wev.udata  = nil
+    var wev = KEvent(ident: result.wakeReadFd.uint, filter: EVFILT_READ,
+                      flags: EV_ADD or EV_CLEAR, fflags: 0, data: 0, udata: nil)
     if kevent(result.kqFd, addr wev, 1, nil, 0, nil) < 0:
       discard posix.close(result.wakeReadFd)
       discard posix.close(result.wakeWriteFd)
@@ -164,8 +175,9 @@ proc init*(T: typedesc[Platform]): T =
       raise newException(OSError, "powpow: kevent ADD failed for wake fd")
 
 proc close*(p: Platform) =
-  p.pending.setLen(0)
-  p.pendingFd.setLen(0)
+  when changelistBatched:
+    p.pending.setLen(0)
+    p.pendingFd.setLen(0)
   if p.wakeReadFd >= 0:
     discard posix.close(p.wakeReadFd)
     p.wakeReadFd = -1
@@ -182,6 +194,12 @@ proc ensureCapacity*(p: Platform, fdCount: int) {.inline.} =
   let target = min(max(fdCount * 2, EventCapacityMin), EventCapacityMax)
   if target > p.events.len:
     p.events.setLen(target)
+  # `poll` hands the kernel `kEvents.len` as the eventlist size and then decodes
+  # into `events`, so `events` must never be the smaller of the two. Growing
+  # them under independent guards (rather than one shared `target > events.len`
+  # test) keeps `events.len >= kEvents.len` even if a future change resizes only
+  # one of them, which is the invariant `poll`'s decode loop relies on.
+  if target > p.kEvents.len:
     p.kEvents.setLen(target)
 
 proc slotFor(p: Platform, fd: int): ptr FilterSlot {.inline.} =
@@ -199,36 +217,64 @@ proc slotFor(p: Platform, fd: int): ptr FilterSlot {.inline.} =
 
 # ── Registration ─────────────────────────────────────────────────────────────
 
-proc mk(ev: var KEvent, fd: int, filter: int, flags: cushort,
-        udata: pointer) {.inline.} =
-  ev.ident  = fd.csize_t
-  ev.filter = filter.cshort
+proc mkev(ev: var KEvent, fd: int, filter: cshort, flags: cushort,
+          udata: pointer) {.inline, noSideEffect.} =
+  ## Fill in place. Returning a `struct kevent` by value instead measured
+  ## ~5-7% slower on the add/remove and modify micro-benchmarks (322 vs 307
+  ## ns/op): the return goes through an sret temporary because the destination
+  ## is `changes[n]` with a runtime `n`.
+  ev.ident  = fd.uint
+  ev.filter = filter
   ev.flags  = flags
   ev.fflags = 0
   ev.data   = 0
   ev.udata  = udata
 
-proc submit(p: Platform, changes: ptr KEvent, n: int, fd: int) =
-  ## Apply `n` changes for `fd`. On macOS they are staged and flushed together
-  ## with the next wait; elsewhere they go out immediately.
+proc submit(p: Platform, changes: openArray[KEvent], n: int, fd: int) =
+  ## Apply the first `n` of `changes` for `fd`.
+  ##
+  ## `openArray` keeps the caller's `array[2, KEvent]` copy-free, and callers
+  ## pass the array itself with the count alongside (`submit(changes, n, fd)`).
+  ## Two plausible-looking alternatives are both wrong, and were measured:
+  ##   - `changes[0 ..< n]` — a runtime-length slice of the fixed-size array
+  ##     measured 563-592 ns/op on the add+remove and modify micro-benchmarks
+  ##     versus 318-336 for the form above, ~78% slower, because a runtime slice
+  ##     of a fixed-size array does not resolve to a compile-time view.
+  ##   - `toOpenArray(0, n)` — inclusive of `n`, so it hands over one element
+  ##     past the 2-element array. At n == 1 that silently staged a garbage
+  ##     duplicate changelist entry on every single-filter registration.
+  ## On macOS the changes are staged and flushed with the next wait; elsewhere
+  ## they go out in one `kevent()` call so a read+write pair stays a single
+  ## syscall.
   when changelistBatched:
-    let arr = cast[ptr UncheckedArray[KEvent]](changes)
+    let arr = cast[ptr UncheckedArray[KEvent]](unsafeAddr changes[0])
     for i in 0 ..< n:
-      p.pending.add(arr[i])
-      p.pendingFd.add(fd)
+      p.pending.add arr[i]
+      p.pendingFd.add fd
   else:
     if n > 0:
-      if kevent(p.kqFd, changes, n.cint, nil, 0, nil) < 0:
+      if kevent(p.kqFd, unsafeAddr changes[0], n.cint, nil, 0, nil) < 0:
         raise newException(OSError,
           "powpow: kevent change failed for fd " & $fd & ": " & $strerror(errno))
 
+proc wantMask(events: set[EventType], edgeTriggered: bool): uint8
+    {.inline, noSideEffect.} =
+  ## Which filters a knote needs to cover `events`. One definition shared by
+  ## `add` and `modify` so the two can never disagree about what "already
+  ## registered" means — that disagreement would silently skip a knote.
+  ##
+  ## Two independent bit tests rather than a `case`: the set's bits are
+  ## independent, so there is no single-value dispatch to jump-table, and a
+  ## `case` would still need a fallback branch for combinations like
+  ## `{Read, Error}` that the hot path never produces.
+  result = 0
+  if Read in events:  result = result or FiltRead
+  if Write in events: result = result or FiltWrite
+  if edgeTriggered:    result = result or FiltClear
+
 proc add*(p: Platform, fd: int, events: set[EventType],
           edgeTriggered = false, udata: pointer = nil) =
-  var want: uint8 = 0
-  if Read in events:  want = want or FiltRead
-  if Write in events: want = want or FiltWrite
-  if edgeTriggered:    want = want or FiltClear
-
+  let want = wantMask(events, edgeTriggered)
   let slot = p.slotFor(fd)
 
   # NOTE: `add` always emits its changes, even when the table already describes
@@ -240,102 +286,95 @@ proc add*(p: Platform, fd: int, events: set[EventType],
   # knote at all and it would hang forever. `add` is the registration entry point
   # and must always reach the kernel; on macOS it is staged into the changelist,
   # so it costs no extra syscall anyway.
-  var n = 0
-  var changes: array[2, KEvent]
   let addFlags: cushort =
     if edgeTriggered: (EV_ADD or EV_CLEAR).cushort else: EV_ADD.cushort
 
+  var n = 0
+  var changes: array[2, KEvent]
   if Read in events:
-    mk(changes[n], fd, EVFILT_READ, addFlags, udata)
+    mkev(changes[n], fd, FiltReadK, addFlags, udata)
     inc n
   if Write in events:
-    mk(changes[n], fd, EVFILT_WRITE, addFlags, udata)
+    mkev(changes[n], fd, FiltWriteK, addFlags, udata)
     inc n
 
   slot.mask = want
   if n > 0:
     slot.udata = udata
-  p.submit(addr changes[0], n, fd)
+  p.submit(changes, n, fd)
 
 proc remove*(p: Platform, fd: int) =
-  var n = 0
-  var changes: array[2, KEvent]
-
   let slot = p.slotFor(fd)
   let have = slot.mask and FiltAny
+
+  var n = 0
+  var changes: array[2, KEvent]
   if (have and FiltRead) != 0:
-    mk(changes[n], fd, EVFILT_READ, EV_DELETE.cushort, nil)
+    mkev(changes[n], fd, FiltReadK, EV_DELETE.cushort, nil)
     inc n
   if (have and FiltWrite) != 0:
-    mk(changes[n], fd, EVFILT_WRITE, EV_DELETE.cushort, nil)
+    mkev(changes[n], fd, FiltWriteK, EV_DELETE.cushort, nil)
     inc n
   if n == 0:
     # Nothing tracked for this fd (never registered through `add`, or its state
     # was already cleared). Blind-delete both filters in a single `kevent()`
     # rather than leak a knote if the bookkeeping is ever wrong; this is the
     # defensive path and does not run for a normally-registered fd.
-    mk(changes[n], fd, EVFILT_READ, EV_DELETE.cushort, nil)
-    inc n
-    mk(changes[n], fd, EVFILT_WRITE, EV_DELETE.cushort, nil)
-    inc n
+    mkev(changes[0], fd, FiltReadK, EV_DELETE.cushort, nil)
+    mkev(changes[1], fd, FiltWriteK, EV_DELETE.cushort, nil)
+    n = 2
 
   if fd >= 0 and fd < p.fslots.len:
     p.fslots[fd] = default(FilterSlot)
-  p.submit(addr changes[0], n, fd)
+  p.submit(changes, n, fd)
 
 proc modify*(p: Platform, fd: int, events: set[EventType],
              edgeTriggered = false, udata: pointer = nil) =
-  var want: uint8 = 0
-  if Read in events:  want = want or FiltRead
-  if Write in events: want = want or FiltWrite
-  if edgeTriggered:    want = want or FiltClear
-
+  let want = wantMask(events, edgeTriggered)
   let slot = p.slotFor(fd)
   if slot.mask == want and slot.udata == udata:
     return  # no-op: nothing about this registration changed
 
-  let addFlags: cushort =
-    if edgeTriggered: (EV_ADD or EV_CLEAR).cushort else: EV_ADD.cushort
   # EV_CLEAR can only be changed by re-adding, and a changed udata has to ride
   # along on an actual change. In either case re-issue every wanted filter
   # instead of the deltas. (Explicit parens for clarity around the `or`.)
   let edgeChanged = (want and FiltClear) != (slot.mask and FiltClear)
   let fullReAdd = edgeChanged or (slot.udata != udata)
 
+  let addFlags: cushort =
+    if edgeTriggered: (EV_ADD or EV_CLEAR).cushort else: EV_ADD.cushort
+
   var n = 0
   var changes: array[2, KEvent]
 
   if fullReAdd:
+    # At most one entry per filter: a filter that is wanted is re-added, a
+    # filter that is not is deleted, never both.
     if Read in events:
-      mk(changes[n], fd, EVFILT_READ, addFlags, udata)
+      mkev(changes[n], fd, FiltReadK, addFlags, udata)
       inc n
     if Write in events:
-      mk(changes[n], fd, EVFILT_WRITE, addFlags, udata)
-      inc n
-    if Read notin events and (slot.mask and FiltRead) != 0:
-      mk(changes[n], fd, EVFILT_READ, EV_DELETE.cushort, nil)
-      inc n
-    if Write notin events and (slot.mask and FiltWrite) != 0:
-      mk(changes[n], fd, EVFILT_WRITE, EV_DELETE.cushort, nil)
+      mkev(changes[n], fd, FiltWriteK, addFlags, udata)
       inc n
   else:
     if Read in events and (slot.mask and FiltRead) == 0:
-      mk(changes[n], fd, EVFILT_READ, addFlags, udata)
+      mkev(changes[n], fd, FiltReadK, addFlags, udata)
       inc n
     if Write in events and (slot.mask and FiltWrite) == 0:
-      mk(changes[n], fd, EVFILT_WRITE, addFlags, udata)
+      mkev(changes[n], fd, FiltWriteK, addFlags, udata)
       inc n
-    if Read notin events and (slot.mask and FiltRead) != 0:
-      mk(changes[n], fd, EVFILT_READ, EV_DELETE.cushort, nil)
-      inc n
-    if Write notin events and (slot.mask and FiltWrite) != 0:
-      mk(changes[n], fd, EVFILT_WRITE, EV_DELETE.cushort, nil)
-      inc n
+
+  if Read notin events and (slot.mask and FiltRead) != 0:
+    mkev(changes[n], fd, FiltReadK, EV_DELETE.cushort, nil)
+    inc n
+  if Write notin events and (slot.mask and FiltWrite) != 0:
+    mkev(changes[n], fd, FiltWriteK, EV_DELETE.cushort, nil)
+    inc n
 
   slot.mask = want
   if n > 0:
     slot.udata = udata
-  p.submit(addr changes[0], n, fd)
+  p.submit(changes, n, fd)
 
 # ── Wake ─────────────────────────────────────────────────────────────────────
 
@@ -344,13 +383,8 @@ proc wake*(p: Platform) {.inline.} =
     # NOTE: `flags` is 0 here, not EV_ADD — submitting the change *is* the
     # trigger. The kernel coalesces concurrent triggers, so a storm of wakes
     # can never overflow anything the way the pipe could.
-    var wev: KEvent
-    wev.ident  = 0
-    wev.filter = EvFilterUser.cshort
-    wev.flags  = 0
-    wev.fflags = NoteTrigger
-    wev.data   = 0
-    wev.udata  = nil
+    var wev = KEvent(ident: 0, filter: EVFILT_USER, flags: 0,
+                      fflags: NOTE_TRIGGER, data: 0, udata: nil)
     discard kevent(p.kqFd, addr wev, 1, nil, 0, nil)
   else:
     var byte: byte = 0
@@ -361,28 +395,18 @@ proc wake*(p: Platform) {.inline.} =
 when changelistBatched:
   proc recoverChanges(p: Platform) =
     ## A staged change was rejected, so `kevent()` aborted before waiting.
-    ## Re-apply the entries one at a time: the first offender is recorded for
-    ## `pendingError*` and the remainder still lands, so one bad fd cannot
-    ## silently drop every registration behind it. Costs one syscall per change
-    ## — exactly what the unbatched implementation always paid — and only on a
-    ## genuinely failing changelist.
-    var i = 0
-    while i < p.pending.len:
+    ## Re-apply the entries one at a time: the first offender is recorded and
+    ## the remainder still lands, so one bad fd cannot silently drop every
+    ## registration behind it. Costs one syscall per change — exactly what the
+    ## unbatched implementation always paid — and only on a genuinely failing
+    ## changelist.
+    for i in 0 ..< p.pending.len:
       var one = p.pending[i]
-      if kevent(p.kqFd, addr one, 1, nil, 0, nil) < 0:
-        if p.pendErrFd < 0:
-          p.pendErrFd = p.pendingFd[i]
-          p.pendErrNo = errno
-      inc i
+      if kevent(p.kqFd, addr one, 1, nil, 0, nil) < 0 and p.pendErrFd < 0:
+        p.pendErrFd = p.pendingFd[i]
+        p.pendErrNo = errno
     p.pending.setLen(0)
     p.pendingFd.setLen(0)
-
-proc pendingError*(p: Platform): (int, int) {.inline.} =
-  ## `(fd, errno)` of the last rejected staged change, `(-1, 0)` when there is
-  ## none. `poll()` raises on it before dispatching, which is where the
-  ## pre-change `add()` used to raise from — the contract is preserved, only the
-  ## timing moves to the next wait.
-  (p.pendErrFd, p.pendErrNo)
 
 # ── Polling ──────────────────────────────────────────────────────────────────
 
@@ -390,8 +414,9 @@ proc poll*(p: Platform, timeoutMs: int): int =
   var ts: Timespec
   var tsPtr: ptr Timespec = nil
   # Sampled lazily on the first EINTR only. Reading the clock up front would
-  # add a `mach_absolute_time` to every poll iteration; EINTR is rare enough
-  # that paying for two reads there and zero here is strictly better.
+  # add a `mach_absolute_time` + `mach_timebase_info` to every poll iteration;
+  # EINTR is rare enough that paying for two reads there and zero here is
+  # strictly better.
   var startMono = -1'i64
 
   if timeoutMs >= 0:
@@ -400,6 +425,7 @@ proc poll*(p: Platform, timeoutMs: int): int =
     tsPtr = addr ts
 
   var n: cint
+  p.count = 0
   while true:
     when changelistBatched:
       let nChanges = p.pending.len.cint
@@ -421,8 +447,7 @@ proc poll*(p: Platform, timeoutMs: int): int =
           let elapsed = getMonoTime().ticks div 1_000_000 - startMono
           let remaining = timeoutMs - elapsed.int
           if remaining <= 0:
-            n = 0
-            break
+            return 0
           ts.tv_sec  = Time(remaining div 1000)
           ts.tv_nsec = (remaining mod 1000) * 1_000_000
         continue
@@ -435,6 +460,10 @@ proc poll*(p: Platform, timeoutMs: int): int =
       if nChanges > 0:
         p.pending.setLen(0)
         p.pendingFd.setLen(0)
+      # A staged change was rejected; surface it here, which is where the
+      # pre-change `add()` used to raise from — same contract, the timing just
+      # moves to the next wait. Raised before dispatch so a failed registration
+      # never reports as a live event.
       if p.pendErrFd >= 0:
         let badFd = p.pendErrFd
         let badErr = p.pendErrNo
@@ -442,15 +471,33 @@ proc poll*(p: Platform, timeoutMs: int): int =
         raise newException(OSError,
           "powpow: kevent change failed for fd " & $badFd & ": " & $strerror(badErr.cint))
     if n == 0:
-      p.count = 0
       return 0
     break
 
-  p.count = 0
+  # Decode in place: read `p.kEvents[i]` through a pointer so no 32-byte KEvent
+  # is copied per event, and write one `PlatformEvent` per kernel event.
+  #
+  # Deliberately NOT hoisting `p.kEvents` / `p.events` / `p.count` into locals.
+  # The generated C reloads all five from the heap on every iteration, because
+  # the stores below go through a pointer into `p.events` and Nim compiles with
+  # `-fno-strict-aliasing`, so clang cannot prove the two are disjoint. Hoisting
+  # them by hand does remove those loads, and it is *slower*: measured
+  # 90.5 -> 92.3 ns/event over a 512-event poll, consistently, across
+  # interleaved runs. The reloads are hot L1 hits on the Platform object, and
+  # keeping the seq headers, lengths and counter live across the loop costs more
+  # in register pressure and in two extra bounds guards than the loads it saves.
+  #
+  # Hoisting into `seq` locals instead of raw pointers is outright broken and
+  # cost an afternoon: a Nim seq of a non-GC'd element type has no refcount, so
+  # `let s = p.kEvents` bit-copies the `{len, p}` header and *still* emits a
+  # `=destroy` on scope exit — which then `alignedDealloc`s the very buffer
+  # `p.events`/`p.kEvents` still point at. That frees the platform's own arrays
+  # on the first poll(): the server answers exactly one request, then writes into
+  # freed memory and spins at 100% CPU. Keep these as `seq` field reads.
   for i in 0 ..< n.int:
     let kev = addr p.kEvents[i]
     when userFilterAvailable:
-      if kev.filter == EvFilterUser.cshort:
+      if kev.filter == EVFILT_USER:
         continue  # EVFILT_USER carries no state to drain
     else:
       if kev.ident.int == p.wakeReadFd:
@@ -458,19 +505,34 @@ proc poll*(p: Platform, timeoutMs: int): int =
         discard posix.read(p.wakeReadFd, addr buf[0], 64)
         continue
 
-    p.events[p.count].fd     = kev.ident.int
-    p.events[p.count].events = {}
-    p.events[p.count].udata  = kev.udata
+    let flags = kev.flags
+    # One EV_ERROR test, not two. EV_EOF stays an independent test: an event
+    # carrying both EV_ERROR and EV_EOF must report Error *and* Hup.
+    let isErr = (flags and EV_ERROR) != 0
+    var evs: set[EventType] = {}
+    if isErr:
+      evs.incl Error
+    if (flags and EV_EOF) != 0:
+      evs.incl Hup
+    if not isErr:
+      # `case` on the kernel's filter (not an if/elif chain): EVFILT_USER and
+      # the EVFILT_TIMER/VNODE traps land in `else` without an extra compare.
+      case kev.filter
+      of FiltReadK: evs.incl Read
+      of FiltWriteK: evs.incl Write
+      else: discard
 
-    if (kev.flags and EV_ERROR) != 0:
-      p.events[p.count].events.incl Error
-    if (kev.flags and EV_EOF) != 0:
-      p.events[p.count].events.incl Hup
-    if kev.filter == EVFILT_READ and (kev.flags and EV_ERROR) == 0:
-      p.events[p.count].events.incl Read
-    elif kev.filter == EVFILT_WRITE and (kev.flags and EV_ERROR) == 0:
-      p.events[p.count].events.incl Write
-
+    let pev = addr p.events[p.count]
+    # std/kqueue declares KEvent.ident as `uint` even though the kernel field is
+    # uintptr_t, so Nim's checked uint -> int conversion emitted a
+    # raiseRangeErrorNoArgs per event that can never fire on any platform where
+    # the two types are the same width.
+    when sizeof(int) > sizeof(uint):
+      pev.fd = kev.ident.int
+    else:
+      pev.fd = cast[int](kev.ident)
+    pev.events = evs
+    pev.udata = kev.udata
     inc p.count
 
   return p.count

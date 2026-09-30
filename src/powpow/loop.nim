@@ -164,8 +164,34 @@ type
 
 # ── Timer wheel helpers ──────────────────────────────────────────────────────
 
+when defined(macosx):
+  # std/monotimes' getMonoTime() re-derives the clock frequency on *every* call:
+  # it reads mach_absolute_time() and then mach_timebase_info(). The timebase is
+  # constant for the process lifetime, so read it once at module init and keep
+  # only the mach_absolute_time() read on the hot path (~3 ns/call cheaper;
+  # monoMs() runs at least once per poll iteration). `clock_gettime(CLOCK_
+  # MONOTONIC)` was measured slower than both (65 vs 29 ns) because of the libc
+  # wrapper, so it is not the replacement here.
+  type MachTimebaseInfoData {.pure, final,
+      importc: "mach_timebase_info_data_t",
+      header: "<mach/mach_time.h>".} = object
+    numer, denom: int32
+
+  proc mach_absolute_time(): int64 {.importc, header: "<mach/mach.h>".}
+  proc mach_timebase_info(info: var MachTimebaseInfoData) {.importc,
+      header: "<mach/mach_time.h>".}
+
+  let monoTimebase = block:
+    var info: MachTimebaseInfoData
+    mach_timebase_info(info)
+    info
+
 proc monoMs*(): int64 {.inline.} =
-  getMonoTime().ticks div 1_000_000
+  when defined(macosx):
+    (mach_absolute_time() * monoTimebase.numer.int64) div
+      monoTimebase.denom.int64 div 1_000_000
+  else:
+    getMonoTime().ticks div 1_000_000
 
 var pollNowMs* {.threadvar.}: int64
   ## Monotonic clock sampled once per `poll` iteration (refreshed again after
@@ -178,6 +204,20 @@ var pollWallSec* {.threadvar.}: int64
   ## Wall-clock Unix seconds, same sampling contract as `pollNowMs`. Backs the
   ## cached HTTP Date header: at most one poll iteration (<- typically ~1 ms)
   ## stale, far below the header's 1-second resolution.
+var wallBaseSec {.threadvar.}: int64   ## wall clock at the last anchor refresh
+var monoBaseMs {.threadvar.}: int64    ## monoMs() at that refresh
+
+proc sampleWallClock(now: int64) {.inline.} =
+  ## Refresh `pollWallSec` from `now` without calling `gettimeofday()` on every
+  ## poll iteration: derive it from the monotonic clock instead, and re-read the
+  ## wall clock once per second of monotonic time so a clock step is picked up
+  ## within a second rather than persisting for the process lifetime. Cheaper
+  ## than the direct call because `getTime()` is a libc call per iteration and
+  ## only one reader (the cached HTTP Date) exists, at 1-second resolution.
+  if wallBaseSec == 0 or now - monoBaseMs >= 1000:
+    wallBaseSec = getTime().toUnix()
+    monoBaseMs = now
+  pollWallSec = wallBaseSec + (now - monoBaseMs) div 1000
 
 # ── io_uring helpers ─────────────────────────────────────────────────────────
 
@@ -751,6 +791,16 @@ proc unregisterFd*(loop: Loop, fd: int) =
     loop.watcherTokens.del(w.token)
   loop.fdWatchers.del(fd)
 
+proc isCurrentWatcher(loop: Loop, w: FdWatcher): bool {.inline.} =
+  ## Stale-event guard: is `w` still the live registration for its own fd?
+  ##
+  ## Compares pointers rather than fields, and reaches the entry through `[]`
+  ## (which returns `lent`) instead of `getOrDefault` (which returns a copy).
+  ## The copy is not free: `FdWatcher` owns a closure, so every dispatched event
+  ## incs the watcher's refcount and the temporary's destructor decs it again.
+  if not loop.fdWatchers.hasKey(w.fd): return false
+  cast[pointer](loop.fdWatchers[w.fd]) == cast[pointer](w)
+
 proc modify*(loop: Loop, fd: int, events: set[EventType]) {.inline.} =
   when iouEnabled:
     if fd in loop.fdWatchers:
@@ -1172,7 +1222,7 @@ when iouEnabled:
 proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
   let now = monoMs()
   pollNowMs = now
-  pollWallSec = getTime().toUnix()
+  sampleWallClock(now)
 
   processDeferred(loop)
   drainPosted(loop)
@@ -1218,22 +1268,26 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
       ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
   else:
     nEvents = loop.platform.poll(timeout)
+    # Hoist the seq out of the platform ref: `loop.platform.events[i]` would
+    # reload the ref's seq header (len + data) for every field read, every
+    # event. `addr` also avoids copying the 24-byte PlatformEvent per event.
+    let events = loop.platform.events
     for i in 0 ..< nEvents:
-      let pev = loop.platform.events[i]
-      let w = cast[FdWatcher](pev.udata)
+      let pev = addr events[i]
+      let w = cast[FdWatcher](pev[].udata)
       # Stale-event guard: the watcher pointer in this event must still be the
       # CURRENT registration for its fd. A watcher that was unregistered and
       # pooled (then possibly reused for another fd/registration) must not be
       # dispatched — this is the generation-counter check.
-      if w != nil and w.alive and loop.fdWatchers.getOrDefault(w.fd) == w:
-        w.callback(w.fd, pev.events)
+      if w != nil and w.alive and loop.isCurrentWatcher(w):
+        w.callback(w.fd, pev[].events)
   if loop.stopFlag: return
 
   if loop.totalTimers > 0:
     # Timers may have expired during the I/O wait — recompute and fire them.
     let now2 = monoMs()
     pollNowMs = now2
-    pollWallSec = getTime().toUnix()
+    sampleWallClock(now2)
     processTimers(loop, now2)
   if loop.stopFlag: return
 
