@@ -1268,12 +1268,22 @@ proc poll*(loop: Loop, timeoutMs: int = -1) {.inline.} =
       ret = loop.ring.submit(minComplete, IORING_ENTER_GETEVENTS)
   else:
     nEvents = loop.platform.poll(timeout)
-    # Hoist the seq out of the platform ref: `loop.platform.events[i]` would
-    # reload the ref's seq header (len + data) for every field read, every
-    # event. `addr` also avoids copying the 24-byte PlatformEvent per event.
-    let events = loop.platform.events
+    # Read the event seq through `addr` — deliberately NOT via a local
+    # `let events = loop.platform.events`. `PlatformEvent` holds no traced
+    # fields, so `seq[PlatformEvent]` carries no refcount: that `let` is a bare
+    # bit-copy of the `{len, p}` header that shares the pointer, and Nim still
+    # emits `=destroy` on scope exit, which expands to
+    #   if (p && !(p->cap & NIM_STRLIT_FLAG)) alignedDealloc(p);
+    # so it frees the platform's OWN buffer on every single loop iteration and
+    # leaves `poll()` writing into freed memory (and `close()` double-freeing
+    # it). Verified in the generated C; keep this as `addr`.
+    #
+    # `evs[]` is re-read every iteration rather than captured, because a
+    # dispatched callback can `register()` and grow `events` via
+    # `ensureCapacity`, which reallocates the buffer mid-loop.
+    let evs = addr loop.platform.events
     for i in 0 ..< nEvents:
-      let pev = addr events[i]
+      let pev = addr evs[][i]
       let w = cast[FdWatcher](pev[].udata)
       # Stale-event guard: the watcher pointer in this event must still be the
       # CURRENT registration for its fd. A watcher that was unregistered and
