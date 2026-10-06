@@ -6,33 +6,40 @@ nim	lastSocketError	powpow/net/common.html#lastSocketError	proc lastSocketError(
 nim	setNonBlocking	powpow/net/common.html#setNonBlocking,SocketHandle	proc setNonBlocking(fd: SocketHandle)		244
 nim	setReuseAddr	powpow/net/common.html#setReuseAddr,SocketHandle	proc setReuseAddr(fd: SocketHandle)		255
 nim	setReusePort	powpow/net/common.html#setReusePort,SocketHandle	proc setReusePort(fd: SocketHandle)		262
-nim	setTcpNoDelay	powpow/net/common.html#setTcpNoDelay,SocketHandle	proc setTcpNoDelay(fd: SocketHandle)		270
-nim	setTcpCork	powpow/net/common.html#setTcpCork,SocketHandle,bool	proc setTcpCork(fd: SocketHandle; enable: bool)		278
-nim	setIpv6Only	powpow/net/common.html#setIpv6Only,SocketHandle	proc setIpv6Only(fd: SocketHandle)		292
-nim	resolveAddrAll	powpow/net/common.html#resolveAddrAll,string,int,int	proc resolveAddrAll(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): seq[\n    Sockaddr_storage]		309
-nim	resolveAddr	powpow/net/common.html#resolveAddr,string,int,int	proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage		332
-nim	isIpAddress	powpow/net/common.html#isIpAddress,string	proc isIpAddress(address: string): bool		339
-nim	sockaddrFromIp	powpow/net/common.html#sockaddrFromIp,string,int	proc sockaddrFromIp(ip: string; port: int): Sockaddr_storage		345
-nim	getSockLen	powpow/net/common.html#getSockLen,ptr.Sockaddr_storage	proc getSockLen(addrBuf: ptr Sockaddr_storage): SockLen		373
-nim	sockWouldBlock	powpow/net/common.html#sockWouldBlock	proc sockWouldBlock(): bool		385
-nim	sockInterrupted	powpow/net/common.html#sockInterrupted	proc sockInterrupted(): bool		391
-nim	sockInProgress	powpow/net/common.html#sockInProgress	proc sockInProgress(): bool		397
-nim	sockRecv	powpow/net/common.html#sockRecv,SocketHandle,pointer,int	proc sockRecv(fd: SocketHandle; buf: pointer; bufLen: int): int		405
-nim	sockSend	powpow/net/common.html#sockSend,SocketHandle,pointer,int	proc sockSend(fd: SocketHandle; buf: pointer; len: int): int		409
-nim	sockClose	powpow/net/common.html#sockClose,SocketHandle	proc sockClose(fd: SocketHandle)		413
-nim	sockShutdown	powpow/net/common.html#sockShutdown,SocketHandle,cint	proc sockShutdown(fd: SocketHandle; how: cint)		420
-nim	sockWritev	powpow/net/common.html#sockWritev,SocketHandle,ptr.IOVec,int	proc sockWritev(fd: SocketHandle; iov: ptr IOVec; iovcnt: int): int		428
-nim	SendFileChunkSize	powpow/net/common.html#SendFileChunkSize	const SendFileChunkSize		460
-nim	DefaultSendFileChunk	powpow/net/common.html#DefaultSendFileChunk	const DefaultSendFileChunk		461
-nim	O_RDONLY	powpow/net/common.html#O_RDONLY	const O_RDONLY		469
-nim	SEEK_SET	powpow/net/common.html#SEEK_SET	const SEEK_SET		470
-nim	SEEK_CUR	powpow/net/common.html#SEEK_CUR	const SEEK_CUR		471
-nim	SEEK_END	powpow/net/common.html#SEEK_END	const SEEK_END		472
-nim	O_BINARY	powpow/net/common.html#O_BINARY	const O_BINARY		485
-nim	openFileRead	powpow/net/common.html#openFileRead,string	proc openFileRead(path: string): int		495
-nim	getFileSize	powpow/net/common.html#getFileSize,int	proc getFileSize(fd: int): int64		501
-nim	closeFile	powpow/net/common.html#closeFile,int	proc closeFile(fd: int)		510
-nim	readFile	powpow/net/common.html#readFile,int,ptr.UncheckedArray[byte],int	proc readFile(fd: int; buf: ptr UncheckedArray[byte]; len: int): int64		514
-nim	seekFile	powpow/net/common.html#seekFile,int,int64	proc seekFile(fd: int; offset: int64): int64		518
-nim	sendFileChunk	powpow/net/common.html#sendFileChunk,SocketHandle,int,int64,int64	proc sendFileChunk(sockFd: SocketHandle; fileFd: int; fileOff: var int64;\n              remaining: var int64): int64		522
-nim	DefaultBufSize	powpow/net/common.html#DefaultBufSize	const DefaultBufSize		587
+nim	setTcpNoDelay	powpow/net/common.html#setTcpNoDelay,SocketHandle	proc setTcpNoDelay(fd: SocketHandle)		278
+nim	setTcpCork	powpow/net/common.html#setTcpCork,SocketHandle,bool	proc setTcpCork(fd: SocketHandle; enable: bool)		286
+nim	setIpv6Only	powpow/net/common.html#setIpv6Only,SocketHandle	proc setIpv6Only(fd: SocketHandle)		300
+nim	KtlsOff	powpow/net/common.html#KtlsOff	KtlsMode.KtlsOff		347
+nim	KtlsAuto	powpow/net/common.html#KtlsAuto	KtlsMode.KtlsAuto		347
+nim	KtlsRequired	powpow/net/common.html#KtlsRequired	KtlsMode.KtlsRequired		347
+nim	KtlsMode	powpow/net/common.html#KtlsMode	enum KtlsMode		347
+nim	ktlsTxInstalled	powpow/net/common.html#ktlsTxInstalled,SocketHandle	proc ktlsTxInstalled(fd: SocketHandle): bool		417
+nim	ktlsRxInstalled	powpow/net/common.html#ktlsRxInstalled,SocketHandle	proc ktlsRxInstalled(fd: SocketHandle): bool		422
+nim	ktlsUlpAttach	powpow/net/common.html#ktlsUlpAttach,SocketHandle	proc ktlsUlpAttach(fd: SocketHandle): bool		426
+nim	resolveAddrAll	powpow/net/common.html#resolveAddrAll,string,int,int	proc resolveAddrAll(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): seq[\n    Sockaddr_storage]		447
+nim	resolveAddr	powpow/net/common.html#resolveAddr,string,int,int	proc resolveAddr(address: string; port: int; sockType = SOCK_STREAM; protocol = 0): Sockaddr_storage		470
+nim	isIpAddress	powpow/net/common.html#isIpAddress,string	proc isIpAddress(address: string): bool		477
+nim	sockaddrFromIp	powpow/net/common.html#sockaddrFromIp,string,int	proc sockaddrFromIp(ip: string; port: int): Sockaddr_storage		483
+nim	getSockLen	powpow/net/common.html#getSockLen,ptr.Sockaddr_storage	proc getSockLen(addrBuf: ptr Sockaddr_storage): SockLen		511
+nim	sockWouldBlock	powpow/net/common.html#sockWouldBlock	proc sockWouldBlock(): bool		523
+nim	sockInterrupted	powpow/net/common.html#sockInterrupted	proc sockInterrupted(): bool		529
+nim	sockInProgress	powpow/net/common.html#sockInProgress	proc sockInProgress(): bool		535
+nim	sockRecv	powpow/net/common.html#sockRecv,SocketHandle,pointer,int	proc sockRecv(fd: SocketHandle; buf: pointer; bufLen: int): int		543
+nim	sockSend	powpow/net/common.html#sockSend,SocketHandle,pointer,int	proc sockSend(fd: SocketHandle; buf: pointer; len: int): int		547
+nim	sockClose	powpow/net/common.html#sockClose,SocketHandle	proc sockClose(fd: SocketHandle)		551
+nim	sockShutdown	powpow/net/common.html#sockShutdown,SocketHandle,cint	proc sockShutdown(fd: SocketHandle; how: cint)		558
+nim	sockWritev	powpow/net/common.html#sockWritev,SocketHandle,ptr.IOVec,int	proc sockWritev(fd: SocketHandle; iov: ptr IOVec; iovcnt: int): int		566
+nim	SendFileChunkSize	powpow/net/common.html#SendFileChunkSize	const SendFileChunkSize		598
+nim	DefaultSendFileChunk	powpow/net/common.html#DefaultSendFileChunk	const DefaultSendFileChunk		599
+nim	O_RDONLY	powpow/net/common.html#O_RDONLY	const O_RDONLY		607
+nim	SEEK_SET	powpow/net/common.html#SEEK_SET	const SEEK_SET		608
+nim	SEEK_CUR	powpow/net/common.html#SEEK_CUR	const SEEK_CUR		609
+nim	SEEK_END	powpow/net/common.html#SEEK_END	const SEEK_END		610
+nim	O_BINARY	powpow/net/common.html#O_BINARY	const O_BINARY		623
+nim	openFileRead	powpow/net/common.html#openFileRead,string	proc openFileRead(path: string): int		633
+nim	getFileSize	powpow/net/common.html#getFileSize,int	proc getFileSize(fd: int): int64		639
+nim	closeFile	powpow/net/common.html#closeFile,int	proc closeFile(fd: int)		648
+nim	readFile	powpow/net/common.html#readFile,int,ptr.UncheckedArray[byte],int	proc readFile(fd: int; buf: ptr UncheckedArray[byte]; len: int): int64		652
+nim	seekFile	powpow/net/common.html#seekFile,int,int64	proc seekFile(fd: int; offset: int64): int64		656
+nim	sendFileChunk	powpow/net/common.html#sendFileChunk,SocketHandle,int,int64,int64	proc sendFileChunk(sockFd: SocketHandle; fileFd: int; fileOff: var int64;\n              remaining: var int64): int64		660
+nim	DefaultBufSize	powpow/net/common.html#DefaultBufSize	const DefaultBufSize		725

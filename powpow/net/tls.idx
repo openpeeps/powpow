@@ -1,12 +1,19 @@
 nimTitle	tls	powpow/net/tls.html	module powpow/net/tls		0
-nim	TlsServer	powpow/net/tls.html#TlsServer	TlsRole.TlsServer		40
-nim	TlsClient	powpow/net/tls.html#TlsClient	TlsRole.TlsClient		40
-nim	TlsRole	powpow/net/tls.html#TlsRole	enum TlsRole		40
-nim	SslContext	powpow/net/tls.html#SslContext	type SslContext		43
-nim	SslError	powpow/net/tls.html#SslError	object SslError		49
-nim	setAlpnProtocols	powpow/net/tls.html#setAlpnProtocols,SslContext,openArray[string]	proc setAlpnProtocols(ctx: SslContext; protos: openArray[string])		100
-nim	alpnSelected	powpow/net/tls.html#alpnSelected,Connection	proc alpnSelected(conn: Connection): string		118
-nim	newServerTlsContext	powpow/net/tls.html#newServerTlsContext,string,string	proc newServerTlsContext(certFile, keyFile: string): SslContext		134
-nim	newClientTlsContext	powpow/net/tls.html#newClientTlsContext	proc newClientTlsContext(verifyPeer = true): SslContext		160
-nim	wrapTls	powpow/net/tls.html#wrapTls,Connection,SslContext,string	proc wrapTls(conn: Connection; ctx: SslContext; serverName = "")		180
-nim	isTlsActive	powpow/net/tls.html#isTlsActive,Connection	proc isTlsActive(conn: Connection): bool		234
+nim	TlsServer	powpow/net/tls.html#TlsServer	TlsRole.TlsServer		41
+nim	TlsClient	powpow/net/tls.html#TlsClient	TlsRole.TlsClient		41
+nim	TlsRole	powpow/net/tls.html#TlsRole	enum TlsRole		41
+nim	SslContext	powpow/net/tls.html#SslContext	type SslContext		44
+nim	SslError	powpow/net/tls.html#SslError	object SslError		58
+nim	setAlpnProtocols	powpow/net/tls.html#setAlpnProtocols,SslContext,openArray[string]	proc setAlpnProtocols(ctx: SslContext; protos: openArray[string])		109
+nim	configureKtls	powpow/net/tls.html#configureKtls,SslContext,KtlsMode	proc configureKtls(ctx: SslContext; mode: KtlsMode; zerocopySendfile = false)		127
+nim	enableKtls	powpow/net/tls.html#enableKtls,SslContext	proc enableKtls(ctx: SslContext; zerocopySendfile = false)		157
+nim	disableKtls	powpow/net/tls.html#disableKtls,SslContext	proc disableKtls(ctx: SslContext)		162
+nim	ktlsSupported	powpow/net/tls.html#ktlsSupported	proc ktlsSupported(): bool		167
+nim	alpnSelected	powpow/net/tls.html#alpnSelected,Connection	proc alpnSelected(conn: Connection): string		214
+nim	newServerTlsContext	powpow/net/tls.html#newServerTlsContext,string,string	proc newServerTlsContext(certFile, keyFile: string): SslContext		230
+nim	newClientTlsContext	powpow/net/tls.html#newClientTlsContext	proc newClientTlsContext(verifyPeer = true): SslContext		256
+nim	wrapTls	powpow/net/tls.html#wrapTls,Connection,SslContext,string	proc wrapTls(conn: Connection; ctx: SslContext; serverName = "")		276
+nim	isTlsActive	powpow/net/tls.html#isTlsActive,Connection	proc isTlsActive(conn: Connection): bool		343
+nim	ktlsTxActive	powpow/net/tls.html#ktlsTxActive,Connection	proc ktlsTxActive(conn: Connection): bool		347
+nim	ktlsRxActive	powpow/net/tls.html#ktlsRxActive,Connection	proc ktlsRxActive(conn: Connection): bool		354
+nim	ktlsActive	powpow/net/tls.html#ktlsActive,Connection	proc ktlsActive(conn: Connection): bool		358

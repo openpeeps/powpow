@@ -62,7 +62,13 @@
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#SslContext" title="SslContext = ref object
-  alpnProtos*: seq[string]">SslContext</a></li>
+  alpnProtos*: seq[string]
+  ktlsMode*: KtlsMode ## Requested kernel-TLS policy. Set with `configureKtls`; applied to
+                      ## every `SSL*` that `wrapTls` creates on a socket-BIO backend, and
+                      ## ignored on memory-BIO backends (io_uring) where OpenSSL never sees
+                      ## the fd and so cannot offload.
+  ktlsZerocopySendfile*: bool ## Additionally set `SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE`. Only
+                              ## meaningful alongside a `KtlsMode` other than `KtlsOff`.">SslContext</a></li>
 <li><a class="reference" href="#SslError" title="SslError = object of CatchableError">SslError</a></li>
 <li><a class="reference" href="#TlsRole" title="TlsRole = enum
   TlsServer, TlsClient">TlsRole</a></li>
@@ -78,8 +84,36 @@
   <li><a class="reference" href="#alpnSelected%2CConnection" title="alpnSelected(conn: Connection): string">alpnSelected(conn: Connection): string</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">configureKtls
+  <li><a class="reference" href="#configureKtls%2CSslContext%2CKtlsMode" title="configureKtls(ctx: SslContext; mode: KtlsMode; zerocopySendfile = false)">configureKtls(ctx: SslContext; mode: KtlsMode; zerocopySendfile = false)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">disableKtls
+  <li><a class="reference" href="#disableKtls%2CSslContext" title="disableKtls(ctx: SslContext)">disableKtls(ctx: SslContext)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">enableKtls
+  <li><a class="reference" href="#enableKtls%2CSslContext" title="enableKtls(ctx: SslContext; zerocopySendfile = false)">enableKtls(ctx: SslContext; zerocopySendfile = false)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">isTlsActive
   <li><a class="reference" href="#isTlsActive%2CConnection" title="isTlsActive(conn: Connection): bool">isTlsActive(conn: Connection): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsActive
+  <li><a class="reference" href="#ktlsActive%2CConnection" title="ktlsActive(conn: Connection): bool">ktlsActive(conn: Connection): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsRxActive
+  <li><a class="reference" href="#ktlsRxActive%2CConnection" title="ktlsRxActive(conn: Connection): bool">ktlsRxActive(conn: Connection): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsSupported
+  <li><a class="reference" href="#ktlsSupported" title="ktlsSupported(): bool">ktlsSupported(): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsTxActive
+  <li><a class="reference" href="#ktlsTxActive%2CConnection" title="ktlsTxActive(conn: Connection): bool">ktlsTxActive(conn: Connection): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">newClientTlsContext
@@ -130,7 +164,7 @@
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
   <dl class="item">
-    <a class="reference external" href="tcp.html">tcp</a>, <a class="reference external" href="../types.html">../types</a>, <a class="reference external" href="tlsapi.html">tlsapi</a>
+    <a class="reference external" href="tcp.html">tcp</a>, <a class="reference external" href="common.html">common</a>, <a class="reference external" href="../types.html">../types</a>, <a class="reference external" href="tlsapi.html">tlsapi</a>
   </dl>
 </div>
 <div class="section" id="7">
@@ -138,7 +172,13 @@
   <dl class="item">
     <div id="SslContext">
   <dt><pre><a href="#SslContext"><span class="Identifier">SslContext</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
-  <span class="Identifier">alpnProtos</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span></pre></dt>
+  <span class="Identifier">alpnProtos</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span>
+  <span class="Identifier">ktlsMode</span><span class="Operator">*</span><span class="Other">:</span> <a href="common.html#KtlsMode"><span class="Identifier">KtlsMode</span></a> <span class="Comment">## Requested kernel-TLS policy. Set with `configureKtls`; applied to</span>
+                      <span class="Comment">## every `SSL*` that `wrapTls` creates on a socket-BIO backend, and</span>
+                      <span class="Comment">## ignored on memory-BIO backends (io_uring) where OpenSSL never sees</span>
+                      <span class="Comment">## the fd and so cannot offload.</span>
+  <span class="Identifier">ktlsZerocopySendfile</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Comment">## Additionally set `SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE`. Only</span>
+                              <span class="Comment">## meaningful alongside a `KtlsMode` other than `KtlsOff`.</span></pre></dt>
   <dd>
     
     
@@ -179,6 +219,47 @@
 </div>
 
 </div>
+<div id="configureKtls-procs-all">
+  <div id="configureKtls,SslContext,KtlsMode">
+  <dt><pre><span class="Keyword">proc</span> <a href="#configureKtls%2CSslContext%2CKtlsMode"><span class="Identifier">configureKtls</span></a><span class="Other">(</span><span class="Identifier">ctx</span><span class="Other">:</span> <a href="#SslContext"><span class="Identifier">SslContext</span></a><span class="Other">;</span> <span class="Identifier">mode</span><span class="Other">:</span> <a href="common.html#KtlsMode"><span class="Identifier">KtlsMode</span></a><span class="Other">;</span> <span class="Identifier">zerocopySendfile</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Choose how hard this context tries to move the TLS record layer into the kernel. <tt class="docutils literal"><span class="pre"><span class="Identifier">wrapTls</span></span></tt> then sets <tt class="docutils literal"><span class="pre"><span class="Identifier">SSL_OP_ENABLE_KTLS</span></span></tt> on each new <tt class="docutils literal"><span class="pre"><span class="Identifier">SSL</span><span class="Operator">*</span></span></tt> (plus <tt class="docutils literal"><span class="pre"><span class="Identifier">SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE</span></span></tt> when <tt class="docutils literal"><span class="pre"><span class="Identifier">zerocopySendfile</span></span></tt> is true).<ul class="simple"><li><tt class="docutils literal"><span class="pre"><span class="Identifier">KtlsOff</span></span></tt> — never offload. This is the default.</li>
+<li><tt class="docutils literal"><span class="pre"><span class="Identifier">KtlsAuto</span></span></tt> — ask for offload and carry on in userspace if it does not happen. The TLS handshake is unaffected either way.</li>
+<li><tt class="docutils literal"><span class="pre"><span class="Identifier">KtlsRequired</span></span></tt> — ask for offload and drop the connection if it does not engage. Use this to make a missing <tt class="docutils literal"><span class="pre"><span class="Identifier">tls</span></span></tt> module, a libssl built without <tt class="docutils literal"><span class="pre"><span class="Identifier">enable</span><span class="Operator">-</span><span class="Identifier">ktls</span></span></tt>, or an unsupported cipher a loud failure instead of a silent, permanently slower deployment.</li>
+</ul>
+<p>Offload additionally needs: the Linux <tt class="docutils literal"><span class="pre"><span class="Identifier">tls</span></span></tt> module loaded (<tt class="docutils literal"><span class="pre"><span class="Identifier">modprobe</span> <span class="Identifier">tls</span></span></tt>), OpenSSL &gt;= 3.0 built with <tt class="docutils literal"><span class="pre"><span class="Identifier">enable</span><span class="Operator">-</span><span class="Identifier">ktls</span></span></tt>, a kTLS-capable cipher, and a socket-BIO backend (the epoll/kqueue readiness loop — the io_uring backend uses memory BIOs and never offloads). Check the kernel half up front with <tt class="docutils literal"><span class="pre"><span class="Identifier">ktlsSupported</span></span></tt>, and a live connection with <tt class="docutils literal"><span class="pre"><span class="Identifier">ktlsTxActive</span></span></tt> / <tt class="docutils literal"><span class="pre"><span class="Identifier">ktlsRxActive</span></span></tt>.</p>
+<p>Call before wrapping connections; changing it later only affects subsequently wrapped connections.</p>
+
+    
+  </dd>
+</div>
+
+</div>
+<div id="disableKtls-procs-all">
+  <div id="disableKtls,SslContext">
+  <dt><pre><span class="Keyword">proc</span> <a href="#disableKtls%2CSslContext"><span class="Identifier">disableKtls</span></a><span class="Other">(</span><span class="Identifier">ctx</span><span class="Other">:</span> <a href="#SslContext"><span class="Identifier">SslContext</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Stop requesting kTLS offload. Connections already wrapped keep the offload state they negotiated.
+    
+  </dd>
+</div>
+
+</div>
+<div id="enableKtls-procs-all">
+  <div id="enableKtls,SslContext">
+  <dt><pre><span class="Keyword">proc</span> <a href="#enableKtls%2CSslContext"><span class="Identifier">enableKtls</span></a><span class="Other">(</span><span class="Identifier">ctx</span><span class="Other">:</span> <a href="#SslContext"><span class="Identifier">SslContext</span></a><span class="Other">;</span> <span class="Identifier">zerocopySendfile</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Opt in to best-effort kTLS offload. Shorthand for <tt class="docutils literal"><span class="pre"><span class="Identifier">configureKtls</span><span class="Punctuation">(</span><span class="Identifier">ctx</span><span class="Punctuation">,</span> <span class="Identifier">KtlsAuto</span><span class="Punctuation">,</span> <span class="Identifier">zerocopySendfile</span><span class="Punctuation">)</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
 <div id="isTlsActive-procs-all">
   <div id="isTlsActive,Connection">
   <dt><pre><span class="Keyword">proc</span> <a href="#isTlsActive%2CConnection"><span class="Identifier">isTlsActive</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
@@ -186,6 +267,52 @@
   <dd>
     
     True once the connection's TLS handshake has completed.
+    
+  </dd>
+</div>
+
+</div>
+<div id="ktlsActive-procs-all">
+  <div id="ktlsActive,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsActive%2CConnection"><span class="Identifier">ktlsActive</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the kernel terminates TLS on this connection in either direction. False on memory-BIO backends (io_uring) and off Linux, which cannot offload at all.
+    
+  </dd>
+</div>
+
+</div>
+<div id="ktlsRxActive-procs-all">
+  <div id="ktlsRxActive,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsRxActive%2CConnection"><span class="Identifier">ktlsRxActive</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the kernel decrypts this connection's receive path.
+    
+  </dd>
+</div>
+
+</div>
+<div id="ktlsSupported-procs-all">
+  <div id="ktlsSupported">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsSupported"><span class="Identifier">ktlsSupported</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    <p>True when this kernel can attach the TLS ULP to a TCP socket, i.e. kTLS offload is at all possible. Always false off Linux.</p>
+<p>Necessary but not sufficient: engagement also needs OpenSSL with <tt class="docutils literal"><span class="pre"><span class="Identifier">enable</span><span class="Operator">-</span><span class="Identifier">ktls</span></span></tt>, a kTLS-capable cipher, and a socket-BIO backend. A false result here means the <tt class="docutils literal"><span class="pre"><span class="Identifier">tls</span></span></tt> module is not loaded — <tt class="docutils literal"><span class="pre"><span class="Identifier">modprobe</span> <span class="Identifier">tls</span></span></tt> (and loading it at boot) fixes it.</p>
+
+    
+  </dd>
+</div>
+
+</div>
+<div id="ktlsTxActive-procs-all">
+  <div id="ktlsTxActive,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsTxActive%2CConnection"><span class="Identifier">ktlsTxActive</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the kernel encrypts this connection's transmit path. This is what unlocks the zero-copy <tt class="docutils literal"><span class="pre"><span class="Identifier">sendfile</span><span class="Punctuation">(</span><span class="DecNumber">2</span><span class="Punctuation">)</span></span></tt> path: only a kernel-encrypted socket may be handed raw file bytes, so a false result means file bodies fall back to a userspace <tt class="docutils literal"><span class="pre"><span class="Identifier">SSL_write</span></span></tt> chunk loop.
     
   </dd>
 </div>
@@ -253,7 +380,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 17:23:41 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-06 13:59:21 UTC</small>
       </div>
     </div>
   </div>

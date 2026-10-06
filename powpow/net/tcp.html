@@ -78,6 +78,21 @@
   data*: pointer
   ssl*: pointer
   tlsState*: TlsState
+  ktlsMode*: KtlsMode ## Requested kTLS policy, copied from the `SslContext` at `wrapTls`
+                      ## time. `KtlsRequired` makes the connection fail closed if offload
+                      ## does not engage.
+  ktlsTx*: bool ## Whether the kernel encrypts this connection's transmit path. False
+                ## on io_uring/memory-BIO backends and off Linux. Only meaningful
+                ## once `ktlsTxFinal` — read via `ktlsTxActive` (net/tls), never
+                ## directly.
+  ktlsRx*: bool ## Receive-side counterpart of `ktlsTx`. Installed during the
+                ## handshake, so it is final almost immediately.
+  ktlsTxFinal*: bool ## True once `ktlsTx` can no longer change: either the kernel is
+                     ## already encrypting, or a TLS write has gone out. Until then
+                     ## `ktlsTx` is re-read on demand, because a &quot;not yet&quot; answer is
+                     ## normal and a cached one would be wrong for good. See
+                     ## `refreshKtlsState`.
+  ktlsRxFinal*: bool
   when iouEnabled:
     pendingRead*: seq[byte]">Connection</a></li>
 <li><a class="reference" href="#ConnState" title="ConnState = enum
@@ -115,7 +130,11 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#12" id="62">Procs</a></summary>
     <ul class="simple simple-toc-section">
-      <ul class="simple nested-toc-section">cancelSendFile
+      <ul class="simple nested-toc-section">adoptListenFd
+  <li><a class="reference" href="#adoptListenFd%2CTcpServer%2CSocketHandle" title="adoptListenFd(server: TcpServer; fd: SocketHandle)">adoptListenFd(server: TcpServer; fd: SocketHandle)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">cancelSendFile
   <li><a class="reference" href="#cancelSendFile%2CConnection" title="cancelSendFile(conn: Connection)">cancelSendFile(conn: Connection)</a></li>
 
 </ul>
@@ -164,6 +183,10 @@
   <li><a class="reference" href="#continueSendFile%2CConnection" title="continueSendFile(conn: Connection): bool">continueSendFile(conn: Connection): bool</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">createListenSocket
+  <li><a class="reference" href="#createListenSocket%2Cstring%2Cint" title="createListenSocket(address: string; port: int): SocketHandle">createListenSocket(address: string; port: int): SocketHandle</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">driveHandshake
   <li><a class="reference" href="#driveHandshake%2CConnection" title="driveHandshake(conn: Connection): bool">driveHandshake(conn: Connection): bool</a></li>
 
@@ -192,6 +215,14 @@
   <li><a class="reference" href="#injectFd%2CTcpServer%2CSocketHandle" title="injectFd(server: TcpServer; clientFd: SocketHandle)">injectFd(server: TcpServer; clientFd: SocketHandle)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">ktlsRxOffloaded
+  <li><a class="reference" href="#ktlsRxOffloaded%2CConnection" title="ktlsRxOffloaded(conn: Connection): bool">ktlsRxOffloaded(conn: Connection): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsTxOffloaded
+  <li><a class="reference" href="#ktlsTxOffloaded%2CConnection" title="ktlsTxOffloaded(conn: Connection): bool">ktlsTxOffloaded(conn: Connection): bool</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">listen
   <li><a class="reference" href="#listen%2CTcpServer%2Cstring%2Cint" title="listen(server: TcpServer; address: string; port: int)">listen(server: TcpServer; address: string; port: int)</a></li>
 
@@ -210,6 +241,10 @@
   <li><a class="reference" href="#newTcpServer%2CLoop%2COnData%2COnAccept%2COnClose" title="newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;
              onClose: OnClose = nil): TcpServer">newTcpServer(loop: Loop; onData: OnData; onAccept: OnAccept = nil;
              onClose: OnClose = nil): TcpServer</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">refreshKtlsState
+  <li><a class="reference" href="#refreshKtlsState%2CConnection" title="refreshKtlsState(conn: Connection)">refreshKtlsState(conn: Connection)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">send
@@ -301,6 +336,21 @@
   <span class="Identifier">data</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">pointer</span>
   <span class="Identifier">ssl</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">pointer</span>
   <span class="Identifier">tlsState</span><span class="Operator">*</span><span class="Other">:</span> <a href="../types.html#TlsState"><span class="Identifier">TlsState</span></a>
+  <span class="Identifier">ktlsMode</span><span class="Operator">*</span><span class="Other">:</span> <a href="common.html#KtlsMode"><span class="Identifier">KtlsMode</span></a> <span class="Comment">## Requested kTLS policy, copied from the `SslContext` at `wrapTls`</span>
+                      <span class="Comment">## time. `KtlsRequired` makes the connection fail closed if offload</span>
+                      <span class="Comment">## does not engage.</span>
+  <span class="Identifier">ktlsTx</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Comment">## Whether the kernel encrypts this connection's transmit path. False</span>
+                <span class="Comment">## on io_uring/memory-BIO backends and off Linux. Only meaningful</span>
+                <span class="Comment">## once `ktlsTxFinal` — read via `ktlsTxActive` (net/tls), never</span>
+                <span class="Comment">## directly.</span>
+  <span class="Identifier">ktlsRx</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Comment">## Receive-side counterpart of `ktlsTx`. Installed during the</span>
+                <span class="Comment">## handshake, so it is final almost immediately.</span>
+  <span class="Identifier">ktlsTxFinal</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Comment">## True once `ktlsTx` can no longer change: either the kernel is</span>
+                     <span class="Comment">## already encrypting, or a TLS write has gone out. Until then</span>
+                     <span class="Comment">## `ktlsTx` is re-read on demand, because a &quot;not yet&quot; answer is</span>
+                     <span class="Comment">## normal and a cached one would be wrong for good. See</span>
+                     <span class="Comment">## `refreshKtlsState`.</span>
+  <span class="Identifier">ktlsRxFinal</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
   <span class="Keyword">when</span> <span class="Identifier">iouEnabled</span><span class="Other">:</span>
     <span class="Identifier">pendingRead</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span></pre></dt>
   <dd>
@@ -417,7 +467,21 @@
 <div class="section" id="12">
   <h1><a class="toc-backref" href="#12">Procs</a></h1>
   <dl class="item">
-    <div id="cancelSendFile-procs-all">
+    <div id="adoptListenFd-procs-all">
+  <div id="adoptListenFd,TcpServer,SocketHandle">
+  <dt><pre><span class="Keyword">proc</span> <a href="#adoptListenFd%2CTcpServer%2CSocketHandle"><span class="Identifier">adoptListenFd</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#TcpServer"><span class="Identifier">TcpServer</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    <p>Serve on an already-bound listen socket (see <tt class="docutils literal"><span class="pre"><span class="Identifier">createListenSocket</span></span></tt>). Registers the fd in <em>this</em> server's loop. Ownership stays with the caller: <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> will not sockClose it.</p>
+<p>Registering one fd in several independent loops is intentional — each loop observes the shared listener as readable and whichever accepts first wins, so all workers take connections without cross-thread traffic. The cost is a thundering herd on accept, which is amortized under keep-alive.</p>
+
+    
+  </dd>
+</div>
+
+</div>
+<div id="cancelSendFile-procs-all">
   <div id="cancelSendFile,Connection">
   <dt><pre><span class="Keyword">proc</span> <a href="#cancelSendFile%2CConnection"><span class="Identifier">cancelSendFile</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
                                         <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -543,6 +607,18 @@
 </div>
 
 </div>
+<div id="createListenSocket-procs-all">
+  <div id="createListenSocket,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#createListenSocket%2Cstring%2Cint"><span class="Identifier">createListenSocket</span></a><span class="Other">(</span><span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create a bound, listening TCP socket. Exposed so a multi-worker server can create one listener in the parent thread and hand the fd to every worker via <tt class="docutils literal"><span class="pre"><span class="Identifier">adoptListenFd</span></span></tt>, rather than one SO_REUSEPORT socket per worker. Darwin permits the shared bind under plain SO_REUSEPORT but does NOT load-balance the group (every connection goes to one member), so per-worker sockets there leave all workers but one idle.
+    
+  </dd>
+</div>
+
+</div>
 <div id="driveHandshake-procs-all">
   <div id="driveHandshake,Connection">
   <dt><pre><span class="Keyword">proc</span> <a href="#driveHandshake%2CConnection"><span class="Identifier">driveHandshake</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
@@ -629,13 +705,37 @@
 </div>
 
 </div>
+<div id="ktlsRxOffloaded-procs-all">
+  <div id="ktlsRxOffloaded,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsRxOffloaded%2CConnection"><span class="Identifier">ktlsRxOffloaded</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the kernel decrypts this connection's receive path. Installed during the handshake, so this needs no re-probing.
+    
+  </dd>
+</div>
+
+</div>
+<div id="ktlsTxOffloaded-procs-all">
+  <div id="ktlsTxOffloaded,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsTxOffloaded%2CConnection"><span class="Identifier">ktlsTxOffloaded</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the kernel encrypts this connection's transmit path. Single source of truth for the zero-copy <tt class="docutils literal"><span class="pre"><span class="Identifier">sendfile</span><span class="Punctuation">(</span><span class="DecNumber">2</span><span class="Punctuation">)</span></span></tt> gate here and for the public <tt class="docutils literal"><span class="pre"><span class="Identifier">ktlsTxActive</span></span></tt> in <tt class="docutils literal"><span class="pre"><span class="Identifier">net</span><span class="Operator">/</span><span class="Identifier">tls</span></span></tt>; the two must not drift.
+    
+  </dd>
+</div>
+
+</div>
 <div id="listen-procs-all">
   <div id="listen,TcpServer,string,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#listen%2CTcpServer%2Cstring%2Cint"><span class="Identifier">listen</span></a><span class="Other">(</span><span class="Identifier">server</span><span class="Other">:</span> <a href="#TcpServer"><span class="Identifier">TcpServer</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    
+    Create and serve on a new, owned SO_REUSEPORT listen socket.
     
   </dd>
 </div>
@@ -679,10 +779,25 @@
 </div>
 
 </div>
+<div id="refreshKtlsState-procs-all">
+  <div id="refreshKtlsState,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#refreshKtlsState%2CConnection"><span class="Identifier">refreshKtlsState</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    <p>Re-read TX offload while the answer is still open.</p>
+<p>&quot;Not offloaded&quot; is not a final answer on the transmit path, and caching it as one is the whole bug this proc exists to avoid. OpenSSL installs kTLS RX during the handshake but does not set up kTLS TX until it first records application data, so a probe taken before that legitimately answers &quot;no&quot; and a connection would then be locked out of the zero-copy <tt class="docutils literal"><span class="pre"><span class="Identifier">sendfile</span><span class="Punctuation">(</span><span class="DecNumber">2</span><span class="Punctuation">)</span></span></tt> path for good — which is exactly what an HTTP server does first thing on every connection.</p>
+<p>So: re-read on demand, settle as soon as the kernel is encrypting, and let <tt class="docutils literal"><span class="pre"><span class="Identifier">tlsWrite</span></span></tt> settle the negative case once a record has actually gone out. That bounds this to a couple of <tt class="docutils literal"><span class="pre"><span class="Identifier">getsockopt</span></span></tt>s per connection, all of them before the hot path.</p>
+
+    
+  </dd>
+</div>
+
+</div>
 <div id="send-procs-all">
   <div id="send,Connection,openArray[byte]">
   <dt><pre><span class="Keyword">proc</span> <a href="#send%2CConnection%2CopenArray%5Bbyte%5D"><span class="Identifier">send</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
-    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -691,7 +806,7 @@
 </div>
 <div id="send,Connection,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#send%2CConnection%2Cstring"><span class="Identifier">send</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
-    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -711,7 +826,7 @@
     
     <p>Queue <tt class="docutils literal"><span class="pre"><span class="Identifier">length</span></span></tt> bytes from <tt class="docutils literal"><span class="pre"><span class="Identifier">fd</span></span></tt> starting at <tt class="docutils literal"><span class="pre"><span class="Identifier">offset</span></span></tt> for zero-copy transfer to this connection via sendfile(2).</p>
 <p>With keepOpen=false (default) powpow closes fd when the range drains or fails — matching single-shot usage. With keepOpen=true the fd stays open so callers can stream many ranges sequentially (e.g. media tags); call again once <tt class="docutils literal"><span class="pre"><span class="Identifier">sendFileActive</span></span></tt> turns false, or react to onComplete.</p>
-<p>Returns false when another transfer is active, the connection is not connected, or TLS is enabled (sendfile over TLS is unsupported). On success the transfer self-pumps across Write events on both server and client connections.</p>
+<p>Returns false when another transfer is active, the connection is not connected, or TLS is enabled without kTLS TX offload (only a kernel-encrypted socket can take raw sendfile(2) bytes). On success the transfer self-pumps across Write events on both server and client connections.</p>
 
     
   </dd>
@@ -734,7 +849,7 @@
   <div id="sendv,Connection,openArray[tuple[ptr.UncheckedArray[byte],int]]">
   <dt><pre><span class="Keyword">proc</span> <a href="#sendv%2CConnection%2CopenArray%5Btuple%5Bptr.UncheckedArray%5Bbyte%5D%2Cint%5D%5D"><span class="Identifier">sendv</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span>
            <span class="Identifier">parts</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Keyword">tuple</span><span class="Other">[</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Keyword">ptr</span> <span class="Identifier">UncheckedArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">len</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">]</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -770,7 +885,7 @@
 <div id="tlsRead-procs-all">
   <div id="tlsRead,Connection,pointer,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#tlsRead%2CConnection%2Cpointer%2Cint"><span class="Identifier">tlsRead</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">buf</span><span class="Other">:</span> <span class="Identifier">pointer</span><span class="Other">;</span> <span class="Identifier">count</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
-    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -782,7 +897,7 @@
 <div id="tlsWrite-procs-all">
   <div id="tlsWrite,Connection,pointer,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#tlsWrite%2CConnection%2Cpointer%2Cint"><span class="Identifier">tlsWrite</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">buf</span><span class="Other">:</span> <span class="Identifier">pointer</span><span class="Other">;</span> <span class="Identifier">count</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
-    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -807,7 +922,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 17:23:41 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-06 13:59:21 UTC</small>
       </div>
     </div>
   </div>

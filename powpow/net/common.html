@@ -58,7 +58,13 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
-      <li><a class="reference" href="#NetError" title="NetError = object of CatchableError">NetError</a></li>
+      <li><a class="reference" href="#KtlsMode" title="KtlsMode = enum
+  KtlsOff,                  ## Never request offload; all crypto stays in userspace.
+  KtlsAuto,                 ## Request offload, silently fall back when unavailable.
+  KtlsRequired ## Request offload and reject connections where it does
+               ## not engage, so a silent regression to userspace crypto
+               ## cannot masquerade as a working deployment.">KtlsMode</a></li>
+<li><a class="reference" href="#NetError" title="NetError = object of CatchableError">NetError</a></li>
 
     </ul>
   </details>
@@ -102,6 +108,18 @@
 </ul>
 <ul class="simple nested-toc-section">isIpAddress
   <li><a class="reference" href="#isIpAddress%2Cstring" title="isIpAddress(address: string): bool">isIpAddress(address: string): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsRxInstalled
+  <li><a class="reference" href="#ktlsRxInstalled%2CSocketHandle" title="ktlsRxInstalled(fd: SocketHandle): bool">ktlsRxInstalled(fd: SocketHandle): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsTxInstalled
+  <li><a class="reference" href="#ktlsTxInstalled%2CSocketHandle" title="ktlsTxInstalled(fd: SocketHandle): bool">ktlsTxInstalled(fd: SocketHandle): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">ktlsUlpAttach
+  <li><a class="reference" href="#ktlsUlpAttach%2CSocketHandle" title="ktlsUlpAttach(fd: SocketHandle): bool">ktlsUlpAttach(fd: SocketHandle): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">lastSocketError
@@ -212,7 +230,20 @@
     <div class="section" id="7">
   <h1><a class="toc-backref" href="#7">Types</a></h1>
   <dl class="item">
-    <div id="NetError">
+    <div id="KtlsMode">
+  <dt><pre><a href="#KtlsMode"><span class="Identifier">KtlsMode</span></a> <span class="Other">=</span> <span class="Keyword">enum</span>
+  <span class="Identifier">KtlsOff</span><span class="Other">,</span>                  <span class="Comment">## Never request offload; all crypto stays in userspace.</span>
+  <span class="Identifier">KtlsAuto</span><span class="Other">,</span>                 <span class="Comment">## Request offload, silently fall back when unavailable.</span>
+  <span class="Identifier">KtlsRequired</span> <span class="Comment">## Request offload and reject connections where it does</span>
+               <span class="Comment">## not engage, so a silent regression to userspace crypto</span>
+               <span class="Comment">## cannot masquerade as a working deployment.</span></pre></dt>
+  <dd>
+    
+    How hard a <tt class="docutils literal"><span class="pre"><span class="Identifier">SslContext</span></span></tt> tries to move TLS into the kernel. See <tt class="docutils literal"><span class="pre"><span class="Identifier">configureKtls</span></span></tt> in <tt class="docutils literal"><span class="pre"><span class="Identifier">net</span><span class="Operator">/</span><span class="Identifier">tls</span></span></tt>.
+    
+  </dd>
+</div>
+<div id="NetError">
   <dt><pre><a href="#NetError"><span class="Identifier">NetError</span></a> <span class="Other">=</span> <span class="Keyword">object</span> <span class="Keyword">of</span> <span class="Identifier">CatchableError</span></pre></dt>
   <dd>
     
@@ -360,6 +391,42 @@
 </div>
 
 </div>
+<div id="ktlsRxInstalled-procs-all">
+  <div id="ktlsRxInstalled,SocketHandle">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsRxInstalled%2CSocketHandle"><span class="Identifier">ktlsRxInstalled</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the kernel decrypts this socket's receive path.
+    
+  </dd>
+</div>
+
+</div>
+<div id="ktlsTxInstalled-procs-all">
+  <div id="ktlsTxInstalled,SocketHandle">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsTxInstalled%2CSocketHandle"><span class="Identifier">ktlsTxInstalled</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when the kernel encrypts this socket's transmit path. Only such a socket may be handed raw <tt class="docutils literal"><span class="pre"><span class="Identifier">sendfile</span><span class="Punctuation">(</span><span class="DecNumber">2</span><span class="Punctuation">)</span></span></tt> bytes.
+    
+  </dd>
+</div>
+
+</div>
+<div id="ktlsUlpAttach-procs-all">
+  <div id="ktlsUlpAttach,SocketHandle">
+  <dt><pre><span class="Keyword">proc</span> <a href="#ktlsUlpAttach%2CSocketHandle"><span class="Identifier">ktlsUlpAttach</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Whether the <tt class="docutils literal"><span class="pre"><span class="Identifier">tls</span></span></tt> ULP can be attached to this socket. False when the kernel module is absent (<tt class="docutils literal"><span class="pre"><span class="Identifier">ENOENT</span></span></tt>) — the common case on a stock kernel, where <tt class="docutils literal"><span class="pre"><span class="Identifier">modprobe</span> <span class="Identifier">tls</span></span></tt> is required.
+    
+  </dd>
+</div>
+
+</div>
 <div id="lastSocketError-procs-all">
   <div id="lastSocketError">
   <dt><pre><span class="Keyword">proc</span> <a href="#lastSocketError"><span class="Identifier">lastSocketError</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">cint</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -484,7 +551,9 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#setReusePort%2CSocketHandle"><span class="Identifier">setReusePort</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Enable SO_REUSEPORT on a socket (macOS/Linux). No-op on Windows.
+    <p>Enable SO_REUSEPORT on a socket (macOS/Linux). No-op on Windows.</p>
+<p>Note: this only permits the shared bind. On Linux and FreeBSD the kernel also load-balances the group, so one listen socket per worker works. On Darwin it does NOT: every connection is delivered to a single member of the group, and there is no SO_REUSEPORT_LB to change that (the option does not exist, so setting it fails with ENOPROTOOPT). Multi-worker servers on Darwin must therefore share one listen socket across workers instead — see <tt class="docutils literal"><span class="pre"><span class="Identifier">proto</span><span class="Operator">/</span><span class="Identifier">multithread</span><span class="Operator">.</span><span class="Identifier">nim</span></span></tt>.</p>
+
     
   </dd>
 </div>
@@ -627,7 +696,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-28 17:23:41 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-06 13:59:21 UTC</small>
       </div>
     </div>
   </div>
