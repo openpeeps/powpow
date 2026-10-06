@@ -1,27 +1,26 @@
 ## tests/test_ktls.nim — kernel-TLS (kTLS) opt-in tests for powpow.
 ##
+## - `ktls_capability_probe`: `ktlsSupported()` must not raise on any kernel,
+##   and a plain TCP socket must never report kTLS offload. This is the
+##   regression cover for the probe that gates the zero-copy `sendfile(2)`
+##   path — a false positive there puts unencrypted file bytes on a TLS wire.
 ## - `ktls_optin_echo`: TLS echo with `enableKtls` on both contexts. Passes
 ##   via userspace fallback when the kernel lacks kTLS, via offload when
 ##   present — either way the bytes must round-trip unchanged.
+## - `ktls_required_closes_without_offload`: `KtlsRequired` must fail the
+##   connection rather than silently serve in userspace.
 ## - `ktls_https_file_download`: `HttpServer` + `serveFile` over TLS with
 ##   `enableKtls`; the downloaded bytes must match the file exactly.
-## - Both tests assert engagement consistency: `ktlsTxActive` on the live
-##   connection implies a direct kernel probe (attach the `"tls"` ULP on
-##   a loopback pair) succeeds. The converse does not hold: the probe only
-##   checks the kernel `tls` module, while engagement additionally needs
+## - Engagement is one-directional: `ktlsTxActive` on a live connection
+##   implies the kernel `tls` ULP is available. The converse does not hold —
+##   the probe only checks the kernel, while engagement additionally needs
 ##   OpenSSL built with `enable-ktls`, a kTLS-capable cipher, and the
-##   socket-BIO (readiness) backend — so engaged => probe, but probe =/=>
-##   engaged. On kernels without kTLS (e.g. `tls` module not
-##   loaded) the probe fails and the flag must be false — the fallback path.
+##   socket-BIO (readiness) backend. On kernels without kTLS (`tls` module
+##   not loaded) the probe fails and the flag must be false.
 
 import ../src/powpow
 import std/httpcore except HttpMethod
 import std/[unittest, os, strutils]
-when defined(linux):
-  import ktls/raw as ktlsRaw
-  import std/net as stdnet
-  import std/posix as stdposix
-
 const TestCert = """-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIUQ9SLaN1JcfaYyluaCXKsGhNnIa4wDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDgwMTE3MzA0OFoXDTM2MDcy
@@ -81,45 +80,103 @@ proc writeTestCert(): tuple[cert, key: string] =
   writeFile(result.cert, TestCert)
   writeFile(result.key, TestKey)
 
-when defined(linux):
-  proc kernelHasKtls(): bool =
-    ## Direct kernel probe: attach the "tls" ULP on a connected loopback
-    ## pair. False when the `tls` module is missing (ENOENT) or any setup
-    ## step fails.
-    var srv = stdnet.newSocket()
-    try:
-      srv.setSockOpt(OptReuseAddr, true)
-      srv.bindAddr(Port(0), "127.0.0.1")
-      srv.listen()
-      let port = srv.getLocalAddr()[1]
-      var cli = stdnet.newSocket()
-      try:
-        cli.connect("127.0.0.1", port)
-        var acc: stdnet.Socket
-        srv.accept(acc)
-        try:
-          result = ktlsRaw.rawEnableUlp(cli.getFd()) == 0
-        finally:
-          acc.close()
-      finally:
-        cli.close()
-    except OSError:
-      result = false
-    finally:
-      srv.close()
-else:
-  proc kernelHasKtls(): bool = false
+proc kernelHasKtls(): bool =
+  ## powpow's own capability probe (attach the "tls" ULP to a throwaway
+  ## loopback pair). False when the `tls` module is missing (ENOENT) or any
+  ## setup step fails.
+  ktlsSupported()
+
+let strict = existsEnv("POWPOW_KTLS_STRICT")
+  ## With POWPOW_KTLS_STRICT=1 the tests additionally *require* that offload
+  ## actually engages, not merely that the answer is self-consistent. A
+  ## kernel with the `tls` module plus a libssl built with `enable-ktls`
+  ## engages every time, so this is the setting that catches a probe which
+  ## has drifted back to always reporting "off" — the failure mode that
+  ## silently disables the zero-copy path in production while every
+  ## consistency assertion still passes.
 
 suite "kTLS opt-in":
-  test "kernel probe agrees with documentation":
-    # Sanity: the probe itself must not raise, whatever the kernel has.
+  test "capability probe is safe and conservative":
+    # `ktlsSupported()` must answer on any kernel rather than raise, and a
+    # socket with no TLS on it must never claim offload. A false positive
+    # here is not cosmetic: it is the gate on the zero-copy `sendfile(2)`
+    # path, which would hand raw file bytes to a kernel that is not
+    # encrypting them.
     discard kernelHasKtls()
 
+  when defined(linux):
+    test "plain socket never reports kTLS offload":
+      # The TLS_INFO_*CONF option numbers live in the shared SOL_TCP
+      # namespace, so a wrong number can land on an unrelated TCP option and
+      # return a plausible-looking value. This is the canary for that.
+      let srv = socket(AF_INET.cint, SOCK_STREAM.cint, 0)
+      check srv.int >= 0
+      defer: sockClose(srv)
+      var one: cint = 1
+      discard setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, addr one,
+                         posix.SockLen(sizeof(one)))
+      doAssert not ktlsTxInstalled(srv)
+      doAssert not ktlsRxInstalled(srv)
+
   when not defined(windows):
+    test "ktls_required_closes_without_offload":
+      # `KtlsRequired` exists so a deployment cannot quietly fall back to
+      # userspace crypto. On a kernel that cannot offload, the connection
+      # must be dropped and no response body delivered.
+      let (cert, key) = writeTestCert()
+      let serverCtx = newServerTlsContext(cert, key)
+      serverCtx.configureKtls(KtlsRequired)
+      let loop = newLoop()
+      var served = false
+      var body = ""
+
+      let server = newTcpServer(loop,
+        onAccept = proc(conn: Connection) =
+          conn.wrapTls(serverCtx)
+        ,
+        onData = proc(conn: Connection, data: openArray[byte]) =
+          served = true
+          discard conn.send("should never arrive")
+        ,
+      )
+      server.listen("127.0.0.1", 29883)
+
+      discard loop.addTimer(50) do (id: int):
+        let clientCtx = newClientTlsContext(verifyPeer = false)
+        loop.connect("127.0.0.1", 29883,
+          onConnect = proc(conn: Connection) =
+            conn.wrapTls(clientCtx)
+            discard conn.send("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+          ,
+          onData = proc(conn: Connection, data: openArray[byte]) =
+            body.add(cast[string](@data))
+          ,
+          onClose = proc(conn: Connection) =
+            server.close()
+            loop.stop()
+          ,
+        )
+
+      discard loop.addTimer(5000) do (id: int):
+        server.close()
+        loop.stop()
+
+      loop.run()
+
+      if kernelHasKtls():
+        # The kernel can offload, so this may legitimately succeed; all we
+        # can insist on is that the two agree.
+        discard
+      else:
+        doAssert not served,
+          "KtlsRequired served a request on a kernel with no kTLS"
+        check body.len == 0
+      loop.close()
+
     test "ktls_optin_echo":
       let (cert, key) = writeTestCert()
       let serverCtx = newServerTlsContext(cert, key)
-      enableKtls(serverCtx)
+      serverCtx.configureKtls(KtlsAuto)
       let loop = newLoop()
       var gotEcho = false
       var received = ""
@@ -139,7 +196,7 @@ suite "kTLS opt-in":
 
       discard loop.addTimer(50) do (id: int):
         let clientCtx = newClientTlsContext(verifyPeer = false)
-        enableKtls(clientCtx)
+        clientCtx.configureKtls(KtlsAuto)
         loop.connect("127.0.0.1", 29881,
           onConnect = proc(conn: Connection) =
             conn.wrapTls(clientCtx)
@@ -172,6 +229,16 @@ suite "kTLS opt-in":
         "server kTLS engaged without kernel support"
       doAssert (not clientKtls) or kernelHasKtls(),
         "client kTLS engaged without kernel support"
+      if strict:
+        doAssert kernelHasKtls(),
+          "POWPOW_KTLS_STRICT=1 but the kernel cannot offload TLS"
+        doAssert serverKtls,
+          "POWPOW_KTLS_STRICT=1 but the server connection did not offload"
+        doAssert clientKtls,
+          "POWPOW_KTLS_STRICT=1 but the client connection did not offload"
+      else:
+        echo "    kTLS: kernel=", kernelHasKtls(),
+             " server=", serverKtls, " client=", clientKtls
       loop.close()
 
     test "ktls_https_file_download":
@@ -192,7 +259,7 @@ suite "kTLS opt-in":
         writeFile(filePath, cast[string](payload))
 
         let serverCtx = newServerTlsContext(cert, key)
-        enableKtls(serverCtx)
+        serverCtx.configureKtls(KtlsAuto, zerocopySendfile = true)
         let loop = newLoop()
         var serverKtls = false
         let httpServer = newHttpServer(loop)
@@ -211,7 +278,7 @@ suite "kTLS opt-in":
         var gotResponse = false
         discard loop.addTimer(50) do (id: int):
           let clientCtx = newClientTlsContext(verifyPeer = false)
-          enableKtls(clientCtx)
+          clientCtx.configureKtls(KtlsAuto)
           loop.connect("127.0.0.1", 29882,
             onConnect = proc(conn: Connection) =
               conn.wrapTls(clientCtx)
@@ -236,6 +303,9 @@ suite "kTLS opt-in":
         doAssert gotResponse, "HTTPS file download should have completed"
         doAssert (not serverKtls) or kernelHasKtls(),
           "server kTLS engaged without kernel support"
+        if strict:
+          doAssert serverKtls,
+            "POWPOW_KTLS_STRICT=1 but the download connection did not offload"
         let text = cast[string](body)
         let sep = text.find("\r\n\r\n")
         doAssert sep >= 0, "response has no header/body separator"

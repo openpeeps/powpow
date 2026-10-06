@@ -287,8 +287,14 @@ proc close*(res: HttpResponse): HttpResponse {.inline, discardable.} =
 proc ktlsTxActive*(res: HttpResponse): bool {.inline.} =
   ## True when this response's connection has kTLS TX offload engaged (the
   ## kernel encrypts the transmit path, so `serveFile` uses zero-copy
-  ## `sendfile(2)` even over TLS). See `enableKtls` (net/tls).
+  ## `sendfile(2)` even over TLS). See `configureKtls` (net/tls).
   res.conn.ktlsTxActive()
+
+proc ktlsActive*(res: HttpResponse): bool {.inline.} =
+  ## True when the kernel terminates TLS on this response's connection in
+  ## either direction. When false, file bodies take the userspace chunk loop
+  ## rather than zero-copy `sendfile(2)`. See `ktlsTxActive` (net/tls).
+  res.conn.ktlsActive()
 
 func statusText(code: HttpCode): string {.inline.} =
   ## Return the HTTP reason phrase for a status code.
@@ -1384,25 +1390,35 @@ proc listen*(server: HttpServer, address: string, port: int) =
     server.tcpServers.add(ts)
   server.startTimeoutSweep()
 
-proc adoptListenFd*(server: HttpServer, fd: SocketHandle) =
-  ## Serve on an already-bound listen socket (see `createListenSocket`),
-  ## adding one `TcpServer` per call just like `listen`. Intended for
-  ## multi-worker servers, where a single listen socket is created once and
-  ## adopted by every worker's loop; ownership stays with the creator, so
-  ## `close()` never sockCloses it.
-  if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
-    # `populatePools` pre-created an unbound TcpServer; migrate its pool as
-    # in listen() above so the warmed Connection buffers are not leaked.
-    let ts = server.buildTcpServer()
-    ts.connPool = move server.tcpServers[0].connPool
-    server.tcpServers.setLen(0)
-    ts.adoptListenFd(fd)
-    server.tcpServers.add(ts)
-  else:
-    let ts = server.buildTcpServer()
-    ts.adoptListenFd(fd)
-    server.tcpServers.add(ts)
-  server.startTimeoutSweep()
+when not iouEnabled:
+  proc adoptListenFd*(server: HttpServer, fd: SocketHandle) =
+    ## Serve on an already-bound listen socket (see `createListenSocket`),
+    ## adding one `TcpServer` per call just like `listen`. Intended for
+    ## multi-worker servers, where a single listen socket is created once and
+    ## adopted by every worker's loop; ownership stays with the creator, so
+    ## `close()` never sockCloses it.
+    ##
+    ## Availability: the readiness backends only. `TcpServer.adoptListenFd`
+    ## lives in the non-io_uring branch of `net/tcp.nim` because its only
+    ## caller is `MultiThreadHttpServer`'s shared-listener path, which exists
+    ## solely for Darwin — Linux and FreeBSD load-balance a SO_REUSEPORT group,
+    ## but Darwin does not (there is no `SO_REUSEPORT_LB`), so there every
+    ## worker would otherwise share one member and leave the rest idle.
+    ## `iouEnabled` is Linux-only, so the two can never both hold and this
+    ## gate removes no reachable code.
+    if server.tcpServers.len == 1 and server.tcpServers[0].fd.int < 0:
+      # `populatePools` pre-created an unbound TcpServer; migrate its pool as
+      # in listen() above so the warmed Connection buffers are not leaked.
+      let ts = server.buildTcpServer()
+      ts.connPool = move server.tcpServers[0].connPool
+      server.tcpServers.setLen(0)
+      ts.adoptListenFd(fd)
+      server.tcpServers.add(ts)
+    else:
+      let ts = server.buildTcpServer()
+      ts.adoptListenFd(fd)
+      server.tcpServers.add(ts)
+    server.startTimeoutSweep()
 
 when not defined(windows):
   proc listenUnix*(server: HttpServer, path: string; mode: int = 0o660) =

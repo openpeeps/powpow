@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.2.1"
+version       = "0.2.2"
 author        = "OpenPeeps"
 description   = "High-performance event notification library for Nim"
 license       = "MIT"
@@ -12,10 +12,9 @@ requires "nim >= 2.2.0"
 requires "voodoo >= 0.2.0"
 requires "nimsimd >= 1.3.2"
 requires "mimedb >= 0.1.1"
-requires "openparser >= 0.3.6"
+requires "openparser >= 0.3.8"
 requires "multipart >= 0.1.4"
 requires "checksums >= 0.2.2"
-requires "ktls >= 0.1.0"
 
 # Features
 

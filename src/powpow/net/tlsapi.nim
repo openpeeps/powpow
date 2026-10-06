@@ -89,14 +89,16 @@ const SSL_CTRL_SET_TLSEXT_HOSTNAME* = 55
 # above about not mixing TLS libraries).
 
 const
-  SslCtrlOptions* = 32
-    ## `SSL_CTRL_OPTIONS` control code (`SSL_CTX_ctrl`/`SSL_ctrl`).
   SslOpEnableKtls* = 8'u64
     ## `SSL_OP_ENABLE_KTLS` = `SSL_OP_BIT(3)`.
   SslOpEnableKtlsTxZerocopySendfile* = 17179869184'u64
     ## `SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE` = `SSL_OP_BIT(34)`.
     ## Lets `sendfile(2)` on the kTLS fd skip the in-kernel copy when a
     ## capable NIC owns the crypto; the file must not change while sending.
+    ##
+    ## Set through `SSL_set_options`, not `SSL_ctrl(SSL_CTRL_OPTIONS)`:
+    ## the latter takes a `long` argument, so on ILP32 targets this bit-34
+    ## value is truncated to zero and the flag is silently dropped.
 
 # ── ALPN (RFC 7301, used by HTTP/2 RFC 7540 section 3.3) ─────────────────────
 #

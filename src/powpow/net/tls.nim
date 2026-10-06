@@ -32,6 +32,7 @@
 ## ```
 
 import ./tcp
+import ./common
 import ../types
 import ./tlsapi
 import std/tables
@@ -45,12 +46,14 @@ type
     role: TlsRole
     alpnProtos*: seq[string]
     alpnWire: string
-    ktls*: bool
-      ## Opt-in kernel-TLS offload (see `enableKtls`). Applied to every
-      ## `SSL*` created by `wrapTls` on socket-BIO backends; ignored on
-      ## memory-BIO backends (io_uring) where OpenSSL never sees the fd.
+    ktlsMode*: KtlsMode
+      ## Requested kernel-TLS policy. Set with `configureKtls`; applied to
+      ## every `SSL*` that `wrapTls` creates on a socket-BIO backend, and
+      ## ignored on memory-BIO backends (io_uring) where OpenSSL never sees
+      ## the fd and so cannot offload.
     ktlsZerocopySendfile*: bool
-      ## Additionally set `SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE`.
+      ## Additionally set `SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE`. Only
+      ## meaningful alongside a `KtlsMode` other than `KtlsOff`.
 
   SslError* = object of CatchableError
 
@@ -121,26 +124,92 @@ when not defined(windows):
         alpnProtosByCtx[ctx.ctx] = @protos
         discard SSL_CTX_set_alpn_select_cb(ctx.ctx, alpnSelectCb, nil)
 
-  proc enableKtls*(ctx: SslContext, txZerocopySendfile = false) =
-    ## Opt in to kernel-TLS (kTLS) offload for connections wrapped with this
-    ## context. `wrapTls` then sets `SSL_OP_ENABLE_KTLS` on each new `SSL*`
+  proc configureKtls*(ctx: SslContext, mode: KtlsMode,
+                      zerocopySendfile = false) =
+    ## Choose how hard this context tries to move the TLS record layer into
+    ## the kernel. `wrapTls` then sets `SSL_OP_ENABLE_KTLS` on each new `SSL*`
     ## (plus `SSL_OP_ENABLE_KTLS_TX_ZEROCOPY_SENDFILE` when
-    ## `txZerocopySendfile` is true), permitting OpenSSL ≥ 3.0 — built with
-    ## `enable-ktls` — to move the record layer into the kernel once the
-    ## handshake negotiates a kTLS-capable cipher on a socket-BIO connection.
+    ## `zerocopySendfile` is true).
     ##
-    ## Best-effort: when the kernel lacks kTLS (`tls` module missing), the
-    ## cipher is unsupported, or the backend uses memory BIOs (io_uring),
-    ## OpenSSL silently stays in userspace and everything behaves as before.
-    ## Query per-connection engagement with `ktlsTxActive`.
+    ## - `KtlsOff` — never offload. This is the default.
+    ## - `KtlsAuto` — ask for offload and carry on in userspace if it does
+    ##   not happen. The TLS handshake is unaffected either way.
+    ## - `KtlsRequired` — ask for offload and drop the connection if it does
+    ##   not engage. Use this to make a missing `tls` module, a libssl built
+    ##   without `enable-ktls`, or an unsupported cipher a loud failure
+    ##   instead of a silent, permanently slower deployment.
     ##
-    ## Call before wrapping connections; toggling it later only affects
+    ## Offload additionally needs: the Linux `tls` module loaded (`modprobe
+    ## tls`), OpenSSL >= 3.0 built with `enable-ktls`, a kTLS-capable cipher,
+    ## and a socket-BIO backend (the epoll/kqueue readiness loop — the
+    ## io_uring backend uses memory BIOs and never offloads). Check the
+    ## kernel half up front with `ktlsSupported`, and a live connection with
+    ## `ktlsTxActive` / `ktlsRxActive`.
+    ##
+    ## Call before wrapping connections; changing it later only affects
     ## subsequently wrapped connections.
     when defined(windows):
       raise newException(SslError, "TLS is not supported on Windows")
     else:
-      ctx.ktls = true
-      ctx.ktlsZerocopySendfile = txZerocopySendfile
+      ctx.ktlsMode = mode
+      ctx.ktlsZerocopySendfile = zerocopySendfile and mode != KtlsOff
+
+  proc enableKtls*(ctx: SslContext, zerocopySendfile = false) =
+    ## Opt in to best-effort kTLS offload. Shorthand for
+    ## `configureKtls(ctx, KtlsAuto, zerocopySendfile)`.
+    ctx.configureKtls(KtlsAuto, zerocopySendfile)
+
+  proc disableKtls*(ctx: SslContext) =
+    ## Stop requesting kTLS offload. Connections already wrapped keep the
+    ## offload state they negotiated.
+    ctx.configureKtls(KtlsOff)
+
+  proc ktlsSupported*(): bool =
+    ## True when this kernel can attach the TLS ULP to a TCP socket, i.e.
+    ## kTLS offload is at all possible. Always false off Linux.
+    ##
+    ## Necessary but not sufficient: engagement also needs OpenSSL with
+    ## `enable-ktls`, a kTLS-capable cipher, and a socket-BIO backend.
+    ## A false result here means the `tls` module is not loaded —
+    ## `modprobe tls` (and loading it at boot) fixes it.
+    when defined(linux):
+      # The ULP can only be attached to an established TCP socket, so probe
+      # with a throwaway loopback pair. Cheaper to ask than to guess.
+      let srvFd = socket(AF_INET.cint, SOCK_STREAM.cint, 0)
+      if srvFd.int < 0: return false
+      defer: sockClose(srvFd)
+
+      var one: cint = 1
+      discard setsockopt(srvFd, SOL_SOCKET, SO_REUSEADDR, addr one,
+                         sizeof(one).SockLen)
+      var bindAddr: Sockaddr_in
+      bindAddr.sin_family = AF_INET.int.uint8
+      bindAddr.sin_port = 0
+      bindAddr.sin_addr.s_addr = 0x0100007F'u32   # 127.0.0.1, network order
+      if bindSocket(srvFd, cast[ptr SockAddr](addr bindAddr),
+                   sizeof(bindAddr).SockLen) < 0:
+        return false
+      if listen(srvFd, 1) < 0: return false
+
+      var boundAddr: Sockaddr_in
+      var boundLen = sizeof(boundAddr).SockLen
+      if getsockname(srvFd, cast[ptr SockAddr](addr boundAddr),
+                      addr boundLen) < 0: return false
+
+      let cliFd = socket(AF_INET.cint, SOCK_STREAM.cint, 0)
+      if cliFd.int < 0: return false
+      defer: sockClose(cliFd)
+      if connect(cliFd, cast[ptr SockAddr](addr boundAddr),
+                  sizeof(boundAddr).SockLen) < 0:
+        return false
+
+      let accFd = accept(srvFd, nil, nil)
+      if accFd.int < 0: return false
+      defer: sockClose(accFd)
+
+      ktlsUlpAttach(cliFd)
+    else:
+      false
 
   proc alpnSelected*(conn: Connection): string =
     ## Negotiated ALPN protocol after the handshake, or "" if none.
@@ -236,14 +305,16 @@ when not defined(windows):
       if SSL_set_fd(ssl, cint(conn.fd)) != 1:
         SSL_free(ssl)
         raise newException(SslError, "SSL_set_fd() failed")
-      if ctx.ktls:
-        # Permit kernel-TLS offload. Best-effort: OpenSSL engages only when
-        # the kernel and the negotiated cipher cooperate, otherwise this is
-        # a no-op and userspace crypto is used.
+      if ctx.ktlsMode != KtlsOff:
+        # Permit kernel-TLS offload. OpenSSL engages only when the kernel and
+        # the negotiated cipher cooperate; otherwise this is a no-op and
+        # userspace crypto is used. `SSL_set_options` (not
+        # `SSL_ctrl(SSL_CTRL_OPTIONS)`) so the bit-34 zerocopy-sendfile
+        # option survives on ILP32 targets.
         var ops = SslOpEnableKtls
         if ctx.ktlsZerocopySendfile:
           ops = ops or SslOpEnableKtlsTxZerocopySendfile
-        discard SSL_ctrl(ssl, SslCtrlOptions.cint, clong(ops), nil)
+        discard SSL_set_options(ssl, ops)
     if ctx.alpnWire.len > 0 and ctx.role == TlsClient:
       # Per-connection ALPN list; servers advertise via the SSL_CTX instead.
       if SSL_set_alpn_protos(ssl, cast[ptr uint8](ctx.alpnWire[0].addr),
@@ -261,6 +332,9 @@ when not defined(windows):
         discard SSL_set1_host(ssl, serverName.cstring)        # hostname check
     conn.ssl = cast[pointer](ssl)
     conn.tlsState = TlsHandshaking
+    conn.ktlsMode = ctx.ktlsMode
+    conn.ktlsTxFinal = false
+    conn.ktlsRxFinal = false
     # Clients must kick the handshake off by writing the ClientHello; servers
     # are driven by their first read event (accept) or STARTTLS upgrade.
     if ctx.role == TlsClient:
@@ -270,15 +344,22 @@ when not defined(windows):
     ## True once the connection's TLS handshake has completed.
     conn.tlsState == TlsActive
 
-  proc ktlsTxActive*(conn: Connection): bool {.inline.} =
-    ## True when the kernel encrypts this connection's transmit path
-    ## (kTLS TX offload engaged at handshake end). Enables zero-copy
-    ## `sendfile(2)` straight onto the TLS socket. Always false on
-    ## memory-BIO backends (io_uring) and on platforms without kTLS.
-    when defined(linux):
-      conn.ktlsTx
-    else:
-      false
+  proc ktlsTxActive*(conn: Connection): bool =
+    ## True when the kernel encrypts this connection's transmit path. This is
+    ## what unlocks the zero-copy `sendfile(2)` path: only a kernel-encrypted
+    ## socket may be handed raw file bytes, so a false result means file
+    ## bodies fall back to a userspace `SSL_write` chunk loop.
+    conn.ktlsTxOffloaded()
+
+  proc ktlsRxActive*(conn: Connection): bool =
+    ## True when the kernel decrypts this connection's receive path.
+    conn.ktlsRxOffloaded()
+
+  proc ktlsActive*(conn: Connection): bool =
+    ## True when the kernel terminates TLS on this connection in either
+    ## direction. False on memory-BIO backends (io_uring) and off Linux,
+    ## which cannot offload at all.
+    conn.ktlsTxActive() or conn.ktlsRxActive()
 
 else:
   proc newServerTlsContext*(certFile, keyFile: string): SslContext =
@@ -297,7 +378,20 @@ else:
 
   proc isTlsActive*(conn: Connection): bool {.inline.} = false
 
-  proc enableKtls*(ctx: SslContext, txZerocopySendfile = false) =
+  proc configureKtls*(ctx: SslContext, mode: KtlsMode,
+                      zerocopySendfile = false) =
     raise newException(SslError, "TLS is not supported on Windows")
 
+  proc enableKtls*(ctx: SslContext, zerocopySendfile = false) =
+    raise newException(SslError, "TLS is not supported on Windows")
+
+  proc disableKtls*(ctx: SslContext) =
+    raise newException(SslError, "TLS is not supported on Windows")
+
+  proc ktlsSupported*(): bool = false
+
+  proc ktlsActive*(conn: Connection): bool {.inline.} = false
+
   proc ktlsTxActive*(conn: Connection): bool {.inline.} = false
+
+  proc ktlsRxActive*(conn: Connection): bool {.inline.} = false
