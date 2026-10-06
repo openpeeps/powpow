@@ -477,9 +477,16 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
   if conn == nil or conn.state != Connected:
     return
   if not st.active:
-    # Stale event on an idle/pooled connection — drop it from the pool.
-    if client.pool.removeFromPool(conn):
-      conn.close()
+    # Stale event on an idle/pooled connection. A pure-Write event is not
+    # death: kqueue reports Read and Write as separate events, so the
+    # writability that was current when the response completed is still
+    # dispatched after pooling (epoll coalesces both into one event and never
+    # hits this). Only Error/Hup/Read can mean the server closed the idle
+    # socket — a trailing Write must be ignored or every pooled connection
+    # risks immediate eviction on macOS/BSD.
+    if Read in ev or Hup in ev or Error in ev:
+      if client.pool.removeFromPool(conn):
+        conn.close()
     return
   if Error in ev and Read notin ev:
     if retryFresh(st, client):
