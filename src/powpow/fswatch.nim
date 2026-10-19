@@ -29,6 +29,7 @@ type
 
   FileWatcher* = ref object
     loop*:     Loop
+    ownsLoop*: bool
     path*:     string
     callback*: FileWatcherCb
     when defined(macosx) or defined(bsd):
@@ -127,7 +128,7 @@ proc newFileWatcher*(loop: Loop, path: string,
       return nil
 
     result = FileWatcher(
-      loop: loop, path: path, callback: callback,
+      loop: loop, ownsLoop: false, path: path, callback: callback,
       kq: kq.int, fileFd: fileFd.int)
     let w = result
 
@@ -154,7 +155,7 @@ proc newFileWatcher*(loop: Loop, path: string,
       return nil
 
     result = FileWatcher(
-      loop: loop, path: path, callback: callback,
+      loop: loop, ownsLoop: false, path: path, callback: callback,
       inotifyFd: ifd.int, watchWd: wd.int)
     let w = result
 
@@ -174,11 +175,28 @@ proc newFileWatcher*(loop: Loop, path: string,
   else:
     discard
 
+proc newFileWatcher*(path: string,
+                     callback: FileWatcherCb): FileWatcher =
+  ## Create a file watcher with its own internal event loop.
+  ## The loop is owned by the watcher: `run` drives it and
+  ## `close` frees it. Use `getLoop` to share the loop.
+  let loop = newLoop()
+  result = newFileWatcher(loop, path, callback)
+  if result != nil:
+    result.ownsLoop = true
+  else:
+    loop.close()
+
+proc getLoop*(w: FileWatcher): Loop {.inline.} =
+  ## The event loop driving this watcher (owned or borrowed).
+  w.loop
+
 proc close*(w: FileWatcher) =
   if w == nil: return
   when defined(macosx) or defined(bsd):
     if w.kq >= 0:
-      w.loop.unregister(w.kq)
+      if w.loop != nil and not w.loop.closed:
+        w.loop.unregister(w.kq)
       discard posix.close(w.kq.cint)
       w.kq = -1
     if w.fileFd >= 0:
@@ -186,6 +204,25 @@ proc close*(w: FileWatcher) =
       w.fileFd = -1
   elif defined(linux):
     if w.inotifyFd >= 0:
-      w.loop.unregister(w.inotifyFd)
+      if w.loop != nil and not w.loop.closed:
+        w.loop.unregister(w.inotifyFd)
       discard posix.close(w.inotifyFd.cint)
       w.inotifyFd = -1
+  if w.ownsLoop and w.loop != nil and not w.loop.closed:
+    if w.loop.isRunning():
+      w.loop.stop()
+    else:
+      w.loop.close()
+
+proc run*(w: FileWatcher) =
+  ## Block driving the watcher's event loop until `stop`/`close`.
+  ## When the watcher owns its loop, the loop is freed on exit,
+  ## so `run` is terminal for owned watchers.
+  w.loop.run()
+  if w.ownsLoop and w.loop != nil and not w.loop.closed:
+    w.close()
+
+proc stop*(w: FileWatcher) {.inline.} =
+  ## Stop the watcher's event loop (use from a callback).
+  ## Prefer `close`, which also frees an owned loop.
+  w.close()

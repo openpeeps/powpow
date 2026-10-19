@@ -70,6 +70,7 @@ type
   HttpServer* = ref object
     tcpServers*: seq[TcpServer]
     loop:      Loop
+    ownsLoop*: bool
     handler*:  OnRequestCallback
     sslCtx*:   tls.SslContext
     connRoots*: Table[int, ConnHttp]
@@ -888,6 +889,7 @@ proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
   let srv = HttpServer(
     tcpServers: @[],
     loop:      loop,
+    ownsLoop:  false,
     handler:   nil,
     connRoots: initTable[int, ConnHttp](1024),
     parserPool: @[],
@@ -914,8 +916,16 @@ proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
   srv
 
 proc newHttpServer*(populate: bool = true): HttpServer =
+  ## Create an HTTP server with its own internal event loop.
+  ## `run`/`start` drive it; `close` frees it. Use `getLoop`
+  ## to share the loop with other subsystems.
   var eventLoop = newLoop()
-  newHttpServer(eventLoop, populate)
+  try:
+    result = newHttpServer(eventLoop, populate)
+    result.ownsLoop = true
+  except CatchableError:
+    eventLoop.close()
+    raise
 
 proc start*(server: HttpServer, handler: OnRequestCallback, port: Port) =
   server.handler = handler
@@ -943,9 +953,14 @@ proc start*(server: HttpServer, handler: OnRequestCallback, address: string, por
   server.loop.run()
 
 proc stop*(server: HttpServer) =
-  ## Stop the HTTP server and close all connections
+  ## Stop the HTTP server (use from a callback). Frees an owned loop
+  ## via `close` semantics once `run` returns; a borrowed loop is
+  ## stopped but left alive for its owner.
+  if server == nil: return
   server.close()
-  server.loop.close()
+  if not server.ownsLoop and server.loop != nil and
+      not server.loop.closed and server.loop.isRunning():
+    server.loop.stop()
 
 proc maybeArmBodyStream(server: HttpServer, ctx: ConnHttp, p: HttpParser)
   ## Forward declaration (defined near handleConnectionData): choose the body
@@ -1437,9 +1452,15 @@ when not defined(windows):
     server.startTimeoutSweep()
 
 proc close*(server: HttpServer) =
-  ## Close the server and all active connections
-  if server.sweepTimer != TimerId(0):
-    server.loop.cancelTimer(server.sweepTimer)
+  ## Close the server and all active connections. When the server owns
+  ## its loop (created via `newHttpServer()` without a loop), the loop
+  ## is stopped (if running) or freed; a borrowed loop is left alive.
+  if server == nil: return
+  if server.loop != nil and not server.loop.closed:
+    if server.sweepTimer != TimerId(0):
+      server.loop.cancelTimer(server.sweepTimer)
+      server.sweepTimer = TimerId(0)
+  else:
     server.sweepTimer = TimerId(0)
   for ts in server.tcpServers:
     ts.close()
@@ -1447,6 +1468,18 @@ proc close*(server: HttpServer) =
   server.connRoots.clear()
   server.pendingConns.setLen(0)
   server.parserPool.setLen(0)
+  if server.ownsLoop and server.loop != nil and not server.loop.closed:
+    if server.loop.isRunning():
+      server.loop.stop()
+    else:
+      server.loop.close()
+
+proc run*(server: HttpServer) =
+  ## Block serving until `stop`/`close`. When the server owns its loop,
+  ## the server is closed and the loop freed on exit.
+  server.loop.run()
+  if server.ownsLoop and server.loop != nil and not server.loop.closed:
+    server.close()
 
 proc ensureTcpServer*(server: HttpServer) =
   ## Ensure the server has at least one TCP server instance

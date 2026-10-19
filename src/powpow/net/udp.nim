@@ -47,6 +47,7 @@ type
   UdpSocket* = ref object
     fd*:        SocketHandle
     loop*:      Loop
+    ownsLoop*:  bool
     onData:     OnUdpData
     readBuf:    ptr UncheckedArray[byte]
     readBufLen: int
@@ -155,26 +156,54 @@ when iouEnabled:
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 proc close*(sock: UdpSocket) =
-  if sock.fd.int < 0: return
-  when iouEnabled:
-    if sock.recvToken != 0:
-      sock.loop.cancelOp(sock.recvToken)
-      sock.recvToken = 0
-    if sock.sendToken != 0:
-      sock.loop.cancelOp(sock.sendToken)
-      sock.sendToken = 0
-    sock.sendQueue.setLen(0)
-    sock.loop.unregisterFd(sock.fd.int)
-    if sock.fixedFd:
-      sock.loop.unregisterFixedFd(sock.fd.int)
-      sock.fixedFd = false
+  if sock == nil: return
+  if sock.loop != nil and not sock.loop.closed:
+    if sock.fd.int >= 0:
+      when iouEnabled:
+        if sock.recvToken != 0:
+          sock.loop.cancelOp(sock.recvToken)
+          sock.recvToken = 0
+        if sock.sendToken != 0:
+          sock.loop.cancelOp(sock.sendToken)
+          sock.sendToken = 0
+        sock.sendQueue.setLen(0)
+        sock.loop.unregisterFd(sock.fd.int)
+        if sock.fixedFd:
+          sock.loop.unregisterFixedFd(sock.fd.int)
+          sock.fixedFd = false
+      else:
+        sock.loop.unregister(sock.fd.int)
+      sockClose(sock.fd)
+      sock.fd = SocketHandle(-1)
+    if sock.readBuf != nil:
+      releaseBuf(sock.loop, sock.readBuf)
+      sock.readBuf = nil
   else:
-    sock.loop.unregister(sock.fd.int)
-  sockClose(sock.fd)
-  sock.fd = SocketHandle(-1)
-  if sock.readBuf != nil:
-    releaseBuf(sock.loop, sock.readBuf)
+    sock.fd = SocketHandle(-1)
     sock.readBuf = nil
+  if sock.ownsLoop and sock.loop != nil and not sock.loop.closed:
+    # Owned loops are private to this thread; stop/close are safe here.
+    {.cast(gcsafe).}:
+      if sock.loop.isRunning():
+        sock.loop.stop()
+      else:
+        sock.loop.close()
+
+proc getLoop*(sock: UdpSocket): Loop {.inline.} =
+  ## The event loop driving this socket (owned or borrowed).
+  sock.loop
+
+proc run*(sock: UdpSocket) =
+  ## Block driving the socket's event loop until `stop`/`close`.
+  ## When the socket owns its loop, the loop is freed on exit.
+  sock.loop.run()
+  if sock.ownsLoop and sock.loop != nil and not sock.loop.closed:
+    sock.close()
+
+proc stop*(sock: UdpSocket) {.inline.} =
+  ## Stop the socket (use from a callback). Frees an owned loop
+  ## via `close` semantics once `run` returns.
+  sock.close()
 
 # ── I/O ──────────────────────────────────────────────────────────────────────
 
@@ -293,6 +322,7 @@ proc bindUdp*(loop: Loop, address: string, port: int,
   let sock = UdpSocket(
     fd:         fd,
     loop:       loop,
+    ownsLoop:   false,
     onData:     onData,
     readBuf:    acquireBuf(loop),
     readBufLen: DefaultBufSize,
@@ -308,6 +338,18 @@ proc bindUdp*(loop: Loop, address: string, port: int,
         sock.handleRead()
 
   return sock
+
+proc bindUdp*(address: string, port: int,
+              onData: OnUdpData): UdpSocket =
+  ## Bind a UDP socket with its own internal event loop.
+  ## `run` drives it; `close` frees the socket and the owned loop.
+  let loop = newLoop()
+  try:
+    result = bindUdp(loop, address, port, onData)
+    result.ownsLoop = true
+  except CatchableError:
+    loop.close()
+    raise
 
 # ── Client (connect to a specific peer) ──────────────────────────────────────
 
@@ -330,6 +372,7 @@ proc connectUdp*(loop: Loop, address: string, port: int,
   let sock = UdpSocket(
     fd:         fd,
     loop:       loop,
+    ownsLoop:   false,
     onData:     onData,
     readBuf:    acquireBuf(loop),
     readBufLen: DefaultBufSize,
@@ -348,3 +391,15 @@ proc connectUdp*(loop: Loop, address: string, port: int,
           sock.handleRead()
 
   return sock
+
+proc connectUdp*(address: string, port: int,
+                 onData: OnUdpData = nil): UdpSocket =
+  ## Connect a UDP socket with its own internal event loop.
+  ## `run` drives it; `close` frees the socket and the owned loop.
+  let loop = newLoop()
+  try:
+    result = connectUdp(loop, address, port, onData)
+    result.ownsLoop = true
+  except CatchableError:
+    loop.close()
+    raise

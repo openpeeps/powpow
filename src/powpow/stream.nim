@@ -51,6 +51,7 @@ when not defined(windows):
     IoStream* = ref object
       fd*:              int
       loop*:            Loop
+      ownsLoop*:        bool
       state*:           IoStreamState
       onData:           proc(s: IoStream, data: openArray[byte]) {.closure.}
       onClose*:         proc(s: IoStream) {.closure.}
@@ -173,6 +174,7 @@ when not defined(windows):
     result = IoStream(
       fd:              fd,
       loop:            loop,
+      ownsLoop:        false,
       state:           StreamOpen,
       onData:          onData,
       onClose:         onClose,
@@ -186,14 +188,37 @@ when not defined(windows):
     )
     result.rearm()
 
+  proc openStream*(fd: int,
+                  onData: proc(s: IoStream, data: openArray[byte]) {.closure.},
+                  onClose: proc(s: IoStream) {.closure.} = nil): IoStream =
+    ## Open a stream with its own internal event loop.
+    ## `run` drives it; `close` frees the fd and the owned loop.
+    let loop = newLoop()
+    result = openStream(loop, fd, onData, onClose)
+    result.ownsLoop = true
+
+  proc getLoop*(s: IoStream): Loop {.inline.} =
+    ## The event loop driving this stream (owned or borrowed).
+    s.loop
+
   proc close*(s: IoStream) =
     ## Close the stream: unregister, close the fd, return the read buffer,
-    ## then fire `onClose` once. Idempotent.
-    if s.state == StreamClosed: return
+    ## then fire `onClose` once. Idempotent. When the stream owns its loop,
+    ## the loop is stopped (if running) or freed.
+    if s == nil: return
+    if s.state == StreamClosed:
+      if s.ownsLoop and s.loop != nil and not s.loop.closed:
+        if s.loop.isRunning():
+          s.loop.stop()
+        else:
+          s.loop.close()
+      return
     s.state = StreamClosed
+    let loopClosed = s.loop == nil or s.loop.closed
     if s.fd >= 0:
-      s.loop.unregister(s.fd)
-      discard posix.close(s.fd.cint)
+      if not loopClosed:
+        s.loop.unregister(s.fd)
+        discard posix.close(s.fd.cint)
       s.fd = -1
     s.writeBuf.setLen(0)
     s.writePos = 0
@@ -203,6 +228,23 @@ when not defined(windows):
       s.readBuf = nil
     if s.onClose != nil:
       s.onClose(s)
+    if s.ownsLoop and s.loop != nil and not s.loop.closed:
+      if s.loop.isRunning():
+        s.loop.stop()
+      else:
+        s.loop.close()
+
+  proc run*(s: IoStream) =
+    ## Block driving the stream's event loop until `stop`/`close`.
+    ## When the stream owns its loop, the loop is freed on exit.
+    s.loop.run()
+    if s.ownsLoop and s.loop != nil and not s.loop.closed:
+      s.close()
+
+  proc stop*(s: IoStream) {.inline.} =
+    ## Stop the stream (use from a callback). Frees an owned loop
+    ## via `close` semantics once `run` returns.
+    s.close()
 
   proc write*(s: IoStream, data: openArray[byte]): int =
     ## Write `data` to the stream. Tries a direct write, draining until
@@ -283,3 +325,22 @@ when not defined(windows):
                        (if onData2 != nil: onData2 else: onData),
                        (if onClose2 != nil: onClose2 else: onClose))
     (a, b)
+
+  proc newStreamPair*(
+      onData: proc(s: IoStream, data: openArray[byte]) {.closure.},
+      onClose: proc(s: IoStream) {.closure.} = nil,
+      onData2: proc(s: IoStream, data: openArray[byte]) {.closure.} = nil,
+      onClose2: proc(s: IoStream) {.closure.} = nil): (IoStream, IoStream) =
+    ## Create a full-duplex socketpair with its own internal event loop.
+    ## Both ends share one owned loop; `run`/`stop` via `getLoop`.
+    ## Closing either end tears the loop down (the surviving peer's fd
+    ## is reclaimed by that teardown), so close both ends together and
+    ## treat the first `close` as terminal for the pair.
+    let loop = newLoop()
+    try:
+      result = newStreamPair(loop, onData, onClose, onData2, onClose2)
+      result[0].ownsLoop = true
+      result[1].ownsLoop = true
+    except CatchableError:
+      loop.close()
+      raise

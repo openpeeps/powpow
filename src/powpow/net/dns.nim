@@ -962,3 +962,114 @@ proc closeDns*(loop: Loop) =
       if q.timer != TimerId(0):
         r.loop.cancelTimer(q.timer)
     r.queries.clear()
+
+# ── Owned-loop overloads (no Loop param) ──────────────────────────────────────
+#
+# Self-contained one-shot resolvers: each creates a private loop, drives it
+# until the single query settles, then closes it. Fast paths (IP literals,
+# /etc/hosts, warm cache) never apply here — a fresh loop has no cache and
+# hosts-file hits still need no I/O, so those invoke `cb` synchronously
+# without ever entering `run()`.
+
+proc resolveAddrAsync*(address: string; port: int; sockType: cint;
+                       cb: proc(addrs: seq[Sockaddr_storage];
+                                err: string) {.closure.}) =
+  ## Resolve `address:port` with an internal event loop. `cb` runs on that
+  ## loop; the loop is closed before this proc returns.
+  if isIpAddress(address):
+    var addrBuf: Sockaddr_storage
+    try:
+      addrBuf = sockaddrFromIp(address, port)
+    except NetError as e:
+      cb(newSeq[Sockaddr_storage](), e.msg)
+      return
+    cb(@[addrBuf], "")
+    return
+  let h = getHosts().getOrDefault(address.toLowerAscii())
+  if h.len > 0:
+    var outAddrs: seq[Sockaddr_storage]
+    for ip in h:
+      outAddrs.add(makeSockaddr(ip, port))
+    cb(outAddrs, "")
+    return
+  let loop = newLoop()
+  var done = false
+  var outAddrs: seq[Sockaddr_storage]
+  var outErr = ""
+  resolveAddrAsync(loop, address, port, sockType,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      outAddrs = addrs
+      outErr = err
+      done = true
+      loop.stop())
+  while not done:
+    loop.poll()
+  loop.close()
+  cb(outAddrs, outErr)
+
+proc resolveMxAsync*(domain: string; mcb: MxCallback) =
+  ## Resolve MX records with an internal event loop (see above).
+  let loop = newLoop()
+  var done = false
+  var outMxs: seq[MxRecord]
+  var outErr = ""
+  resolveMxAsync(loop, domain,
+    proc(mxs: seq[MxRecord]; err: string) =
+      outMxs = mxs
+      outErr = err
+      done = true
+      loop.stop())
+  while not done:
+    loop.poll()
+  loop.close()
+  mcb(outMxs, outErr)
+
+proc resolveTxtAsync*(hostname: string; tcb: TxtCallback) =
+  ## Resolve TXT records with an internal event loop (see above).
+  let loop = newLoop()
+  var done = false
+  var outTxts: seq[TxtRecord]
+  var outErr = ""
+  resolveTxtAsync(loop, hostname,
+    proc(txts: seq[TxtRecord]; err: string) =
+      outTxts = txts
+      outErr = err
+      done = true
+      loop.stop())
+  while not done:
+    loop.poll()
+  loop.close()
+  tcb(outTxts, outErr)
+
+proc resolveAddrBothAsync*(address: string; port: int; cb: DnsCallback) =
+  ## Resolve both families with an internal event loop (see above).
+  if isIpAddress(address):
+    var addrBuf: Sockaddr_storage
+    try:
+      addrBuf = sockaddrFromIp(address, port)
+    except NetError as e:
+      cb(newSeq[Sockaddr_storage](), e.msg)
+      return
+    cb(@[addrBuf], "")
+    return
+  let h = getHosts().getOrDefault(address.toLowerAscii())
+  if h.len > 0:
+    var outAddrs: seq[Sockaddr_storage]
+    for ip in h:
+      outAddrs.add(makeSockaddr(ip, port))
+    cb(outAddrs, "")
+    return
+  let loop = newLoop()
+  var done = false
+  var outAddrs: seq[Sockaddr_storage]
+  var outErr = ""
+  resolveAddrBothAsync(loop, address, port,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      outAddrs = addrs
+      outErr = err
+      done = true
+      loop.stop())
+  while not done:
+    loop.poll()
+  loop.close()
+  cb(outAddrs, outErr)

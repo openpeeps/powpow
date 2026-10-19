@@ -155,6 +155,7 @@ type
   Connection* = ref object
     fd*:              SocketHandle
     loop*:            Loop
+    ownsLoop*:        bool
     server*:          TcpServer
     state*:           ConnState
     clientIp*:        string
@@ -267,6 +268,7 @@ type
   TcpServer* = ref object
     fd*:       SocketHandle
     loop*:     Loop
+    ownsLoop*: bool
     onAccept:  OnAccept
     onData:    OnData
     onClose*:  OnClose
@@ -432,7 +434,14 @@ when iouEnabled:
     conn.writePos = 0
 
   proc close*(conn: Connection) {.gcsafe.} =
-    if conn.state == Closed: return
+    if conn.state == Closed:
+      if conn.ownsLoop and conn.loop != nil and not conn.loop.closed:
+        {.cast(gcsafe).}:
+          if conn.loop.isRunning():
+            conn.loop.stop()
+          else:
+            conn.loop.close()
+      return
     conn.state = Closed
     if conn.server != nil:
       conn.server.fdConn.del(conn.fd.int)
@@ -467,6 +476,13 @@ when iouEnabled:
       conn.armTlsWrite()
     else:
       conn.finishClose()
+    if conn.ownsLoop and conn.loop != nil and not conn.loop.closed:
+      # Owned loops are private to this thread; stop/close are safe here.
+      {.cast(gcsafe).}:
+        if conn.loop.isRunning():
+          conn.loop.stop()
+        else:
+          conn.loop.close()
 
   proc beginRetire(conn: Connection) {.gcsafe.} =
     ## Hold the connection (and the buffers its ops may still write) until every
@@ -2000,28 +2016,38 @@ when iouEnabled:
       server.armAccept()
 
   proc close*(server: TcpServer) {.gcsafe.} =
-    for conn in server.connPool:
-      if conn.readBuf != nil:
-        releaseBuf(conn.loop, conn.readBuf)
-        conn.readBuf = nil
-    server.connPool.setLen(0)
-    when iouEnabled:
-      for i in 0 ..< AcceptBatch:
-        if server.acceptTokens[i] != 0:
-          server.loop.cancelOp(server.acceptTokens[i])
-          server.acceptTokens[i] = 0
-    if server.fd.int >= 0:
-      server.loop.unregister(server.fd.int)
-      if server.fixedFd:
-        server.loop.unregisterFixedFd(server.fd.int)
-        server.fixedFd = false
-      sockClose(server.fd)
+    if server.loop != nil and not server.loop.closed:
+      for conn in server.connPool:
+        if conn.readBuf != nil:
+          releaseBuf(conn.loop, conn.readBuf)
+          conn.readBuf = nil
+      server.connPool.setLen(0)
+      when iouEnabled:
+        for i in 0 ..< AcceptBatch:
+          if server.acceptTokens[i] != 0:
+            server.loop.cancelOp(server.acceptTokens[i])
+            server.acceptTokens[i] = 0
+      if server.fd.int >= 0:
+        server.loop.unregister(server.fd.int)
+        if server.fixedFd:
+          server.loop.unregisterFixedFd(server.fd.int)
+          server.fixedFd = false
+        sockClose(server.fd)
+        server.fd = SocketHandle(-1)
+    else:
+      server.connPool.setLen(0)
       server.fd = SocketHandle(-1)
     if server.unixPath.len > 0:
       when not defined(windows):
         proc c_unlink(path: cstring): cint {.importc: "unlink", header: "<unistd.h>".}
         discard c_unlink(server.unixPath.cstring)
       server.unixPath.setLen(0)
+    if server.ownsLoop and server.loop != nil and not server.loop.closed:
+      {.cast(gcsafe).}:
+        if server.loop.isRunning():
+          server.loop.stop()
+        else:
+          server.loop.close()
 
   proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
     let conn = server.acquireConnection(clientFd)
@@ -2040,6 +2066,7 @@ when iouEnabled:
     let srv = TcpServer(
       fd:       SocketHandle(-1),
       loop:     loop,
+      ownsLoop: false,
       onAccept: onAccept,
       onData:   onData,
       onClose:  onClose,
@@ -2397,7 +2424,14 @@ else:
   # ── Connection ───────────────────────────────────────────────────────────────
 
   proc close*(conn: Connection) =
-    if conn.state == Closed: return
+    if conn.state == Closed:
+      if conn.ownsLoop and conn.loop != nil and not conn.loop.closed:
+        {.cast(gcsafe).}:
+          if conn.loop.isRunning():
+            conn.loop.stop()
+          else:
+            conn.loop.close()
+      return
     conn.state = Closed
     if conn.server != nil:
       conn.server.fdConn.del(conn.fd.int)
@@ -2415,6 +2449,12 @@ else:
     conn.fd = SocketHandle(-1)   # never close/register a reused fd via stale state
     conn.writeBuf.setLen(0)
     conn.writePos = 0
+    if conn.ownsLoop and conn.loop != nil and not conn.loop.closed:
+      {.cast(gcsafe).}:
+        if conn.loop.isRunning():
+          conn.loop.stop()
+        else:
+          conn.loop.close()
 
   proc queueWrite(conn: Connection, data: openArray[byte]): bool =
     ## Append `data` to the connection's write buffer, closing the connection if
@@ -3380,21 +3420,31 @@ else:
         server.acceptClients()
 
   proc close*(server: TcpServer) =
-    for conn in server.connPool:
-      if conn.readBuf != nil:
-        releaseBuf(conn.loop, conn.readBuf)
-        conn.readBuf = nil
-    server.connPool.setLen(0)
-    if server.fd.int >= 0:
-      server.loop.unregister(server.fd.int)
-      if not server.sharedFd:
-        sockClose(server.fd)
+    if server.loop != nil and not server.loop.closed:
+      for conn in server.connPool:
+        if conn.readBuf != nil:
+          releaseBuf(conn.loop, conn.readBuf)
+          conn.readBuf = nil
+      server.connPool.setLen(0)
+      if server.fd.int >= 0:
+        server.loop.unregister(server.fd.int)
+        if not server.sharedFd:
+          sockClose(server.fd)
+        server.fd = SocketHandle(-1)
+    else:
+      server.connPool.setLen(0)
       server.fd = SocketHandle(-1)
     if server.unixPath.len > 0:
       when not defined(windows):
         proc c_unlink(path: cstring): cint {.importc: "unlink", header: "<unistd.h>".}
         discard c_unlink(server.unixPath.cstring)
       server.unixPath.setLen(0)
+    if server.ownsLoop and server.loop != nil and not server.loop.closed:
+      {.cast(gcsafe).}:
+        if server.loop.isRunning():
+          server.loop.stop()
+        else:
+          server.loop.close()
 
   proc injectFd*(server: TcpServer, clientFd: SocketHandle) =
     let conn = acquireConnection(server, clientFd)
@@ -3415,6 +3465,7 @@ else:
     let srv {.cursor.} = TcpServer(
       fd:       SocketHandle(-1),
       loop:     loop,
+      ownsLoop: false,
       onAccept: onAccept,
       onData:   onData,
       onClose:  onClose,
@@ -3948,3 +3999,158 @@ else:
               if onClose != nil: onClose(conn)
           onConnect(conn)
           if conn.state == Closed: return
+
+# ── Owned-loop overloads (no Loop param) ──────────────────────────────────────
+#
+# Each creates a private loop, marks the handle as its owner, and ties the
+# loop lifetime to the handle: `close` frees the loop (stopping it first when
+# called from a callback), `run` blocks and frees the loop on exit.
+
+proc newTcpServer*(onData: OnData,
+                   onAccept: OnAccept = nil,
+                   onClose: OnClose = nil): TcpServer =
+  ## Create a TCP server with its own internal event loop.
+  ## `run`/`start` drive it; `close`/`stop` free it.
+  ## Use `getLoop` to share the loop with other subsystems.
+  let loop = newLoop()
+  result = newTcpServer(loop, onData, onAccept, onClose)
+  result.ownsLoop = true
+
+proc getLoop*(server: TcpServer): Loop {.inline.} =
+  ## The event loop driving this server (owned or borrowed).
+  server.loop
+
+proc getLoop*(conn: Connection): Loop {.inline.} =
+  ## The event loop driving this connection (owned or borrowed).
+  conn.loop
+
+proc run*(server: TcpServer) =
+  ## Block serving until `stop`/`close`. When the server owns its loop,
+  ## the server is closed and the loop freed on exit.
+  server.loop.run()
+  if server.ownsLoop and server.loop != nil and not server.loop.closed:
+    server.close()
+
+proc run*(conn: Connection) =
+  ## Block driving the connection's loop until `stop`/`close`.
+  ## When the connection owns its loop, the loop is freed on exit.
+  conn.loop.run()
+  if conn.ownsLoop and conn.loop != nil and not conn.loop.closed:
+    conn.close()
+
+proc stop*(server: TcpServer) {.inline.} =
+  ## Stop the server (use from a callback). Frees an owned loop
+  ## via `close` semantics once `run` returns.
+  server.close()
+
+proc stop*(conn: Connection) {.inline.} =
+  ## Stop the connection (use from a callback).
+  conn.close()
+
+proc start*(server: TcpServer, address: string, port: int) =
+  ## Shorthand: `listen(address, port)` then `run()` (blocking).
+  server.listen(address, port)
+  server.run()
+
+when not defined(windows):
+  proc startUnix*(server: TcpServer, path: string; mode: int = 0o660) =
+    ## Shorthand: `listenUnix(path)` then `run()` (blocking).
+    server.listenUnix(path, mode)
+    server.run()
+
+proc connect*(address: string, port: int,
+              onConnect: proc(conn: Connection) {.closure.},
+              onData: OnData,
+              onClose: OnClose = nil,
+              onError: OnError = nil) =
+  ## Blocking TCP connect with an internal event loop. Returns after the
+  ## connection closes (or the connect fails); the loop is freed on exit.
+  ## For concurrent clients sharing one loop, use the `loop`-taking
+  ## overload with an explicit loop instead.
+  let loop = newLoop()
+  var syncFailed = false
+  var syncErr = ""
+  var owned: Connection = nil
+  loop.connect(address, port,
+    onConnect = proc(conn: Connection) =
+      conn.ownsLoop = true
+      owned = conn
+      onConnect(conn),
+    onData = onData,
+    onClose = onClose,
+    onError = proc(err: string) =
+      if loop.isRunning():
+        if onError != nil: onError(err)
+        loop.stop()
+      else:
+        syncFailed = true
+        syncErr = err)
+  if syncFailed:
+    loop.close()
+    if onError != nil: onError(syncErr)
+    return
+  loop.run()
+  if not loop.closed:
+    if owned != nil and owned.state != Closed:
+      owned.ownsLoop = false
+      owned.close()
+    loop.close()
+
+proc connectHe*(address: string, port: int,
+                onConnect: proc(conn: Connection) {.closure.},
+                onData: OnData,
+                onClose: OnClose = nil,
+                onError: OnError = nil) =
+  ## Blocking Happy-Eyeballs connect (RFC 6555) with an internal loop.
+  ## See `connect` for lifetime semantics.
+  let loop = newLoop()
+  var syncFailed = false
+  var syncErr = ""
+  var ownedHe: Connection = nil
+  loop.connectHe(address, port,
+    onConnect = proc(conn: Connection) =
+      conn.ownsLoop = true
+      ownedHe = conn
+      onConnect(conn),
+    onData = onData,
+    onClose = onClose,
+    onError = proc(err: string) =
+      if loop.isRunning():
+        if onError != nil: onError(err)
+        loop.stop()
+      else:
+        syncFailed = true
+        syncErr = err)
+  if syncFailed:
+    loop.close()
+    if onError != nil: onError(syncErr)
+    return
+  loop.run()
+  if not loop.closed:
+    if ownedHe != nil and ownedHe.state != Closed:
+      ownedHe.ownsLoop = false
+      ownedHe.close()
+    loop.close()
+
+when not defined(windows):
+  proc connectUnix*(path: string,
+                    onConnect: proc(conn: Connection) {.closure.},
+                    onData: OnData,
+                    onClose: OnClose = nil) =
+    ## Blocking Unix-socket connect with an internal event loop.
+    ## See `connect` for lifetime semantics.
+    let loop = newLoop()
+    var ownedUx: Connection = nil
+    loop.connectUnix(path,
+      onConnect = proc(conn: Connection) =
+        conn.ownsLoop = true
+        ownedUx = conn
+        onConnect(conn),
+      onData = onData,
+      onClose = onClose)
+    loop.run()
+    if not loop.closed:
+      if ownedUx != nil and ownedUx.state != Closed:
+        ownedUx.ownsLoop = false
+        ownedUx.close()
+      loop.close()

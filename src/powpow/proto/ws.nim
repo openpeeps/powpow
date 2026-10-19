@@ -141,6 +141,7 @@ type
     ## Standalone WebSocket server.
     tcpServer: TcpServer
     loop:      Loop
+    ownsLoop*: bool
     conns:     Table[int, WsConnection]  ## fd → connection
     wsPool:    seq[WsConnection]         ## idle connections recycled across upgrades
     maxFrameSize*: int
@@ -757,6 +758,8 @@ proc armIdleTimeout(ws: WsConnection) =
 
 # ── Standalone WsServer ──────────────────────────────────────────────────────
 
+proc close*(wss: WsServer)
+
 func headerValue(headers: HttpHeaders, key: string): string {.inline.} =
   ## Get a header value or "" if not present.
   if headers.hasKey(key):
@@ -769,6 +772,7 @@ proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer
   WsServer(
     tcpServer: nil,
     loop:      loop,
+    ownsLoop:  false,
     conns:     initTable[int, WsConnection](64),
     wsPool:    @[],
     maxFrameSize: maxFrameSize,
@@ -780,11 +784,32 @@ proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer
 
 proc newWsServer*(maxFrameSize: int = DefaultMaxFrameSize): WsServer =
   ## Create a standalone WebSocket server with its own event loop.
-  newWsServer(newLoop(), maxFrameSize)
+  ## `run`/`start` drive it; `close` frees it. Use `getLoop`
+  ## to share the loop with other subsystems.
+  let loop = newLoop()
+  try:
+    result = newWsServer(loop, maxFrameSize)
+    result.ownsLoop = true
+  except CatchableError:
+    loop.close()
+    raise
+
+proc getLoop*(wss: WsServer): Loop {.inline.} =
+  ## The event loop driving this server (owned or borrowed).
+  wss.loop
 
 proc start*(wss: WsServer) =
   ## Start the server's event loop. Blocks until the loop is stopped.
+  ## When the server owns its loop, the server is closed and the loop
+  ## freed on exit.
   wss.loop.run()
+  if wss.ownsLoop and wss.loop != nil and not wss.loop.closed:
+    wss.close()
+
+proc stop*(wss: WsServer) =
+  ## Stop the server (use from a callback). Frees an owned loop
+  ## via `close` semantics once `run` returns.
+  wss.close()
 
 proc onOpen*(wss: WsServer, cb: WsOpenCb) =
   ## Set the callback for new WebSocket connections.
@@ -1026,15 +1051,19 @@ proc listen*(wss: WsServer, address: string, port: int) =
   wss.tcpServer.listen(address, port)
 
 proc close*(wss: WsServer) =
-  ## Shut down the WebSocket server.
+  ## Shut down the WebSocket server. When the server owns its loop
+  ## (created via `newWsServer()` without a loop), the loop is stopped
+  ## (if running) or freed; a borrowed loop is left alive.
+  if wss == nil: return
   if wss.tcpServer != nil:
     wss.tcpServer.close()
-  for fd, id in wss.handshakeTimers:
-    wss.loop.cancelTimer(id)
+  if wss.loop != nil and not wss.loop.closed:
+    for fd, id in wss.handshakeTimers:
+      wss.loop.cancelTimer(id)
   wss.handshakeTimers.clear()
   wss.handshakeSessions.clear()
   for fd, ws in wss.conns:
-    if ws.idleTimer != TimerId(0):
+    if wss.loop != nil and not wss.loop.closed and ws.idleTimer != TimerId(0):
       wss.loop.cancelTimer(ws.idleTimer)
     # notifyClose-guarded conns already reported their close (e.g. a close
     # frame); don't overwrite a real close code with 1001 on shutdown.
@@ -1044,6 +1073,11 @@ proc close*(wss: WsServer) =
     wss.releaseWsConnection(ws)
   wss.conns.clear()
   wss.wsPool.setLen(0)
+  if wss.ownsLoop and wss.loop != nil and not wss.loop.closed:
+    if wss.loop.isRunning():
+      wss.loop.stop()
+    else:
+      wss.loop.close()
 
 # ── HTTP → WebSocket upgrade ─────────────────────────────────────────────────
 

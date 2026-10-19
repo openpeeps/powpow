@@ -137,6 +137,7 @@ type
 
   H2Server* = ref object
     loop*: Loop
+    ownsLoop*: bool
     tcp*: TcpServer
     handler*: OnH2RequestCallback
     sslCtx*: SslContext
@@ -1483,7 +1484,7 @@ proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
   ## A TLS server advertises ALPN `["h2"]` only: peers negotiating anything
   ## else are closed after the handshake (H1 fallback on the same port is
   ## future work).
-  let s = H2Server(loop: loop, handler: handler, sslCtx: sslCtx,
+  let s = H2Server(loop: loop, ownsLoop: false, handler: handler, sslCtx: sslCtx,
                    conns: initTable[int, H2Conn](64),
                    maxConcurrent: maxConcurrent,
                    maxHeaderList: maxHeaderList, maxBody: maxBody)
@@ -1531,6 +1532,10 @@ proc listen*(s: H2Server, address: string, port: int) =
   s.tcp.listen(address, port)
 
 proc close*(s: H2Server) =
+  ## Shut down the H2 server. When the server owns its loop (created via
+  ## `newH2Server()` without a loop), the loop is stopped (if running)
+  ## or freed; a borrowed loop is left alive.
+  if s == nil: return
   for _, h2 in s.conns:
     if not h2.goawaySent and h2.state != CsClosed:
       h2.goawaySent = true
@@ -1539,4 +1544,48 @@ proc close*(s: H2Server) =
     h2.state = CsClosed
     h2.conn.close()
   s.conns.clear()
+  s.tcp.close()
+  if s.ownsLoop and s.loop != nil and not s.loop.closed:
+    if s.loop.isRunning():
+      s.loop.stop()
+    else:
+      s.loop.close()
+
+proc newH2Server*(handler: OnH2RequestCallback,
+                  maxConcurrent = H2DefaultMaxConcurrent,
+                  maxHeaderList = H2DefaultMaxHeaderList,
+                  maxBody = H2DefaultMaxBody,
+                  sslCtx: SslContext = nil): H2Server =
+  ## Create an h2c server with its own internal event loop.
+  ## `run` drives it; `close` frees it. Use `getLoop`
+  ## to share the loop with other subsystems.
+  let loop = newLoop()
+  try:
+    result = newH2Server(loop, handler, maxConcurrent,
+                         maxHeaderList, maxBody, sslCtx)
+    result.ownsLoop = true
+  except CatchableError:
+    loop.close()
+    raise
+
+proc getLoop*(s: H2Server): Loop {.inline.} =
+  ## The event loop driving this server (owned or borrowed).
+  s.loop
+
+proc run*(s: H2Server) =
+  ## Block serving until `stop`/`close`. When the server owns its loop,
+  ## the server is closed and the loop freed on exit.
+  s.loop.run()
+  if s.ownsLoop and s.loop != nil and not s.loop.closed:
+    s.close()
+
+proc stop*(s: H2Server) {.inline.} =
+  ## Stop the server (use from a callback). Frees an owned loop
+  ## via `close` semantics once `run` returns.
+  s.close()
+
+proc start*(s: H2Server, address: string, port: int) =
+  ## Shorthand: `listen(address, port)` then `run()` (blocking).
+  s.listen(address, port)
+  s.run()
   s.tcp.close()

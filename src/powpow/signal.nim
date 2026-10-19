@@ -75,21 +75,60 @@ type
     id: int
     alive: bool
 
-  SignalRelay   = ref object
-    loop: Loop
+  SignalRelay*  = ref object
+    loop*: Loop
+    ownsLoop*: bool
     listeners: seq[seq[SignalListener]]
     nextId: int
 
 proc newSignalRelay*(loop: Loop, maxSignals: int): SignalRelay =
   SignalRelay(
     loop: loop,
+    ownsLoop: false,
     listeners: newSeq[seq[SignalListener]](maxSignals),
     nextId: 1,
   )
 
+proc newSignalRelay*(maxSignals: int): SignalRelay =
+  ## Create a relay with its own internal event loop.
+  ## `close` frees the owned loop; `run` drives it.
+  let loop = newLoop()
+  result = newSignalRelay(loop, maxSignals)
+  result.ownsLoop = true
+
 proc newOsSignalRelay*(loop: Loop): SignalRelay =
   ## A relay sized to cover real OS signal numbers (including SIGTERM = 15).
   newSignalRelay(loop, 32)
+
+proc newOsSignalRelay*(): SignalRelay =
+  ## Create an OS-signal relay with its own internal event loop.
+  newSignalRelay(32)
+
+proc getLoop*(relay: SignalRelay): Loop {.inline.} =
+  ## The event loop driving this relay (owned or borrowed).
+  relay.loop
+
+proc close*(relay: SignalRelay) =
+  ## Release the relay. When the relay owns its loop, the loop is
+  ## stopped (if running) or freed. Borrowed loops are left alive.
+  if relay == nil: return
+  if relay.ownsLoop and relay.loop != nil and not relay.loop.closed:
+    if relay.loop.isRunning():
+      relay.loop.stop()
+    else:
+      relay.loop.close()
+
+proc run*(relay: SignalRelay) =
+  ## Block driving the relay's event loop until `stop`/`close`.
+  ## When the relay owns its loop, the loop is freed on exit.
+  relay.loop.run()
+  if relay.ownsLoop and relay.loop != nil and not relay.loop.closed:
+    relay.close()
+
+proc stop*(relay: SignalRelay) {.inline.} =
+  ## Stop the relay (use from a callback). Frees an owned loop
+  ## via `close` semantics once `run` returns.
+  relay.close()
 
 proc listen*(relay: SignalRelay, signalId: int, cb: Callback): ListenerHandle =
   let id = relay.nextId
