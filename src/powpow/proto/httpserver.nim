@@ -124,6 +124,10 @@ type
 
 const
   DefaultKeepAliveMs* = 5_000
+  DefaultReadTimeoutMs* = 30_000
+    ## Mid-request/partial-request timeout matching `newHttpServer`.
+  DefaultTimeoutSweepMs* = 200
+    ## Lazy timeout-sweep interval matching `newHttpServer`.
   MaxParserPoolSize {.intdefine.} = 2048
     ## Idle HTTP parsers recycled across connections. Override at compile time
     ## (`-d:MaxParserPoolSize=4096`) when serving more concurrent connections
@@ -879,6 +883,28 @@ proc releaseRequest(server: HttpServer, req: HttpRequest) =
 
 # ── HttpServer lifecycle ─────────────────────────────────────────────────────
 
+type
+  HttpServerOptions* = object
+    ## Operator-tunable runtime knobs for `HttpServer`. Zero values mean
+    ## "unlimited/disabled" exactly as on the server fields, except
+    ## `keepAliveMs`, `readTimeoutMs` and `timeoutSweepMs` — start from
+    ## `defaultHttpServerOptions()` to keep the powpow defaults there.
+    maxBodySize*, maxStreamBodySize*: int64
+      ## Total request-body caps (bytes).
+    maxFileSize*, maxFieldSize*: int64
+      ## Per-file / per-text-field multipart caps (bytes).
+    maxConnections*, maxPipelineDepth*: int
+    readTimeoutMs*, wsIdleTimeoutMs*, timeoutSweepMs*, keepAliveMs*: int
+      ## Millisecond timeouts. `keepAliveMs = 0` disables idle close.
+
+proc defaultHttpServerOptions*(): HttpServerOptions =
+  ## `HttpServerOptions` matching the `newHttpServer` constructor defaults.
+  HttpServerOptions(
+    readTimeoutMs: DefaultReadTimeoutMs,
+    timeoutSweepMs: DefaultTimeoutSweepMs,
+    keepAliveMs: DefaultKeepAliveMs
+  )
+
 proc populatePools*(server: HttpServer; poolSize = 256)
 
 proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
@@ -994,6 +1020,21 @@ proc wsPoolAdd*(server: HttpServer, ws: ref RootObj) {.inline.} =
 proc setKeepAliveTimeout*(server: HttpServer, ms: int) =
   ## Set the keep-alive idle timeout in milliseconds. 0 disables it.
   server.keepAliveMs = ms
+
+proc applyOptions*(server: HttpServer, opts: HttpServerOptions) =
+  ## Applies `opts` to `server`, overwriting every knob literally.
+  ## Start from `defaultHttpServerOptions()` and override individual
+  ## fields to keep the powpow defaults for the rest.
+  server.maxBodySize = opts.maxBodySize
+  server.maxStreamBodySize = opts.maxStreamBodySize
+  server.maxFileSize = opts.maxFileSize
+  server.maxFieldSize = opts.maxFieldSize
+  server.maxConnections = opts.maxConnections
+  server.maxPipelineDepth = opts.maxPipelineDepth
+  server.readTimeoutMs = opts.readTimeoutMs
+  server.wsIdleTimeoutMs = opts.wsIdleTimeoutMs
+  server.timeoutSweepMs = opts.timeoutSweepMs
+  server.setKeepAliveTimeout(opts.keepAliveMs)
 
 proc acquireConnHttp(server: HttpServer, conn: Connection): ConnHttp =
   ## Take a per-connection session from the pool (or allocate). The parser is

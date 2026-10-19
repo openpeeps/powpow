@@ -71,12 +71,14 @@ when not defined(windows):
       address: string
       ports:   seq[int]
       listenFds: seq[SocketHandle]  # shared-socket mode; empty = bind per worker
+      options: HttpServerOptions    # applied to each worker's HttpServer
 
     WorkerArg = ptr WorkerArgObj
 
     MultiThreadHttpServer* = ref object
       numThreads*: int
       handler:     OnRequestCallback
+      options:     HttpServerOptions
       onStartCb:   proc(numThreads: int) {.gcsafe.}
       threads:     seq[Thread[WorkerArg]]
       contexts:    seq[WorkerCtx]
@@ -108,11 +110,13 @@ when not defined(windows):
       let address = arg.address
       let ports   = arg.ports
       let listenFds = arg.listenFds
+      let opts = arg.options
       freeWorkerArg(arg)
 
       let loop = newLoop()
       let server = newHttpServer(loop, populate = false)
       server.handler = handler
+      server.applyOptions(opts)
 
       loop.register(ctx.wakeRd.int, {Read}) do (fd: int, ev: set[EventType]):
         var buf: array[256, byte]
@@ -142,11 +146,13 @@ when not defined(windows):
       server.close()
       loop.close()
 
-  proc newHttpServer*(numThreads: int): MultiThreadHttpServer =
+  proc newHttpServer*(numThreads: int,
+      options = defaultHttpServerOptions()): MultiThreadHttpServer =
     let n = if numThreads > 0: numThreads else: countProcessors()
     MultiThreadHttpServer(
       numThreads: n,
       handler:    nil,
+      options:    options,
       threads:    newSeq[Thread[WorkerArg]](n),
       contexts:   @[],
       running:    false,
@@ -186,6 +192,7 @@ when not defined(windows):
         arg.address = address
         arg.ports   = @ports
         arg.listenFds = if sharedFdPath: sharedFds else: @[]
+        arg.options = srv.options
         createThread(srv.threads[i], workerMain, arg)
 
       if srv.onStartCb != nil: srv.onStartCb(srv.numThreads)
