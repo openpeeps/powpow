@@ -44,7 +44,7 @@
 ## - Reads /etc/hosts and /etc/resolv.conf (system resolver config)
 ## - A + AAAA queries with A-fallback; retries with timeout/attempts
 ## - TTL-based result cache + negative caching
-## - `resolveAddrAsync` for users; `connect` uses it automatically
+## - `resolveAddr` (callback) / `resolveAddrAsync` (awaitable Future) for users; `connect` uses it automatically
 ## - Numeric IP literals resolve inline (zero DNS I/O)
 ##
 ## ### OS Signals (`signal.nim`)

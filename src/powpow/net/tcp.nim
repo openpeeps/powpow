@@ -2094,7 +2094,7 @@ when iouEnabled:
                 onData: OnData,
                 onClose: OnClose = nil,
                 onError: OnError = nil) =
-    resolveAddrAsync(loop, address, port, SOCK_STREAM,
+    resolveAddr(loop, address, port, SOCK_STREAM,
       proc(addrs: seq[Sockaddr_storage]; err: string) =
         if err.len > 0:
           if onError != nil:
@@ -2195,7 +2195,7 @@ when iouEnabled:
     ## families are resolved, the first attempt starts immediately and further
     ## addresses join every ConnectionAttemptDelayMs while earlier attempts are
     ## still connecting. The first successful connect wins.
-    resolveAddrBothAsync(loop, address, port,
+    resolveAddrBoth(loop, address, port,
       proc(addrs: seq[Sockaddr_storage]; err: string) =
         if err.len > 0:
           if onError != nil:
@@ -3527,7 +3527,7 @@ else:
     ## if one is unreachable the next is attempted before `onError` fires.
     ## `onError` reports DNS / socket() / connect() failures; when nil these are
     ## dropped silently (matching the existing non-blocking connect failure path).
-    resolveAddrAsync(loop, address, port, SOCK_STREAM,
+    resolveAddr(loop, address, port, SOCK_STREAM,
       proc(addrs: seq[Sockaddr_storage]; err: string) =
         if err.len > 0:
           if onError != nil:
@@ -3686,7 +3686,7 @@ else:
     ## families are resolved, the first attempt starts immediately and further
     ## addresses join every ConnectionAttemptDelayMs while earlier attempts are
     ## still connecting. The first successful connect wins.
-    resolveAddrBothAsync(loop, address, port,
+    resolveAddrBoth(loop, address, port,
       proc(addrs: seq[Sockaddr_storage]; err: string) =
         if err.len > 0:
           if onError != nil:

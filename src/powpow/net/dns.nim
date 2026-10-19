@@ -24,7 +24,7 @@
 ##     `SENDMSG` — with `IORING_FEAT_FAST_POLL` the kernel arms an internal
 ##     poll when the socket is not ready, so no readiness watcher is needed).
 
-import std/[tables, os, strutils]
+import std/[tables, os, strutils, asyncdispatch]
 import ../types
 import ../loop
 import common
@@ -51,6 +51,11 @@ else:
   const ResolvConfPath = "/etc/resolv.conf"
 
 type
+  DnsError* = object of CatchableError
+    ## Raised by the awaitable `resolve*Async` procs when resolution fails
+    ## (NXDOMAIN, timeout, no records). The callback API reports the same
+    ## failures as an `err: string` instead.
+
   DnsCallback* = proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.}
 
   MxRecord* = object
@@ -694,7 +699,7 @@ proc getResolver(loop: Loop): DnsResolver =
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-proc resolveAddrAsync*(loop: Loop; address: string; port: int;
+proc resolveAddr*(loop: Loop; address: string; port: int;
                        sockType: cint;
                        cb: proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.}) =
   ## Resolve `address:port` asynchronously on `loop`. `cb` runs on the loop
@@ -748,7 +753,7 @@ proc resolveAddrAsync*(loop: Loop; address: string; port: int;
     return
   startQuery(resolver, address, port, sockType, DnsQtypeAAAA, cb)
 
-proc resolveMxAsync*(loop: Loop; domain: string; mcb: MxCallback) =
+proc resolveMx*(loop: Loop; domain: string; mcb: MxCallback) =
   ## Resolve MX records for `domain` asynchronously on `loop`. `mcb` runs on
   ## the loop thread with the records sorted by ascending preference (or an
   ## empty seq when the name exists but publishes no MX — callers decide
@@ -776,7 +781,7 @@ proc resolveMxAsync*(loop: Loop; domain: string; mcb: MxCallback) =
     return
   startMxQuery(resolver, domain, mcb)
 
-proc resolveTxtAsync*(loop: Loop; hostname: string; tcb: TxtCallback) =
+proc resolveTxt*(loop: Loop; hostname: string; tcb: TxtCallback) =
   ## Resolve TXT records for `hostname` asynchronously on `loop`. `tcb` runs
   ## on the loop thread with ALL TXT records found (or an empty seq plus an
   ## empty `err` when the name exists but publishes no TXT records — the
@@ -803,7 +808,7 @@ proc resolveTxtAsync*(loop: Loop; hostname: string; tcb: TxtCallback) =
     return
   startTxtQuery(resolver, hostname, tcb)
 
-proc resolveAddrBothAsync*(loop: Loop; address: string; port: int;
+proc resolveAddrBoth*(loop: Loop; address: string; port: int;
                            cb: DnsCallback) =
   ## Resolve both address families for `address` and deliver all socket
   ## addresses ordered IPv6-first (RFC 8305 family-block order) — the input
@@ -963,113 +968,199 @@ proc closeDns*(loop: Loop) =
         r.loop.cancelTimer(q.timer)
     r.queries.clear()
 
-# ── Owned-loop overloads (no Loop param) ──────────────────────────────────────
+# ── Awaitable API (std/asyncdispatch Futures) ─────────────────────────────────
 #
-# Self-contained one-shot resolvers: each creates a private loop, drives it
-# until the single query settles, then closes it. Fast paths (IP literals,
-# /etc/hosts, warm cache) never apply here — a fresh loop has no cache and
-# hosts-file hits still need no I/O, so those invoke `cb` synchronously
-# without ever entering `run()`.
+# `resolve*Async` procs return a `Future` for use with `await`/`waitFor`.
+# Loop-taking forms wrap the callback API on the caller's loop (the caller
+# drives it); loop-less forms own a private loop, pumped cooperatively with
+# the asyncdispatch dispatcher until the query settles, then closed.
+# Failures raise `DnsError`; the callback API reports them as `err` instead.
 
-proc resolveAddrAsync*(address: string; port: int; sockType: cint;
-                       cb: proc(addrs: seq[Sockaddr_storage];
-                                err: string) {.closure.}) =
-  ## Resolve `address:port` with an internal event loop. `cb` runs on that
-  ## loop; the loop is closed before this proc returns.
+proc resolveAddrAsync*(loop: Loop; address: string; port: int;
+                       sockType: cint): Future[seq[Sockaddr_storage]] =
+  ## Awaitable address resolution on the caller's `loop`. The caller must keep
+  ## driving `loop` (e.g. it is already `run()`ning) until the future completes.
+  ## Numeric IP literals, `/etc/hosts` hits and warm-cache hits complete
+  ## immediately without any DNS I/O.
+  let fut = newFuture[seq[Sockaddr_storage]]()
+  resolveAddr(loop, address, port, sockType,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      if not fut.finished:
+        if err.len > 0:
+          fut.fail(newException(DnsError, err))
+        else:
+          fut.complete(addrs))
+  fut
+
+proc resolveAddrAsync*(address: string; port: int;
+                       sockType: cint): Future[seq[Sockaddr_storage]] =
+  ## Self-contained awaitable resolution with an internal event loop.
+  ## `await resolveAddrAsync("example.com", 443, SOCK_STREAM)` — the loop is
+  ## closed before the future completes.
+  let fut = newFuture[seq[Sockaddr_storage]]()
   if isIpAddress(address):
-    var addrBuf: Sockaddr_storage
     try:
-      addrBuf = sockaddrFromIp(address, port)
+      fut.complete(@[sockaddrFromIp(address, port)])
     except NetError as e:
-      cb(newSeq[Sockaddr_storage](), e.msg)
-      return
-    cb(@[addrBuf], "")
-    return
+      fut.fail(newException(DnsError, e.msg))
+    return fut
   let h = getHosts().getOrDefault(address.toLowerAscii())
   if h.len > 0:
     var outAddrs: seq[Sockaddr_storage]
     for ip in h:
       outAddrs.add(makeSockaddr(ip, port))
-    cb(outAddrs, "")
-    return
+    fut.complete(outAddrs)
+    return fut
   let loop = newLoop()
   var done = false
   var outAddrs: seq[Sockaddr_storage]
   var outErr = ""
-  resolveAddrAsync(loop, address, port, sockType,
+  resolveAddr(loop, address, port, sockType,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       outAddrs = addrs
       outErr = err
-      done = true
-      loop.stop())
-  while not done:
-    loop.poll()
-  loop.close()
-  cb(outAddrs, outErr)
+      done = true)
+  proc pump() {.async.} =
+    ## Drive the private loop in lockstep with the asyncdispatch dispatcher
+    ## until the query settles (same pattern as `AsyncHttpClient.request`).
+    while not done:
+      loop.poll(0)
+      if not done:
+        await sleepAsync(1)
+    loop.close()
+    if outErr.len > 0:
+      fut.fail(newException(DnsError, outErr))
+    else:
+      fut.complete(outAddrs)
+  discard pump()
+  fut
 
-proc resolveMxAsync*(domain: string; mcb: MxCallback) =
-  ## Resolve MX records with an internal event loop (see above).
+proc resolveMxAsync*(loop: Loop; domain: string): Future[seq[MxRecord]] =
+  ## Awaitable MX resolution on the caller's `loop` (see `resolveAddrAsync`).
+  ## An empty result with no error means the name exists but publishes no MX
+  ## (RFC 5321 §5.1 fallback applies); NXDOMAIN/timeout raise `DnsError`.
+  let fut = newFuture[seq[MxRecord]]()
+  resolveMx(loop, domain,
+    proc(mxs: seq[MxRecord]; err: string) =
+      if not fut.finished:
+        if err.len > 0:
+          fut.fail(newException(DnsError, err))
+        else:
+          fut.complete(mxs))
+  fut
+
+proc resolveMxAsync*(domain: string): Future[seq[MxRecord]] =
+  ## Self-contained awaitable MX resolution with an internal event loop.
+  let fut = newFuture[seq[MxRecord]]()
   let loop = newLoop()
   var done = false
   var outMxs: seq[MxRecord]
   var outErr = ""
-  resolveMxAsync(loop, domain,
+  resolveMx(loop, domain,
     proc(mxs: seq[MxRecord]; err: string) =
       outMxs = mxs
       outErr = err
-      done = true
-      loop.stop())
-  while not done:
-    loop.poll()
-  loop.close()
-  mcb(outMxs, outErr)
+      done = true)
+  proc pump() {.async.} =
+    while not done:
+      loop.poll(0)
+      if not done:
+        await sleepAsync(1)
+    loop.close()
+    if outErr.len > 0:
+      fut.fail(newException(DnsError, outErr))
+    else:
+      fut.complete(outMxs)
+  discard pump()
+  fut
 
-proc resolveTxtAsync*(hostname: string; tcb: TxtCallback) =
-  ## Resolve TXT records with an internal event loop (see above).
+proc resolveTxtAsync*(loop: Loop; hostname: string): Future[seq[TxtRecord]] =
+  ## Awaitable TXT resolution on the caller's `loop` (see `resolveAddrAsync`).
+  let fut = newFuture[seq[TxtRecord]]()
+  resolveTxt(loop, hostname,
+    proc(txts: seq[TxtRecord]; err: string) =
+      if not fut.finished:
+        if err.len > 0:
+          fut.fail(newException(DnsError, err))
+        else:
+          fut.complete(txts))
+  fut
+
+proc resolveTxtAsync*(hostname: string): Future[seq[TxtRecord]] =
+  ## Self-contained awaitable TXT resolution with an internal event loop.
+  let fut = newFuture[seq[TxtRecord]]()
   let loop = newLoop()
   var done = false
   var outTxts: seq[TxtRecord]
   var outErr = ""
-  resolveTxtAsync(loop, hostname,
+  resolveTxt(loop, hostname,
     proc(txts: seq[TxtRecord]; err: string) =
       outTxts = txts
       outErr = err
-      done = true
-      loop.stop())
-  while not done:
-    loop.poll()
-  loop.close()
-  tcb(outTxts, outErr)
+      done = true)
+  proc pump() {.async.} =
+    while not done:
+      loop.poll(0)
+      if not done:
+        await sleepAsync(1)
+    loop.close()
+    if outErr.len > 0:
+      fut.fail(newException(DnsError, outErr))
+    else:
+      fut.complete(outTxts)
+  discard pump()
+  fut
 
-proc resolveAddrBothAsync*(address: string; port: int; cb: DnsCallback) =
-  ## Resolve both families with an internal event loop (see above).
+proc resolveAddrBothAsync*(loop: Loop; address: string; port: int):
+    Future[seq[Sockaddr_storage]] =
+  ## Awaitable dual-family resolution on the caller's `loop`: all socket
+  ## addresses ordered IPv6-first (RFC 8305 family-block order). If one family
+  ## fails the other is still delivered; both empty raises `DnsError`.
+  let fut = newFuture[seq[Sockaddr_storage]]()
+  resolveAddrBoth(loop, address, port,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      if not fut.finished:
+        if err.len > 0:
+          fut.fail(newException(DnsError, err))
+        else:
+          fut.complete(addrs))
+  fut
+
+proc resolveAddrBothAsync*(address: string; port: int):
+    Future[seq[Sockaddr_storage]] =
+  ## Self-contained awaitable dual-family resolution with an internal loop.
+  let fut = newFuture[seq[Sockaddr_storage]]()
   if isIpAddress(address):
-    var addrBuf: Sockaddr_storage
     try:
-      addrBuf = sockaddrFromIp(address, port)
+      fut.complete(@[sockaddrFromIp(address, port)])
     except NetError as e:
-      cb(newSeq[Sockaddr_storage](), e.msg)
-      return
-    cb(@[addrBuf], "")
-    return
+      fut.fail(newException(DnsError, e.msg))
+    return fut
   let h = getHosts().getOrDefault(address.toLowerAscii())
   if h.len > 0:
     var outAddrs: seq[Sockaddr_storage]
     for ip in h:
       outAddrs.add(makeSockaddr(ip, port))
-    cb(outAddrs, "")
-    return
+    fut.complete(outAddrs)
+    return fut
   let loop = newLoop()
   var done = false
   var outAddrs: seq[Sockaddr_storage]
   var outErr = ""
-  resolveAddrBothAsync(loop, address, port,
+  resolveAddrBoth(loop, address, port,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       outAddrs = addrs
       outErr = err
-      done = true
-      loop.stop())
-  while not done:
-    loop.poll()
-  loop.close()
-  cb(outAddrs, outErr)
+      done = true)
+  proc pump() {.async.} =
+    while not done:
+      loop.poll(0)
+      if not done:
+        await sleepAsync(1)
+    loop.close()
+    if outErr.len > 0:
+      fut.fail(newException(DnsError, outErr))
+    else:
+      fut.complete(outAddrs)
+  discard pump()
+  fut

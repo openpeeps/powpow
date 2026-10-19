@@ -175,7 +175,7 @@ test "test_dns_ip_literal_fast_path":
   var got: seq[Sockaddr_storage] = @[]
   var errMsg = ""
   var called = false
-  loop.resolveAddrAsync("10.1.2.3", 8080, SOCK_STREAM,
+  loop.resolveAddr("10.1.2.3", 8080, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       got = addrs
       errMsg = err
@@ -193,7 +193,7 @@ test "test_dns_localhost_via_hosts":
   var got: seq[Sockaddr_storage] = @[]
   var errMsg = ""
   var called = false
-  loop.resolveAddrAsync("localhost", 80, SOCK_STREAM,
+  loop.resolveAddr("localhost", 80, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       got = addrs
       errMsg = err
@@ -214,7 +214,7 @@ test "test_dns_synthetic_a_fallback":
   var got: seq[Sockaddr_storage] = @[]
   var errMsg = ""
   var called = false
-  loop.resolveAddrAsync("test.example", 5000, SOCK_STREAM,
+  loop.resolveAddr("test.example", 5000, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       got = addrs
       errMsg = err
@@ -245,7 +245,7 @@ test "test_dns_nxdomain":
 
   var errMsg = ""
   var called = false
-  loop.resolveAddrAsync("bad.example", 80, SOCK_STREAM,
+  loop.resolveAddr("bad.example", 80, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       errMsg = err
       called = true
@@ -267,7 +267,7 @@ test "test_dns_timeout":
 
   var errMsg = ""
   var called = false
-  loop.resolveAddrAsync("drop.example", 80, SOCK_STREAM,
+  loop.resolveAddr("drop.example", 80, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       errMsg = err
       called = true
@@ -287,7 +287,7 @@ test "test_dns_cache":
   fake.answers["test.example"] = @["10.0.0.9"]
 
   var called = false
-  loop.resolveAddrAsync("test.example", 80, SOCK_STREAM,
+  loop.resolveAddr("test.example", 80, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) = called = true)
   discard pollUntil(loop, proc(): bool = called, 20_000)
   assert called, "first resolve should complete"
@@ -295,7 +295,7 @@ test "test_dns_cache":
   assert queriesAfterFirst >= 1, "expected at least one query"
 
   called = false
-  loop.resolveAddrAsync("test.example", 80, SOCK_STREAM,
+  loop.resolveAddr("test.example", 80, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) = called = true)
   discard pollUntil(loop, proc(): bool = called, 20_000)
   assert called, "cached resolve should complete"
@@ -360,7 +360,7 @@ test "test_dns_loop_not_blocked":
   var ticks = 0
   var errMsg = ""
   var done = false
-  loop.resolveAddrAsync("slow.example", 80, SOCK_STREAM,
+  loop.resolveAddr("slow.example", 80, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       errMsg = err
       done = true
@@ -385,7 +385,7 @@ test "test_dns_multi_record":
   var got: seq[Sockaddr_storage] = @[]
   var errMsg = ""
   var called = false
-  loop.resolveAddrAsync("multi.example", 443, SOCK_STREAM,
+  loop.resolveAddr("multi.example", 443, SOCK_STREAM,
     proc(addrs: seq[Sockaddr_storage]; err: string) =
       got = addrs
       errMsg = err
@@ -416,7 +416,7 @@ test "test_dns_txt_single_record":
   var got: seq[TxtRecord] = @[]
   var errMsg = ""
   var called = false
-  loop.resolveTxtAsync("_dmarc.example.com") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("_dmarc.example.com") do (records: seq[TxtRecord]; err: string):
     got = records
     errMsg = err
     called = true
@@ -442,7 +442,7 @@ test "test_dns_txt_multiple_strings_concatenated":
 
   var got: seq[TxtRecord] = @[]
   var called = false
-  loop.resolveTxtAsync("example.com") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("example.com") do (records: seq[TxtRecord]; err: string):
     got = records
     called = true
   discard pollUntil(loop, proc(): bool = called, 20_000)
@@ -464,7 +464,7 @@ test "test_dns_txt_no_records":
   var got: seq[TxtRecord] = @[]
   var errMsg = ""
   var called = false
-  loop.resolveTxtAsync("notxt.example") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("notxt.example") do (records: seq[TxtRecord]; err: string):
     got = records
     errMsg = err
     called = true
@@ -484,7 +484,7 @@ test "test_dns_txt_nxdomain":
 
   var errMsg = ""
   var called = false
-  loop.resolveTxtAsync("dead.example") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("dead.example") do (records: seq[TxtRecord]; err: string):
     errMsg = err
     called = true
   discard pollUntil(loop, proc(): bool = called, 20_000)
@@ -502,7 +502,7 @@ test "test_dns_txt_cache":
   fake.txtAnswers["cached.example"] = @["v=spf1 +all"]
 
   var called = false
-  loop.resolveTxtAsync("cached.example") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("cached.example") do (records: seq[TxtRecord]; err: string):
     called = true
   discard pollUntil(loop, proc(): bool = called, 20_000)
   assert called, "first TXT resolve should complete"
@@ -510,7 +510,7 @@ test "test_dns_txt_cache":
   assert queriesAfterFirst >= 1, "expected at least one query"
 
   called = false
-  loop.resolveTxtAsync("cached.example") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("cached.example") do (records: seq[TxtRecord]; err: string):
     called = true
   discard pollUntil(loop, proc(): bool = called, 20_000)
   assert called, "cached TXT resolve should complete"
@@ -530,7 +530,7 @@ test "test_dns_txt_empty_string":
 
   var got: seq[TxtRecord] = @[]
   var called = false
-  loop.resolveTxtAsync("empty.example") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("empty.example") do (records: seq[TxtRecord]; err: string):
     got = records
     called = true
   discard pollUntil(loop, proc(): bool = called, 20_000)
@@ -555,7 +555,7 @@ test "test_dns_txt_dmarc_record":
   var got: seq[TxtRecord] = @[]
   var errMsg = ""
   var called = false
-  loop.resolveTxtAsync("_dmarc.paypal.com") do (records: seq[TxtRecord]; err: string):
+  loop.resolveTxt("_dmarc.paypal.com") do (records: seq[TxtRecord]; err: string):
     got = records
     errMsg = err
     called = true
