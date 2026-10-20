@@ -9,5 +9,10 @@ nim	fseRevoke	powpow/fswatch.html#fseRevoke	FileSystemEvent.fseRevoke		19
 nim	FileSystemEvent	powpow/fswatch.html#FileSystemEvent	enum FileSystemEvent		19
 nim	FileWatcherCb	powpow/fswatch.html#FileWatcherCb	type FileWatcherCb		28
 nim	FileWatcher	powpow/fswatch.html#FileWatcher	type FileWatcher		30
-nim	newFileWatcher	powpow/fswatch.html#newFileWatcher,Loop,string,FileWatcherCb	proc newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher		104
-nim	close	powpow/fswatch.html#close,FileWatcher	proc close(w: FileWatcher)		177
+nim	newFileWatcher	powpow/fswatch.html#newFileWatcher,Loop,string,FileWatcherCb	proc newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher		105
+nim	newFileWatcher	powpow/fswatch.html#newFileWatcher,string,FileWatcherCb	proc newFileWatcher(path: string; callback: FileWatcherCb): FileWatcher		178
+nim	getLoop	powpow/fswatch.html#getLoop,FileWatcher	proc getLoop(w: FileWatcher): Loop		190
+nim	close	powpow/fswatch.html#close,FileWatcher	proc close(w: FileWatcher)		194
+nim	run	powpow/fswatch.html#run,FileWatcher	proc run(w: FileWatcher)		217
+nim	stop	powpow/fswatch.html#stop,FileWatcher	proc stop(w: FileWatcher)		225
+nimgrp	newfilewatcher	powpow/fswatch.html#newFileWatcher-procs-all	proc		105

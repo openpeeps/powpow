@@ -66,6 +66,7 @@
   fseRevoke">FileSystemEvent</a></li>
 <li><a class="reference" href="#FileWatcher" title="FileWatcher = ref object
   loop*: Loop
+  ownsLoop*: bool
   path*: string
   callback*: FileWatcherCb
   when defined(macosx) or defined(bsd):
@@ -83,8 +84,21 @@
   <li><a class="reference" href="#close%2CFileWatcher" title="close(w: FileWatcher)">close(w: FileWatcher)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">getLoop
+  <li><a class="reference" href="#getLoop%2CFileWatcher" title="getLoop(w: FileWatcher): Loop">getLoop(w: FileWatcher): Loop</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">newFileWatcher
   <li><a class="reference" href="#newFileWatcher%2CLoop%2Cstring%2CFileWatcherCb" title="newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher">newFileWatcher(loop: Loop; path: string; callback: FileWatcherCb): FileWatcher</a></li>
+<li><a class="reference" href="#newFileWatcher%2Cstring%2CFileWatcherCb" title="newFileWatcher(path: string; callback: FileWatcherCb): FileWatcher">newFileWatcher(path: string; callback: FileWatcherCb): FileWatcher</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">run
+  <li><a class="reference" href="#run%2CFileWatcher" title="run(w: FileWatcher)">run(w: FileWatcher)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">stop
+  <li><a class="reference" href="#stop%2CFileWatcher" title="stop(w: FileWatcher)">stop(w: FileWatcher)</a></li>
 
 </ul>
 
@@ -122,6 +136,7 @@
 <div id="FileWatcher">
   <dt><pre><a href="#FileWatcher"><span class="Identifier">FileWatcher</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
   <span class="Identifier">loop</span><span class="Operator">*</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a>
+  <span class="Identifier">ownsLoop</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
   <span class="Identifier">path</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
   <span class="Identifier">callback</span><span class="Operator">*</span><span class="Other">:</span> <a href="#FileWatcherCb"><span class="Identifier">FileWatcherCb</span></a>
   <span class="Keyword">when</span> <span class="Identifier">defined</span><span class="Other">(</span><span class="Identifier">macosx</span><span class="Other">)</span> <span class="Keyword">or</span> <span class="Identifier">defined</span><span class="Other">(</span><span class="Identifier">bsd</span><span class="Other">)</span><span class="Other">:</span>
@@ -148,10 +163,22 @@
   <dl class="item">
     <div id="close-procs-all">
   <div id="close,FileWatcher">
-  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CFileWatcher"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">w</span><span class="Other">:</span> <a href="#FileWatcher"><span class="Identifier">FileWatcher</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CFileWatcher"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">w</span><span class="Other">:</span> <a href="#FileWatcher"><span class="Identifier">FileWatcher</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+                             <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="getLoop-procs-all">
+  <div id="getLoop,FileWatcher">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getLoop%2CFileWatcher"><span class="Identifier">getLoop</span></a><span class="Other">(</span><span class="Identifier">w</span><span class="Other">:</span> <a href="#FileWatcher"><span class="Identifier">FileWatcher</span></a><span class="Other">)</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    The event loop driving this watcher (owned or borrowed).
     
   </dd>
 </div>
@@ -167,6 +194,40 @@
     
   </dd>
 </div>
+<div id="newFileWatcher,string,FileWatcherCb">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newFileWatcher%2Cstring%2CFileWatcherCb"><span class="Identifier">newFileWatcher</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">callback</span><span class="Other">:</span> <a href="#FileWatcherCb"><span class="Identifier">FileWatcherCb</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#FileWatcher"><span class="Identifier">FileWatcher</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create a file watcher with its own internal event loop. The loop is owned by the watcher: <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span></span></tt> drives it and <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt> frees it. Use <tt class="docutils literal"><span class="pre"><span class="Identifier">getLoop</span></span></tt> to share the loop.
+    
+  </dd>
+</div>
+
+</div>
+<div id="run-procs-all">
+  <div id="run,FileWatcher">
+  <dt><pre><span class="Keyword">proc</span> <a href="#run%2CFileWatcher"><span class="Identifier">run</span></a><span class="Other">(</span><span class="Identifier">w</span><span class="Other">:</span> <a href="#FileWatcher"><span class="Identifier">FileWatcher</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
+                           <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Block driving the watcher's event loop until <tt class="docutils literal"><span class="pre"><span class="Identifier">stop</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt>. When the watcher owns its loop, the loop is freed on exit, so <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span></span></tt> is terminal for owned watchers.
+    
+  </dd>
+</div>
+
+</div>
+<div id="stop-procs-all">
+  <div id="stop,FileWatcher">
+  <dt><pre><span class="Keyword">proc</span> <a href="#stop%2CFileWatcher"><span class="Identifier">stop</span></a><span class="Other">(</span><span class="Identifier">w</span><span class="Other">:</span> <a href="#FileWatcher"><span class="Identifier">FileWatcher</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+                            <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Stop the watcher's event loop (use from a callback). Prefer <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt>, which also frees an owned loop.
+    
+  </dd>
+</div>
 
 </div>
 
@@ -179,7 +240,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-06 13:59:22 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-20 20:05:35 UTC</small>
       </div>
     </div>
   </div>

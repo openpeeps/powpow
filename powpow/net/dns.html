@@ -63,6 +63,7 @@
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#DnsCacheEntry" title="DnsCacheEntry = object">DnsCacheEntry</a></li>
 <li><a class="reference" href="#DnsCallback" title="DnsCallback = proc (addrs: seq[Sockaddr_storage]; err: string) {.closure.}">DnsCallback</a></li>
+<li><a class="reference" href="#DnsError" title="DnsError = object of CatchableError">DnsError</a></li>
 <li><a class="reference" href="#DnsQuery" title="DnsQuery = ref object">DnsQuery</a></li>
 <li><a class="reference" href="#DnsResolver" title="DnsResolver = ref object of RootObj
   when iouEnabled:
@@ -93,22 +94,48 @@
   <li><a class="reference" href="#configureDns%2CLoop%2Cint%2Cint" title="configureDns(loop: Loop; timeoutMs: int; attempts: int)">configureDns(loop: Loop; timeoutMs: int; attempts: int)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">resolveAddr
+  <li><a class="reference" href="#resolveAddr%2CLoop%2Cstring%2Cint%2Ccint%2Cproc%28seq%5BSockaddr_storage%5D%2Cstring%29" title="resolveAddr(loop: Loop; address: string; port: int; sockType: cint;
+            cb: proc (addrs: seq[Sockaddr_storage]; err: string) {.closure.})">resolveAddr(loop: Loop; address: string; port: int; sockType: cint;
+            cb: proc (addrs: seq[Sockaddr_storage]; err: string) {.closure.})</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">resolveAddrAsync
-  <li><a class="reference" href="#resolveAddrAsync%2CLoop%2Cstring%2Cint%2Ccint%2Cproc%28seq%5BSockaddr_storage%5D%2Cstring%29" title="resolveAddrAsync(loop: Loop; address: string; port: int; sockType: cint; cb: proc (
-    addrs: seq[Sockaddr_storage]; err: string) {.closure.})">resolveAddrAsync(loop: Loop; address: string; port: int; sockType: cint; cb: proc (
-    addrs: seq[Sockaddr_storage]; err: string) {.closure.})</a></li>
+  <li><a class="reference" href="#resolveAddrAsync%2Cstring%2Cint%2Ccint" title="resolveAddrAsync(address: string; port: int; sockType: cint): Future[
+    seq[Sockaddr_storage]]">resolveAddrAsync(address: string; port: int; sockType: cint): Future[
+    seq[Sockaddr_storage]]</a></li>
+<li><a class="reference" href="#resolveAddrAsync%2CLoop%2Cstring%2Cint%2Ccint" title="resolveAddrAsync(loop: Loop; address: string; port: int; sockType: cint): Future[
+    seq[Sockaddr_storage]]">resolveAddrAsync(loop: Loop; address: string; port: int; sockType: cint): Future[
+    seq[Sockaddr_storage]]</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">resolveAddrBoth
+  <li><a class="reference" href="#resolveAddrBoth%2CLoop%2Cstring%2Cint%2CDnsCallback" title="resolveAddrBoth(loop: Loop; address: string; port: int; cb: DnsCallback)">resolveAddrBoth(loop: Loop; address: string; port: int; cb: DnsCallback)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">resolveAddrBothAsync
-  <li><a class="reference" href="#resolveAddrBothAsync%2CLoop%2Cstring%2Cint%2CDnsCallback" title="resolveAddrBothAsync(loop: Loop; address: string; port: int; cb: DnsCallback)">resolveAddrBothAsync(loop: Loop; address: string; port: int; cb: DnsCallback)</a></li>
+  <li><a class="reference" href="#resolveAddrBothAsync%2Cstring%2Cint" title="resolveAddrBothAsync(address: string; port: int): Future[seq[Sockaddr_storage]]">resolveAddrBothAsync(address: string; port: int): Future[seq[Sockaddr_storage]]</a></li>
+<li><a class="reference" href="#resolveAddrBothAsync%2CLoop%2Cstring%2Cint" title="resolveAddrBothAsync(loop: Loop; address: string; port: int): Future[
+    seq[Sockaddr_storage]]">resolveAddrBothAsync(loop: Loop; address: string; port: int): Future[
+    seq[Sockaddr_storage]]</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">resolveMx
+  <li><a class="reference" href="#resolveMx%2CLoop%2Cstring%2CMxCallback" title="resolveMx(loop: Loop; domain: string; mcb: MxCallback)">resolveMx(loop: Loop; domain: string; mcb: MxCallback)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">resolveMxAsync
-  <li><a class="reference" href="#resolveMxAsync%2CLoop%2Cstring%2CMxCallback" title="resolveMxAsync(loop: Loop; domain: string; mcb: MxCallback)">resolveMxAsync(loop: Loop; domain: string; mcb: MxCallback)</a></li>
+  <li><a class="reference" href="#resolveMxAsync%2Cstring" title="resolveMxAsync(domain: string): Future[seq[MxRecord]]">resolveMxAsync(domain: string): Future[seq[MxRecord]]</a></li>
+<li><a class="reference" href="#resolveMxAsync%2CLoop%2Cstring" title="resolveMxAsync(loop: Loop; domain: string): Future[seq[MxRecord]]">resolveMxAsync(loop: Loop; domain: string): Future[seq[MxRecord]]</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">resolveTxt
+  <li><a class="reference" href="#resolveTxt%2CLoop%2Cstring%2CTxtCallback" title="resolveTxt(loop: Loop; hostname: string; tcb: TxtCallback)">resolveTxt(loop: Loop; hostname: string; tcb: TxtCallback)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">resolveTxtAsync
-  <li><a class="reference" href="#resolveTxtAsync%2CLoop%2Cstring%2CTxtCallback" title="resolveTxtAsync(loop: Loop; hostname: string; tcb: TxtCallback)">resolveTxtAsync(loop: Loop; hostname: string; tcb: TxtCallback)</a></li>
+  <li><a class="reference" href="#resolveTxtAsync%2Cstring" title="resolveTxtAsync(hostname: string): Future[seq[TxtRecord]]">resolveTxtAsync(hostname: string): Future[seq[TxtRecord]]</a></li>
+<li><a class="reference" href="#resolveTxtAsync%2CLoop%2Cstring" title="resolveTxtAsync(loop: Loop; hostname: string): Future[seq[TxtRecord]]">resolveTxtAsync(loop: Loop; hostname: string): Future[seq[TxtRecord]]</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">setDnsServers
@@ -157,6 +184,14 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+<div id="DnsError">
+  <dt><pre><a href="#DnsError"><span class="Identifier">DnsError</span></a> <span class="Other">=</span> <span class="Keyword">object</span> <span class="Keyword">of</span> <span class="Identifier">CatchableError</span></pre></dt>
+  <dd>
+    
+    Raised by the awaitable <tt class="docutils literal"><span class="pre"><span class="Identifier">resolve</span><span class="Operator">*</span><span class="Identifier">Async</span></span></tt> procs when resolution fails (NXDOMAIN, timeout, no records). The callback API reports the same failures as an <tt class="docutils literal"><span class="pre"><span class="Identifier">err</span><span class="Punctuation">:</span> <span class="Identifier">string</span></span></tt> instead.
     
   </dd>
 </div>
@@ -253,9 +288,9 @@
 </div>
 
 </div>
-<div id="resolveAddrAsync-procs-all">
-  <div id="resolveAddrAsync,Loop,string,int,cint,proc(seq[Sockaddr_storage],string)">
-  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrAsync%2CLoop%2Cstring%2Cint%2Ccint%2Cproc%28seq%5BSockaddr_storage%5D%2Cstring%29"><span class="Identifier">resolveAddrAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">sockType</span><span class="Other">:</span> <span class="Identifier">cint</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span>
+<div id="resolveAddr-procs-all">
+  <div id="resolveAddr,Loop,string,int,cint,proc(seq[Sockaddr_storage],string)">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddr%2CLoop%2Cstring%2Cint%2Ccint%2Cproc%28seq%5BSockaddr_storage%5D%2Cstring%29"><span class="Identifier">resolveAddr</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">sockType</span><span class="Other">:</span> <span class="Identifier">cint</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span>
     <span class="Identifier">addrs</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">Sockaddr_storage</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">err</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}<span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -269,10 +304,33 @@
 </div>
 
 </div>
-<div id="resolveAddrBothAsync-procs-all">
-  <div id="resolveAddrBothAsync,Loop,string,int,DnsCallback">
-  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrBothAsync%2CLoop%2Cstring%2Cint%2CDnsCallback"><span class="Identifier">resolveAddrBothAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span>
-                          <span class="Identifier">cb</span><span class="Other">:</span> <a href="#DnsCallback"><span class="Identifier">DnsCallback</span></a><span class="Other">)</span> {.
+<div id="resolveAddrAsync-procs-all">
+  <div id="resolveAddrAsync,string,int,cint">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrAsync%2Cstring%2Cint%2Ccint"><span class="Identifier">resolveAddrAsync</span></a><span class="Other">(</span><span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">sockType</span><span class="Other">:</span> <span class="Identifier">cint</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span>
+    <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">Sockaddr_storage</span><span class="Other">]</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ValueError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span>
+                                      <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Self-contained awaitable resolution with an internal event loop. <tt class="docutils literal"><span class="pre"><span class="Identifier">await</span> <span class="Identifier">resolveAddrAsync</span><span class="Punctuation">(</span><span class="StringLit">&quot;example.com&quot;</span><span class="Punctuation">,</span> <span class="DecNumber">443</span><span class="Punctuation">,</span> <span class="Identifier">SOCK_STREAM</span><span class="Punctuation">)</span></span></tt> — the loop is closed before the future completes.
+    
+  </dd>
+</div>
+<div id="resolveAddrAsync,Loop,string,int,cint">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrAsync%2CLoop%2Cstring%2Cint%2Ccint"><span class="Identifier">resolveAddrAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">sockType</span><span class="Other">:</span> <span class="Identifier">cint</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span>
+    <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">Sockaddr_storage</span><span class="Other">]</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Awaitable address resolution on the caller's <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt>. The caller must keep driving <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt> (e.g. it is already <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt>ning) until the future completes. Numeric IP literals, <tt class="docutils literal"><span class="pre"><span class="Operator">/</span><span class="Identifier">etc</span><span class="Operator">/</span><span class="Identifier">hosts</span></span></tt> hits and warm-cache hits complete immediately without any DNS I/O.
+    
+  </dd>
+</div>
+
+</div>
+<div id="resolveAddrBoth-procs-all">
+  <div id="resolveAddrBoth,Loop,string,int,DnsCallback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrBoth%2CLoop%2Cstring%2Cint%2CDnsCallback"><span class="Identifier">resolveAddrBoth</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="#DnsCallback"><span class="Identifier">DnsCallback</span></a><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -283,9 +341,33 @@
 </div>
 
 </div>
-<div id="resolveMxAsync-procs-all">
-  <div id="resolveMxAsync,Loop,string,MxCallback">
-  <dt><pre><span class="Keyword">proc</span> <a href="#resolveMxAsync%2CLoop%2Cstring%2CMxCallback"><span class="Identifier">resolveMxAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">domain</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">mcb</span><span class="Other">:</span> <a href="#MxCallback"><span class="Identifier">MxCallback</span></a><span class="Other">)</span> {.
+<div id="resolveAddrBothAsync-procs-all">
+  <div id="resolveAddrBothAsync,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrBothAsync%2Cstring%2Cint"><span class="Identifier">resolveAddrBothAsync</span></a><span class="Other">(</span><span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span>
+    <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">Sockaddr_storage</span><span class="Other">]</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ValueError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span>
+                                      <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Self-contained awaitable dual-family resolution with an internal loop.
+    
+  </dd>
+</div>
+<div id="resolveAddrBothAsync,Loop,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveAddrBothAsync%2CLoop%2Cstring%2Cint"><span class="Identifier">resolveAddrBothAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span>
+    <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">Sockaddr_storage</span><span class="Other">]</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Awaitable dual-family resolution on the caller's <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt>: all socket addresses ordered IPv6-first (RFC 8305 family-block order). If one family fails the other is still delivered; both empty raises <tt class="docutils literal"><span class="pre"><span class="Identifier">DnsError</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
+<div id="resolveMx-procs-all">
+  <div id="resolveMx,Loop,string,MxCallback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveMx%2CLoop%2Cstring%2CMxCallback"><span class="Identifier">resolveMx</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">domain</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">mcb</span><span class="Other">:</span> <a href="#MxCallback"><span class="Identifier">MxCallback</span></a><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -296,14 +378,60 @@
 </div>
 
 </div>
-<div id="resolveTxtAsync-procs-all">
-  <div id="resolveTxtAsync,Loop,string,TxtCallback">
-  <dt><pre><span class="Keyword">proc</span> <a href="#resolveTxtAsync%2CLoop%2Cstring%2CTxtCallback"><span class="Identifier">resolveTxtAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">hostname</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">tcb</span><span class="Other">:</span> <a href="#TxtCallback"><span class="Identifier">TxtCallback</span></a><span class="Other">)</span> {.
+<div id="resolveMxAsync-procs-all">
+  <div id="resolveMxAsync,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveMxAsync%2Cstring"><span class="Identifier">resolveMxAsync</span></a><span class="Other">(</span><span class="Identifier">domain</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span><span class="Identifier">seq</span><span class="Other">[</span><a href="#MxRecord"><span class="Identifier">MxRecord</span></a><span class="Other">]</span><span class="Other">]</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Self-contained awaitable MX resolution with an internal event loop.
+    
+  </dd>
+</div>
+<div id="resolveMxAsync,Loop,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveMxAsync%2CLoop%2Cstring"><span class="Identifier">resolveMxAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">domain</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span><span class="Identifier">seq</span><span class="Other">[</span><a href="#MxRecord"><span class="Identifier">MxRecord</span></a><span class="Other">]</span><span class="Other">]</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Awaitable MX resolution on the caller's <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt> (see <tt class="docutils literal"><span class="pre"><span class="Identifier">resolveAddrAsync</span></span></tt>). An empty result with no error means the name exists but publishes no MX (RFC 5321 §5.1 fallback applies); NXDOMAIN/timeout raise <tt class="docutils literal"><span class="pre"><span class="Identifier">DnsError</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
+<div id="resolveTxt-procs-all">
+  <div id="resolveTxt,Loop,string,TxtCallback">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveTxt%2CLoop%2Cstring%2CTxtCallback"><span class="Identifier">resolveTxt</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">hostname</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">tcb</span><span class="Other">:</span> <a href="#TxtCallback"><span class="Identifier">TxtCallback</span></a><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Resolve TXT records for <tt class="docutils literal"><span class="pre"><span class="Identifier">hostname</span></span></tt> asynchronously on <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt>. <tt class="docutils literal"><span class="pre"><span class="Identifier">tcb</span></span></tt> runs on the loop thread with ALL TXT records found (or an empty seq plus an empty <tt class="docutils literal"><span class="pre"><span class="Identifier">err</span></span></tt> when the name exists but publishes no TXT records — the caller decides what that means). A non-empty <tt class="docutils literal"><span class="pre"><span class="Identifier">err</span></span></tt> signals NXDOMAIN or a resolver failure. Never blocks the loop on DNS.
+    
+  </dd>
+</div>
+
+</div>
+<div id="resolveTxtAsync-procs-all">
+  <div id="resolveTxtAsync,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveTxtAsync%2Cstring"><span class="Identifier">resolveTxtAsync</span></a><span class="Other">(</span><span class="Identifier">hostname</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span><span class="Identifier">seq</span><span class="Other">[</span><a href="#TxtRecord"><span class="Identifier">TxtRecord</span></a><span class="Other">]</span><span class="Other">]</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Self-contained awaitable TXT resolution with an internal event loop.
+    
+  </dd>
+</div>
+<div id="resolveTxtAsync,Loop,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveTxtAsync%2CLoop%2Cstring"><span class="Identifier">resolveTxtAsync</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">hostname</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">Future</span><span class="Other">[</span><span class="Identifier">seq</span><span class="Other">[</span><a href="#TxtRecord"><span class="Identifier">TxtRecord</span></a><span class="Other">]</span><span class="Other">]</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Awaitable TXT resolution on the caller's <tt class="docutils literal"><span class="pre"><span class="Identifier">loop</span></span></tt> (see <tt class="docutils literal"><span class="pre"><span class="Identifier">resolveAddrAsync</span></span></tt>).
     
   </dd>
 </div>
@@ -332,7 +460,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-06 13:59:21 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-20 20:05:34 UTC</small>
       </div>
     </div>
   </div>

@@ -4,12 +4,19 @@ nim	StreamOpen	powpow/stream.html#StreamOpen	IoStreamState.StreamOpen		47
 nim	StreamClosed	powpow/stream.html#StreamClosed	IoStreamState.StreamClosed		47
 nim	IoStreamState	powpow/stream.html#IoStreamState	enum IoStreamState		47
 nim	IoStream	powpow/stream.html#IoStream	type IoStream		51
-nim	close	powpow/stream.html#close,IoStream	proc close(s: IoStream)		68
-nim	openStream	powpow/stream.html#openStream,Loop,int,proc(IoStream,openArray[byte]),proc(IoStream)	proc openStream(loop: Loop; fd: int;\n           onData: proc (s: IoStream; data: openArray[byte]) {.closure.};\n           onClose: proc (s: IoStream) {.closure.} = nil): IoStream		165
-nim	write	powpow/stream.html#write,IoStream,openArray[byte]	proc write(s: IoStream; data: openArray[byte]): int		207
-nim	write	powpow/stream.html#write,IoStream,string	proc write(s: IoStream; data: string): int		242
-nim	pause	powpow/stream.html#pause,IoStream	proc pause(s: IoStream)		246
-nim	resume	powpow/stream.html#resume,IoStream	proc resume(s: IoStream)		254
-nim	closeAfterWrite	powpow/stream.html#closeAfterWrite,IoStream	proc closeAfterWrite(s: IoStream)		262
-nim	newStreamPair	powpow/stream.html#newStreamPair,Loop,proc(IoStream,openArray[byte]),proc(IoStream),proc(IoStream,openArray[byte]),proc(IoStream)	proc newStreamPair(loop: Loop;\n              onData: proc (s: IoStream; data: openArray[byte]) {.closure.};\n              onClose: proc (s: IoStream) {.closure.} = nil; onData2: proc (\n    s: IoStream; data: openArray[byte]) {.closure.} = nil;\n              onClose2: proc (s: IoStream) {.closure.} = nil): (IoStream,\n    IoStream)		271
-nimgrp	write	powpow/stream.html#write-procs-all	proc		207
+nim	close	powpow/stream.html#close,IoStream	proc close(s: IoStream)		69
+nim	openStream	powpow/stream.html#openStream,Loop,int,proc(IoStream,openArray[byte]),proc(IoStream)	proc openStream(loop: Loop; fd: int;\n           onData: proc (s: IoStream; data: openArray[byte]) {.closure.};\n           onClose: proc (s: IoStream) {.closure.} = nil): IoStream		166
+nim	openStream	powpow/stream.html#openStream,int,proc(IoStream,openArray[byte]),proc(IoStream)	proc openStream(fd: int;\n           onData: proc (s: IoStream; data: openArray[byte]) {.closure.};\n           onClose: proc (s: IoStream) {.closure.} = nil): IoStream		191
+nim	getLoop	powpow/stream.html#getLoop,IoStream	proc getLoop(s: IoStream): Loop		200
+nim	run	powpow/stream.html#run,IoStream	proc run(s: IoStream)		237
+nim	stop	powpow/stream.html#stop,IoStream	proc stop(s: IoStream)		244
+nim	write	powpow/stream.html#write,IoStream,openArray[byte]	proc write(s: IoStream; data: openArray[byte]): int		249
+nim	write	powpow/stream.html#write,IoStream,string	proc write(s: IoStream; data: string): int		284
+nim	pause	powpow/stream.html#pause,IoStream	proc pause(s: IoStream)		288
+nim	resume	powpow/stream.html#resume,IoStream	proc resume(s: IoStream)		296
+nim	closeAfterWrite	powpow/stream.html#closeAfterWrite,IoStream	proc closeAfterWrite(s: IoStream)		304
+nim	newStreamPair	powpow/stream.html#newStreamPair,Loop,proc(IoStream,openArray[byte]),proc(IoStream),proc(IoStream,openArray[byte]),proc(IoStream)	proc newStreamPair(loop: Loop;\n              onData: proc (s: IoStream; data: openArray[byte]) {.closure.};\n              onClose: proc (s: IoStream) {.closure.} = nil; onData2: proc (\n    s: IoStream; data: openArray[byte]) {.closure.} = nil;\n              onClose2: proc (s: IoStream) {.closure.} = nil): (IoStream,\n    IoStream)		313
+nim	newStreamPair	powpow/stream.html#newStreamPair,proc(IoStream,openArray[byte]),proc(IoStream),proc(IoStream,openArray[byte]),proc(IoStream)	proc newStreamPair(onData: proc (s: IoStream; data: openArray[byte]) {.closure.};\n              onClose: proc (s: IoStream) {.closure.} = nil; onData2: proc (\n    s: IoStream; data: openArray[byte]) {.closure.} = nil;\n              onClose2: proc (s: IoStream) {.closure.} = nil): (IoStream,\n    IoStream)		329
+nimgrp	newstreampair	powpow/stream.html#newStreamPair-procs-all	proc		313
+nimgrp	openstream	powpow/stream.html#openStream-procs-all	proc		166
+nimgrp	write	powpow/stream.html#write-procs-all	proc		249

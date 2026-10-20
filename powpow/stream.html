@@ -64,6 +64,7 @@
       <li><a class="reference" href="#IoStream" title="IoStream = ref object
   fd*: int
   loop*: Loop
+  ownsLoop*: bool
   state*: IoStreamState
   onClose*: proc (s: IoStream) {.closure.}
   data*: pointer             ## user state, like Connection">IoStream</a></li>
@@ -94,6 +95,10 @@
   <li><a class="reference" href="#closeAfterWrite%2CIoStream" title="closeAfterWrite(s: IoStream)">closeAfterWrite(s: IoStream)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">getLoop
+  <li><a class="reference" href="#getLoop%2CIoStream" title="getLoop(s: IoStream): Loop">getLoop(s: IoStream): Loop</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">newStreamPair
   <li><a class="reference" href="#newStreamPair%2CLoop%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29" title="newStreamPair(loop: Loop;
               onData: proc (s: IoStream; data: openArray[byte]) {.closure.};
@@ -106,10 +111,24 @@
     s: IoStream; data: openArray[byte]) {.closure.} = nil;
               onClose2: proc (s: IoStream) {.closure.} = nil): (IoStream,
     IoStream)</a></li>
+<li><a class="reference" href="#newStreamPair%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29" title="newStreamPair(onData: proc (s: IoStream; data: openArray[byte]) {.closure.};
+              onClose: proc (s: IoStream) {.closure.} = nil; onData2: proc (
+    s: IoStream; data: openArray[byte]) {.closure.} = nil;
+              onClose2: proc (s: IoStream) {.closure.} = nil): (IoStream,
+    IoStream)">newStreamPair(onData: proc (s: IoStream; data: openArray[byte]) {.closure.};
+              onClose: proc (s: IoStream) {.closure.} = nil; onData2: proc (
+    s: IoStream; data: openArray[byte]) {.closure.} = nil;
+              onClose2: proc (s: IoStream) {.closure.} = nil): (IoStream,
+    IoStream)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">openStream
-  <li><a class="reference" href="#openStream%2CLoop%2Cint%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29" title="openStream(loop: Loop; fd: int;
+  <li><a class="reference" href="#openStream%2Cint%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29" title="openStream(fd: int;
+           onData: proc (s: IoStream; data: openArray[byte]) {.closure.};
+           onClose: proc (s: IoStream) {.closure.} = nil): IoStream">openStream(fd: int;
+           onData: proc (s: IoStream; data: openArray[byte]) {.closure.};
+           onClose: proc (s: IoStream) {.closure.} = nil): IoStream</a></li>
+<li><a class="reference" href="#openStream%2CLoop%2Cint%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29" title="openStream(loop: Loop; fd: int;
            onData: proc (s: IoStream; data: openArray[byte]) {.closure.};
            onClose: proc (s: IoStream) {.closure.} = nil): IoStream">openStream(loop: Loop; fd: int;
            onData: proc (s: IoStream; data: openArray[byte]) {.closure.};
@@ -122,6 +141,14 @@
 </ul>
 <ul class="simple nested-toc-section">resume
   <li><a class="reference" href="#resume%2CIoStream" title="resume(s: IoStream)">resume(s: IoStream)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">run
+  <li><a class="reference" href="#run%2CIoStream" title="run(s: IoStream)">run(s: IoStream)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">stop
+  <li><a class="reference" href="#stop%2CIoStream" title="stop(s: IoStream)">stop(s: IoStream)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">write
@@ -165,6 +192,7 @@
   <dt><pre><a href="#IoStream"><span class="Identifier">IoStream</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
   <span class="Identifier">fd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">loop</span><span class="Operator">*</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a>
+  <span class="Identifier">ownsLoop</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
   <span class="Identifier">state</span><span class="Operator">*</span><span class="Other">:</span> <a href="#IoStreamState"><span class="Identifier">IoStreamState</span></a>
   <span class="Identifier">onClose</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}
   <span class="Identifier">data</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">pointer</span>             <span class="Comment">## user state, like Connection</span></pre></dt>
@@ -205,7 +233,7 @@
   <dl class="item">
     <div id="close-procs-all">
   <div id="close,IoStream">
-  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CIoStream"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CIoStream"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
                           <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -217,11 +245,22 @@
 </div>
 <div id="closeAfterWrite-procs-all">
   <div id="closeAfterWrite,IoStream">
-  <dt><pre><span class="Keyword">proc</span> <a href="#closeAfterWrite%2CIoStream"><span class="Identifier">closeAfterWrite</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#closeAfterWrite%2CIoStream"><span class="Identifier">closeAfterWrite</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
                                     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Flush pending writes, then close the fd (delivering EOF to the peer).
+    
+  </dd>
+</div>
+
+</div>
+<div id="getLoop-procs-all">
+  <div id="getLoop,IoStream">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getLoop%2CIoStream"><span class="Identifier">getLoop</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    The event loop driving this stream (owned or borrowed).
     
   </dd>
 </div>
@@ -240,10 +279,34 @@
     
   </dd>
 </div>
+<div id="newStreamPair,proc(IoStream,openArray[byte]),proc(IoStream),proc(IoStream,openArray[byte]),proc(IoStream)">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newStreamPair%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29"><span class="Identifier">newStreamPair</span></a><span class="Other">(</span><span class="Identifier">onData</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}<span class="Other">;</span>
+                   <span class="Identifier">onClose</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.} <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onData2</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span>
+    <span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.} <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
+                   <span class="Identifier">onClose2</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.} <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <span class="Other">(</span><a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">,</span>
+    <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">CatchableError</span><span class="Other">]</span><span class="Other">,</span>
+                <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create a full-duplex socketpair with its own internal event loop. Both ends share one owned loop; <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">stop</span></span></tt> via <tt class="docutils literal"><span class="pre"><span class="Identifier">getLoop</span></span></tt>. Closing either end tears the loop down (the surviving peer's fd is reclaimed by that teardown), so close both ends together and treat the first <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt> as terminal for the pair.
+    
+  </dd>
+</div>
 
 </div>
 <div id="openStream-procs-all">
-  <div id="openStream,Loop,int,proc(IoStream,openArray[byte]),proc(IoStream)">
+  <div id="openStream,int,proc(IoStream,openArray[byte]),proc(IoStream)">
+  <dt><pre><span class="Keyword">proc</span> <a href="#openStream%2Cint%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29"><span class="Identifier">openStream</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span>
+                <span class="Identifier">onData</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}<span class="Other">;</span>
+                <span class="Identifier">onClose</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.} <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Open a stream with its own internal event loop. <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span></span></tt> drives it; <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt> frees the fd and the owned loop.
+    
+  </dd>
+</div>
+<div id="openStream,Loop,int,proc(IoStream,openArray[byte]),proc(IoStream)">
   <dt><pre><span class="Keyword">proc</span> <a href="#openStream%2CLoop%2Cint%2Cproc%28IoStream%2CopenArray%5Bbyte%5D%29%2Cproc%28IoStream%29"><span class="Identifier">openStream</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span>
                 <span class="Identifier">onData</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.<span class="Identifier">closure</span>.}<span class="Other">;</span>
                 <span class="Identifier">onClose</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.} <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a> {.
@@ -274,6 +337,30 @@
   <dd>
     
     Resume reading after <tt class="docutils literal"><span class="pre"><span class="Identifier">pause</span></span></tt>; any data buffered meanwhile is delivered immediately.
+    
+  </dd>
+</div>
+
+</div>
+<div id="run-procs-all">
+  <div id="run,IoStream">
+  <dt><pre><span class="Keyword">proc</span> <a href="#run%2CIoStream"><span class="Identifier">run</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
+                        <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Block driving the stream's event loop until <tt class="docutils literal"><span class="pre"><span class="Identifier">stop</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt>. When the stream owns its loop, the loop is freed on exit.
+    
+  </dd>
+</div>
+
+</div>
+<div id="stop-procs-all">
+  <div id="stop,IoStream">
+  <dt><pre><span class="Keyword">proc</span> <a href="#stop%2CIoStream"><span class="Identifier">stop</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#IoStream"><span class="Identifier">IoStream</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
+                         <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Stop the stream (use from a callback). Frees an owned loop via <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt> semantics once <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span></span></tt> returns.
     
   </dd>
 </div>
@@ -310,7 +397,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-06 13:59:21 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-20 20:05:34 UTC</small>
       </div>
     </div>
   </div>

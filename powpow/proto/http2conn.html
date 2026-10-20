@@ -127,6 +127,7 @@
   H2ServerRole, H2ClientRole">H2Role</a></li>
 <li><a class="reference" href="#H2Server" title="H2Server = ref object
   loop*: Loop
+  ownsLoop*: bool
   tcp*: TcpServer
   handler*: OnH2RequestCallback
   sslCtx*: SslContext
@@ -188,6 +189,10 @@
   <li><a class="reference" href="#flushStagedH2" title="flushStagedH2()">flushStagedH2()</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">getLoop
+  <li><a class="reference" href="#getLoop%2CH2Server" title="getLoop(s: H2Server): Loop">getLoop(s: H2Server): Loop</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">h2Closed
   <li><a class="reference" href="#h2Closed%2CH2Conn" title="h2Closed(h2: H2Conn): bool">h2Closed(h2: H2Conn): bool</a></li>
 
@@ -213,7 +218,14 @@
 
 </ul>
 <ul class="simple nested-toc-section">newH2Server
-  <li><a class="reference" href="#newH2Server%2CLoop%2COnH2RequestCallback%2CSslContext" title="newH2Server(loop: Loop; handler: OnH2RequestCallback;
+  <li><a class="reference" href="#newH2Server%2COnH2RequestCallback%2CSslContext" title="newH2Server(handler: OnH2RequestCallback;
+            maxConcurrent = H2DefaultMaxConcurrent;
+            maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
+            sslCtx: SslContext = nil): H2Server">newH2Server(handler: OnH2RequestCallback;
+            maxConcurrent = H2DefaultMaxConcurrent;
+            maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
+            sslCtx: SslContext = nil): H2Server</a></li>
+<li><a class="reference" href="#newH2Server%2CLoop%2COnH2RequestCallback%2CSslContext" title="newH2Server(loop: Loop; handler: OnH2RequestCallback;
             maxConcurrent = H2DefaultMaxConcurrent;
             maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
             sslCtx: SslContext = nil): H2Server">newH2Server(loop: Loop; handler: OnH2RequestCallback;
@@ -232,6 +244,10 @@
   <li><a class="reference" href="#reset%2CH2Response" title="reset(res: H2Response; code = H2Cancelled)">reset(res: H2Response; code = H2Cancelled)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">run
+  <li><a class="reference" href="#run%2CH2Server" title="run(s: H2Server)">run(s: H2Server)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">send
   <li><a class="reference" href="#send%2CH2Response%2CopenArray%5Bbyte%5D" title="send(res: H2Response; body: openArray[byte])">send(res: H2Response; body: openArray[byte])</a></li>
 <li><a class="reference" href="#send%2CH2Response%2Cstring" title="send(res: H2Response; body: string)">send(res: H2Response; body: string)</a></li>
@@ -242,12 +258,20 @@
 <li><a class="reference" href="#stageFrame%2CH2Conn%2Cstring" title="stageFrame(h2: H2Conn; s: string)">stageFrame(h2: H2Conn; s: string)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">start
+  <li><a class="reference" href="#start%2CH2Server%2Cstring%2Cint" title="start(s: H2Server; address: string; port: int)">start(s: H2Server; address: string; port: int)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">startClientPreface
   <li><a class="reference" href="#startClientPreface%2CH2Conn" title="startClientPreface(h2: H2Conn)">startClientPreface(h2: H2Conn)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">status
   <li><a class="reference" href="#status%2CH2Response%2Cuint16" title="status(res: H2Response; code: uint16): H2Response">status(res: H2Response; code: uint16): H2Response</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">stop
+  <li><a class="reference" href="#stop%2CH2Server" title="stop(s: H2Server)">stop(s: H2Server)</a></li>
 
 </ul>
 
@@ -390,6 +414,7 @@
 <div id="H2Server">
   <dt><pre><a href="#H2Server"><span class="Identifier">H2Server</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span>
   <span class="Identifier">loop</span><span class="Operator">*</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a>
+  <span class="Identifier">ownsLoop</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
   <span class="Identifier">tcp</span><span class="Operator">*</span><span class="Other">:</span> <a href="../net/tcp.html#TcpServer"><span class="Identifier">TcpServer</span></a>
   <span class="Identifier">handler</span><span class="Operator">*</span><span class="Other">:</span> <a href="#OnH2RequestCallback"><span class="Identifier">OnH2RequestCallback</span></a>
   <span class="Identifier">sslCtx</span><span class="Operator">*</span><span class="Other">:</span> <a href="../net/tls.html#SslContext"><span class="Identifier">SslContext</span></a>
@@ -491,11 +516,11 @@
   <dl class="item">
     <div id="close-procs-all">
   <div id="close,H2Server">
-  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CH2Server"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#H2Server"><span class="Identifier">H2Server</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#close%2CH2Server"><span class="Identifier">close</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#H2Server"><span class="Identifier">H2Server</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
                           <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    
+    Shut down the H2 server. When the server owns its loop (created via <tt class="docutils literal"><span class="pre"><span class="Identifier">newH2Server</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> without a loop), the loop is stopped (if running) or freed; a borrowed loop is left alive.
     
   </dd>
 </div>
@@ -515,7 +540,7 @@
 <div id="feedH2-procs-all">
   <div id="feedH2,H2Conn,openArray[byte]">
   <dt><pre><span class="Keyword">proc</span> <a href="#feedH2%2CH2Conn%2CopenArray%5Bbyte%5D"><span class="Identifier">feedH2</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">HpackError</span><span class="Other">,</span> <span class="Identifier">H2Error</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">HpackError</span><span class="Other">,</span> <span class="Identifier">H2Error</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -527,7 +552,7 @@
 </div>
 <div id="flushSendBuf-procs-all">
   <div id="flushSendBuf,H2Conn">
-  <dt><pre><span class="Keyword">proc</span> <a href="#flushSendBuf%2CH2Conn"><span class="Identifier">flushSendBuf</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#flushSendBuf%2CH2Conn"><span class="Identifier">flushSendBuf</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
                                 <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -539,11 +564,22 @@
 </div>
 <div id="flushStagedH2-procs-all">
   <div id="flushStagedH2">
-  <dt><pre><span class="Keyword">proc</span> <a href="#flushStagedH2"><span class="Identifier">flushStagedH2</span></a><span class="Other">(</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#flushStagedH2"><span class="Identifier">flushStagedH2</span></a><span class="Other">(</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
                        <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Turn-end hook: flush every conn that staged frames this turn. Conns that closed mid-turn drop their staged bytes (teardown paths already flushed inline). A conn whose socket dies under the flush fires <tt class="docutils literal"><span class="pre"><span class="Identifier">onConnDeath</span></span></tt> — it will see no further loop events. The batch is moved out first so death callbacks cannot corrupt the queue.
+    
+  </dd>
+</div>
+
+</div>
+<div id="getLoop-procs-all">
+  <div id="getLoop,H2Server">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getLoop%2CH2Server"><span class="Identifier">getLoop</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#H2Server"><span class="Identifier">H2Server</span></a><span class="Other">)</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    The event loop driving this server (owned or borrowed).
     
   </dd>
 </div>
@@ -611,7 +647,20 @@
 
 </div>
 <div id="newH2Server-procs-all">
-  <div id="newH2Server,Loop,OnH2RequestCallback,SslContext">
+  <div id="newH2Server,OnH2RequestCallback,SslContext">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newH2Server%2COnH2RequestCallback%2CSslContext"><span class="Identifier">newH2Server</span></a><span class="Other">(</span><span class="Identifier">handler</span><span class="Other">:</span> <a href="#OnH2RequestCallback"><span class="Identifier">OnH2RequestCallback</span></a><span class="Other">;</span>
+                 <span class="Identifier">maxConcurrent</span> <span class="Other">=</span> <span class="Identifier">H2DefaultMaxConcurrent</span><span class="Other">;</span>
+                 <span class="Identifier">maxHeaderList</span> <span class="Other">=</span> <span class="Identifier">H2DefaultMaxHeaderList</span><span class="Other">;</span>
+                 <span class="Identifier">maxBody</span> <span class="Other">=</span> <span class="Identifier">H2DefaultMaxBody</span><span class="Other">;</span> <span class="Identifier">sslCtx</span><span class="Other">:</span> <a href="../net/tls.html#SslContext"><span class="Identifier">SslContext</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <a href="#H2Server"><span class="Identifier">H2Server</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">CatchableError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create an h2c server with its own internal event loop. <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span></span></tt> drives it; <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt> frees it. Use <tt class="docutils literal"><span class="pre"><span class="Identifier">getLoop</span></span></tt> to share the loop with other subsystems.
+    
+  </dd>
+</div>
+<div id="newH2Server,Loop,OnH2RequestCallback,SslContext">
   <dt><pre><span class="Keyword">proc</span> <a href="#newH2Server%2CLoop%2COnH2RequestCallback%2CSslContext"><span class="Identifier">newH2Server</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">handler</span><span class="Other">:</span> <a href="#OnH2RequestCallback"><span class="Identifier">OnH2RequestCallback</span></a><span class="Other">;</span>
                  <span class="Identifier">maxConcurrent</span> <span class="Other">=</span> <span class="Identifier">H2DefaultMaxConcurrent</span><span class="Other">;</span>
                  <span class="Identifier">maxHeaderList</span> <span class="Other">=</span> <span class="Identifier">H2DefaultMaxHeaderList</span><span class="Other">;</span>
@@ -629,7 +678,7 @@
   <div id="openClientStream,H2Conn,seq[HpackHeader],seq[byte],bool,H2ClientCallback">
   <dt><pre><span class="Keyword">proc</span> <a href="#openClientStream%2CH2Conn%2Cseq%5BHpackHeader%5D%2Cseq%5Bbyte%5D%2Cbool%2CH2ClientCallback"><span class="Identifier">openClientStream</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">;</span> <span class="Identifier">headers</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><a href="hpack.html#HpackHeader"><span class="Identifier">HpackHeader</span></a><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">body</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span>
                       <span class="Identifier">endStream</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">;</span> <span class="Identifier">cb</span><span class="Other">:</span> <a href="#H2ClientCallback"><span class="Identifier">H2ClientCallback</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int32</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -642,11 +691,24 @@
 <div id="reset-procs-all">
   <div id="reset,H2Response">
   <dt><pre><span class="Keyword">proc</span> <a href="#reset%2CH2Response"><span class="Identifier">reset</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="#H2Response"><span class="Identifier">H2Response</span></a><span class="Other">;</span> <span class="Identifier">code</span> <span class="Other">=</span> <span class="Identifier">H2Cancelled</span><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">H2Error</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">H2Error</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Abort the stream with RST_STREAM (e.g. handler rejects the request).
+    
+  </dd>
+</div>
+
+</div>
+<div id="run-procs-all">
+  <div id="run,H2Server">
+  <dt><pre><span class="Keyword">proc</span> <a href="#run%2CH2Server"><span class="Identifier">run</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#H2Server"><span class="Identifier">H2Server</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+                        <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+                        <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Block serving until <tt class="docutils literal"><span class="pre"><span class="Identifier">stop</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt>. When the server owns its loop, the server is closed and the loop freed on exit.
     
   </dd>
 </div>
@@ -678,7 +740,7 @@
 <div id="stageFrame-procs-all">
   <div id="stageFrame,H2Conn,openArray[byte]">
   <dt><pre><span class="Keyword">proc</span> <a href="#stageFrame%2CH2Conn%2CopenArray%5Bbyte%5D"><span class="Identifier">stageFrame</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -688,7 +750,7 @@
 </div>
 <div id="stageFrame,H2Conn,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#stageFrame%2CH2Conn%2Cstring"><span class="Identifier">stageFrame</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">;</span> <span class="Identifier">s</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -698,9 +760,22 @@
 </div>
 
 </div>
+<div id="start-procs-all">
+  <div id="start,H2Server,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#start%2CH2Server%2Cstring%2Cint"><span class="Identifier">start</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#H2Server"><span class="Identifier">H2Server</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Shorthand: <tt class="docutils literal"><span class="pre"><span class="Identifier">listen</span><span class="Punctuation">(</span><span class="Identifier">address</span><span class="Punctuation">,</span> <span class="Identifier">port</span><span class="Punctuation">)</span></span></tt> then <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> (blocking).
+    
+  </dd>
+</div>
+
+</div>
 <div id="startClientPreface-procs-all">
   <div id="startClientPreface,H2Conn">
-  <dt><pre><span class="Keyword">proc</span> <a href="#startClientPreface%2CH2Conn"><span class="Identifier">startClientPreface</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#startClientPreface%2CH2Conn"><span class="Identifier">startClientPreface</span></a><span class="Other">(</span><span class="Identifier">h2</span><span class="Other">:</span> <a href="#H2Conn"><span class="Identifier">H2Conn</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span>
     <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -722,6 +797,19 @@
 </div>
 
 </div>
+<div id="stop-procs-all">
+  <div id="stop,H2Server">
+  <dt><pre><span class="Keyword">proc</span> <a href="#stop%2CH2Server"><span class="Identifier">stop</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <a href="#H2Server"><span class="Identifier">H2Server</span></a><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
+                         <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+                         <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Stop the server (use from a callback). Frees an owned loop via <tt class="docutils literal"><span class="pre"><span class="Identifier">close</span></span></tt> semantics once <tt class="docutils literal"><span class="pre"><span class="Identifier">run</span></span></tt> returns.
+    
+  </dd>
+</div>
+
+</div>
 
   </dl>
 </div>
@@ -732,7 +820,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-06 13:59:22 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-20 20:05:35 UTC</small>
       </div>
     </div>
   </div>
