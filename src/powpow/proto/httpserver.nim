@@ -639,7 +639,13 @@ proc sendFile*(res: HttpResponse, path: string;
         remain -= n
       closeFile(fileFd)
       if res.closeConn:
-        res.conn.closeAfterDrain()
+        when defined(windows):
+          # RST (closeAfterDrain's SO_LINGER=0 fast path) discards the
+          # peer's unread receive buffer on Windows, truncating just-sent
+          # file bytes. Use the FIN fast path like plain send() does.
+          res.conn.closeAfterSend()
+        else:
+          res.conn.closeAfterDrain()
       return
 
     var fileOff = rangeStart
@@ -656,7 +662,13 @@ proc sendFile*(res: HttpResponse, path: string;
       res.conn.sendFileRemain = remain
       discard res.conn.continueSendFile()
       if res.closeConn:
-        res.conn.closeAfterDrain()
+        when defined(windows):
+          # RST (closeAfterDrain's SO_LINGER=0 fast path) discards the
+          # peer's unread receive buffer on Windows, truncating just-sent
+          # file bytes. Use the FIN fast path like plain send() does.
+          res.conn.closeAfterSend()
+        else:
+          res.conn.closeAfterDrain()
       return
     else:
       while remain > 0:
@@ -675,7 +687,13 @@ proc sendFile*(res: HttpResponse, path: string;
 
     closeFile(fileFd)
     if res.closeConn:
-      res.conn.closeAfterDrain()
+      when defined(windows):
+        # RST (closeAfterDrain's SO_LINGER=0 fast path) discards the
+        # peer's unread receive buffer on Windows, truncating just-sent
+        # file bytes. Use the FIN fast path like plain send() does.
+        res.conn.closeAfterSend()
+      else:
+        res.conn.closeAfterDrain()
 
 const
   DefaultChunkSize* = 1_048_576
