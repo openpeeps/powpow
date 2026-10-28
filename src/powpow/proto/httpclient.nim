@@ -596,7 +596,7 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
       else:
         failReq(st, client, "connection closed before response completed")
 
-proc requestImpl(client: HttpClientBase, loop: Loop, meth: HttpMethod,
+proc requestImpl*(client: HttpClientBase, loop: Loop, meth: HttpMethod,
                  url: string, body: openArray[byte],
                  headers: openArray[(string, string)],
                  unixSocket: string, timeoutOverride: int,
