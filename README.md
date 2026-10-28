@@ -18,7 +18,7 @@
 - Built-in HTTP/1.1 & HTTP/2 server implementation
 - Built-in **WebSocket** client and server: standalone + HTTP-upgrade modes
 - **TLS/SSL** support (implicit + STARTTLS-style upgrades)
-- **DTLS 1.2** over UDP — one socket, per-peer sessions, stateless cookie exchange
+- **DTLS 1.2** over UDP, one socket, per-peer sessions, stateless cookie exchange
 - **Threadpool**: a self-managed worker pool. Submit CPU-bound or blocking work off a live event loop without blocking any single thread
 - **Signal/Relay** system for in-process event dispatch
 - Built-in **rate limiting** per client IP with multi-window support
@@ -30,7 +30,7 @@
 - Built on top of `epoll` (Linux), and `kqueue` (BSD, macOS), `IOCP` (Windows)
 - Opt-in Linux **io_uring** backend (submission-based, `--features:io_uring`) with
   zero-copy `send_zc` sends, `SPLICE` file transfers, registered buffers and a
-  full `io_uring` API binding — [documentation](docs/contents/io_uring.md)
+  full `io_uring` API binding, [documentation](docs/contents/io_uring.md)
 - Support for edge-triggered and level-triggered event notification
 - Support for multiple event loops and multi-threaded applications
 - Support for MIME type detection based on file extensions
@@ -48,26 +48,25 @@
 > [!NOTE]
 > **io_uring expectations.** On plain HTTP/1.x, request/response cycles over TCP
 > are serialized per connection, so io_uring doesn't dramatically outpace epoll
-> on a single-connection benchmark — it's a way to reach parity with headroom
+> on a single-connection benchmark, it's a way to reach parity with headroom
 > as concurrency scales and for zero-copy file serving. See the
-> [performance docs](docs/contents/performance.md) for details. Experimental
+> [performance docs](https://powpow.openpeeps.dev/performance) for details. Experimental
 > HTTP/2 multiplexing (see `docs/contents/http/http2.md`) is where that
 > parallelism counts; QUIC is still future work.
 
 ## 📚 Documentation
 
-The full documentation lives in [`docs/`](docs/contents/index.md):
+The full documentation lives at https://powpow.openpeeps.dev:
 
-- [Overview](docs/contents/overview.md) — architecture and the complete feature matrix
-- [Getting started](docs/contents/getting-started.md) — install and your first server
-- [Event loop](docs/contents/core/event-loop.md), [TCP](docs/contents/net/tcp.md),
-  [HTTP server](docs/contents/http/server.md), [WebSocket](docs/contents/websocket.md) and more — per-feature guides
-- [Threadpool](docs/contents/concurrency.md#threadpool): offloading CPU-bound work off a live event loop
-- [io_uring](docs/contents/io_uring.md) — the opt-in Linux submission-based backend
-- [Examples index](docs/contents/examples.md) — every runnable example, its port and commands
-- [API reference](docs/contents/api/README.md) — per-module signatures (plus the [generated reference](https://openpeeps.github.io/powpow))
-- [Performance](docs/contents/performance.md), [Security](docs/contents/security.md), [Testing](docs/contents/testing.md)
-
+- [Overview](https://powpow.openpeeps.dev/overview), architecture and the complete feature matrix
+- [Getting started](https://powpow.openpeeps.dev/getting-started), install and your first server
+- [Event loop](https://powpow.openpeeps.dev/core/event-loop), [TCP](https://powpow.openpeeps.dev/net/tcp),
+  [HTTP server](https://powpow.openpeeps.dev/http/server), [WebSocket](https://powpow.openpeeps.dev/websocket) and more, per-feature guides
+- [Threadpool](https://powpow.openpeeps.dev/concurrency#threadpool): offloading CPU-bound work off a live event loop
+- [io_uring](https://powpow.openpeeps.dev/io_uring.md), the opt-in Linux submission-based backend
+- [Examples index](https://powpow.openpeeps.dev/examples), every runnable example, its port and commands
+- [API reference](https://openpeeps.github.io/powpow) - Generated Nim documentation
+- [Performance](https://powpow.openpeeps.dev/performance), [Security](https://powpow.openpeeps.dev/security), [Testing](https://powpow.openpeeps.dev/testing)
 
 
 ### Security
@@ -179,7 +178,7 @@ Most web servers out there are all rainbows and flowers, until you upload or str
 - `tls_server.nim` an HTTPS server with an embedded self-signed certificate. `curl -k https://localhost:9443/hello` and the TLS handshake happens before your coffee does
 
 - `httpserver_ktls.nim` the same idea with **kernel TLS**: `sudo modprobe tls`, then file bodies leave through a real `sendfile(2)` onto the TLS socket and never enter userspace. `curl -k https://localhost:9444/ktls` reports whether *this* connection actually offloaded. Falls back to ordinary userspace TLS wherever kTLS doesn't exist, with no branching in your handler
-- `stream_server_ktls.nim` the streaming/download routes of `stream_server.nim` over TLS — `streamFile`, `sendFile`, resume-aware `serveFile` — showing which of them actually reach the zero-copy path and which never would
+- `stream_server_ktls.nim` the streaming/download routes of `stream_server.nim` over TLS, `streamFile`, `sendFile`, resume-aware `serveFile`, showing which of them actually reach the zero-copy path and which never would
 
 - `signal_bus.nim` an in-process pub/sub event bus (`SignalRelay`): an HTTP endpoint emits named events and subscribers react to them, including `listenOnce` and manual `unlisten`. Server-side events without a server-side framework
 
