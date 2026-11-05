@@ -6,4 +6,5 @@ jobs:
     with:
       cache: false
       nim-version: stable
+      os: '[{"os":"ubuntu-latest"},{"os":"ubuntu-24.04-arm"},{"os":"windows-latest"},{"os":"windows-11-arm"},{"os":"macos-15"}]'
       pre-test-command: 'if [ "$RUNNER_OS" = "Linux" ]; then sudo modprobe tls; fi'

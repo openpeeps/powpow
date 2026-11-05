@@ -369,11 +369,13 @@ when defined(linux):
 
   {.emit: """
 #if defined(__linux__) && defined(__has_include)
-#if __has_include(<linux/tls.h>) && __has_include(<linux/tcp.h>) && \
+#if __has_include(<linux/tls.h>) && __has_include(<netinet/tcp.h>) && \
     __has_include(<sys/socket.h>)
 #include <sys/socket.h>   /* SOL_TLS */
-/* <linux/tcp.h> alone: it redefines tcphdr/tcp_info against <netinet/tcp.h> */
-#include <linux/tcp.h>
+#include <netinet/tcp.h>  /* TCP_ULP — never <linux/tcp.h> here: the kernel
+                               header redefines struct tcphdr against this
+                               libc header, which Nim's posix bindings have
+                               already included above */
 #include <linux/tls.h>
 #define POWPOW_KTLS_ASSERT(sym, val) \
   typedef char powpow_ktls_assert_##sym[(sym) == (val) ? 1 : -1]
@@ -382,7 +384,9 @@ when defined(linux):
 POWPOW_KTLS_ASSERT(SOL_TLS, 282);
 POWPOW_KTLS_ASSERT(TLS_TX, 1);
 POWPOW_KTLS_ASSERT(TLS_RX, 2);
+#ifdef TCP_ULP
 POWPOW_KTLS_ASSERT(TCP_ULP, 31);
+#endif
 POWPOW_KTLS_ASSERT_SIZED(gcm128, sizeof(struct tls12_crypto_info_aes_gcm_128), 40);
 POWPOW_KTLS_ASSERT_SIZED(chacha,
                          sizeof(struct tls12_crypto_info_chacha20_poly1305), 56);
