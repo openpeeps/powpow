@@ -17,6 +17,7 @@ type
     answers: Table[string, seq[string]]   # hostname -> IPv4 list, or @["nx"]
     txtAnswers: Table[string, seq[string]] # hostname -> TXT record strings
     dropHosts: seq[string]
+    truncateHosts: seq[string]           # hostname -> UDP replies set TC=1 (A queries)
 
 proc decodeName(msg: seq[byte]; start: int): tuple[name: string, next: int] =
   var pos = start
@@ -76,11 +77,88 @@ proc dnsResponse(id: uint16; qname: string; rcode: int; qtype: uint16;
       for part in ip.split('.'):
         result.add(parseInt(part).uint8)
 
+proc dnsTruncated(id: uint16; qname: string; qtype: uint16): seq[byte] =
+  ## Minimal UDP response with TC=1 and no answers (RFC 1035 §4.2.1):
+  ## the resolver must retry the query over TCP.
+  result = newSeq[byte](12)
+  result[0] = byte((id shr 8) and 0xFF)
+  result[1] = byte(id and 0xFF)
+  result[2] = 0x83  # QR + TC
+  result[3] = 0x80  # RA
+  result[4] = 0; result[5] = 1          # QDCOUNT
+  result[6] = 0; result[7] = 0          # ANCOUNT
+  result[8] = 0; result[9] = 0
+  result[10] = 0; result[11] = 0
+  for label in qname.split('.'):
+    if label.len > 0:
+      result.add(label.len.uint8)
+      for ch in label:
+        result.add(ch.uint8)
+  result.add(0)
+  result.add(byte((qtype shr 8) and 0xFF)); result.add(byte(qtype and 0xFF))
+  result.add(0); result.add(1)
+
+type
+  FakeDnsTcp = ref object
+    ## Minimal DNS-over-TCP responder sharing the UDP fake's answer tables.
+    ## Listens on the same port (TCP vs UDP namespaces do not conflict) so
+    ## the resolver's TCP fallback reaches it via `q.server`.
+    server: TcpServer
+    fake: FakeDns
+    pending: Table[int, seq[byte]]  # conn fd -> reassembly buffer
+
+proc fakeTcpAnswer(fake: FakeDns; id: uint16; qname: string;
+                   qtype: uint16): seq[byte] =
+  ## Full (TC=0) answer for a TCP query, length-prefixed per RFC 1035 §4.2.2.
+  let key = qname.toLowerAscii()
+  var body: seq[byte]
+  if key in fake.answers and fake.answers[key] == @["nx"]:
+    body = dnsResponse(id, qname, 3, qtype, @[])
+  elif key in fake.answers and fake.answers[key].len > 0 and qtype == 1:
+    body = dnsResponse(id, qname, 0, qtype, fake.answers[key])
+  else:
+    body = dnsResponse(id, qname, 0, qtype, @[])
+  result = newSeq[byte](body.len + 2)
+  result[0] = byte((body.len shr 8) and 0xFF)
+  result[1] = byte(body.len and 0xFF)
+  for i, b in body: result[2 + i] = b
+
+proc startFakeDnsTcp(loop: Loop; port: int; fake: FakeDns): FakeDnsTcp =
+  let t = FakeDnsTcp(server: nil, fake: fake,
+                     pending: initTable[int, seq[byte]]())
+  t.server = newTcpServer(loop,
+    onData = proc(conn: Connection, data: openArray[byte]) =
+      let key = conn.fd.int
+      var buf = t.pending.getOrDefault(key)
+      for b in data: buf.add(b)
+      while buf.len >= 2:
+        let mlen = (int(buf[0]) shl 8) or int(buf[1])
+        if mlen < 12 or mlen > 65535:
+          break
+        if buf.len < 2 + mlen:
+          break
+        let query = buf[2 ..< 2 + mlen]
+        let qid = (uint16(query[0]) shl 8) or query[1]
+        let (name, pos) = decodeName(query, 12)
+        var qtype: uint16 = 1
+        if pos + 4 <= query.len:
+          qtype = (uint16(query[pos]) shl 8) or query[pos + 1]
+        discard conn.send(fakeTcpAnswer(fake, qid, name, qtype))
+        buf = if 2 + mlen < buf.len: buf[2 + mlen .. ^1] else: @[]
+      t.pending[key] = buf
+    ,
+    onClose = proc(conn: Connection) =
+      t.pending.del(conn.fd.int)
+  )
+  t.server.listen("127.0.0.1", port)
+  result = t
+
 proc startFakeDns(loop: Loop; port: int): FakeDns =
   let fake = FakeDns(
     queries: 0,
     answers: initTable[string, seq[string]](),
     dropHosts: @[],
+    truncateHosts: @[],
     sock: nil,
   )
   fake.sock = loop.bindUdp("127.0.0.1", port,
@@ -141,6 +219,10 @@ proc startFakeDns(loop: Loop; port: int): FakeDns =
             # NOERROR with no TXT records
             discard fake.sock.sendTo(
               dnsResponse(id, name, 0, qtype, @[]), sender)
+      elif key in fake.truncateHosts and qtype == 1:
+        # Truncated A answer: the resolver must retry over TCP.
+        discard fake.sock.sendTo(
+          dnsTruncated(id, name, qtype), sender)
       elif key in fake.answers:
         let ips = fake.answers[key]
         if ips == @["nx"]:
@@ -641,3 +723,73 @@ when not defined(macosx):
     assert not failed, "fallback should have succeeded"
     stopFakeDns(loop, fake)
     loop.close()
+
+test "test_dns_tcp_fallback_on_truncation":
+  # A TC=1 UDP answer must be retried over TCP (RFC 1035 §4.2.2) against the
+  # same nameserver endpoint. The TCP listener shares the UDP port (separate
+  # protocol namespaces). Only A queries are truncated here: AAAA answers
+  # empty over UDP, the A fallback goes UDP/TC -> TCP/full.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29996)])
+  loop.configureDns(300, 2)
+  var fake = startFakeDns(loop, 29996)
+  fake.answers["trunc.example"] = @["10.0.0.99"]
+  fake.truncateHosts = @["trunc.example"]
+  var tcpFake = startFakeDnsTcp(loop, 29996, fake)
+
+  var got: seq[Sockaddr_storage] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveAddr("trunc.example", 5000, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      errMsg = err
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire after TCP fallback"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected one address, got " & $got.len
+  var resolved = sockaddrFromIp("10.0.0.99", 5000)
+  let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
+  let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
+  assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
+    "resolved IP mismatch"
+  assert fake.queries >= 2, "expected AAAA + truncated A queries"
+  tcpFake.server.close()
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_tcp_refused_falls_back_to_next_server":
+  # No TCP listener on the first nameserver: the refused fallback must spend
+  # the attempt and retry the second nameserver over UDP.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 29997), ("127.0.0.1", 29998)])
+  loop.configureDns(300, 2)
+  var fake1 = startFakeDns(loop, 29997)
+  fake1.answers["multi.example"] = @["10.0.0.5"]
+  fake1.truncateHosts = @["multi.example"]
+  var fake2 = startFakeDns(loop, 29998)
+  fake2.answers["multi.example"] = @["10.0.0.6"]
+
+  var got: seq[Sockaddr_storage] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveAddr("multi.example", 5000, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      errMsg = err
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire after next-server retry"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected one address, got " & $got.len
+  var resolved = sockaddrFromIp("10.0.0.6", 5000)
+  let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
+  let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
+  assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
+    "expected second-server IP 10.0.0.6"
+  stopFakeDns(loop, fake1)
+  stopFakeDns(loop, fake2)
+  loop.close()

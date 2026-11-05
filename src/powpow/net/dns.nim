@@ -10,7 +10,9 @@
 ## blocking `getaddrinfo`. It reads the system resolver config (`/etc/hosts`
 ## and `/etc/resolv.conf` on POSIX), sends A/AAAA queries over a UDP socket
 ## owned by the loop, retries with the configured timeout/attempts, and caches
-## results by their TTL.
+## results by their TTL. Truncated (TC=1) UDP answers are retried over TCP
+## (RFC 1035 §4.2.2) on a transient non-blocking connection to the same
+## nameserver — no worker threads, no `--threads:on` requirement.
 ##
 ## `tcp.connect` uses this resolver, so outbound TCP connections no longer
 ## block the loop on DNS. The resolver runs with no worker threads and no
@@ -102,6 +104,16 @@ type
     attemptsLeft: int
     timer: TimerId
     done: bool
+    tcpFd: SocketHandle        ## TCP fallback socket, -1 when no TCP in flight
+    tcpActive: bool            ## true while a truncated answer is retried over TCP
+    tcpConnected: bool         ## TCP three-way handshake completed
+    tcpSendBuf: seq[byte]      ## length-prefixed query (RFC 1035 §4.2.2)
+    tcpSendOff: int
+    tcpLenBuf: array[2, byte]  ## 2-byte TCP length prefix being received
+    tcpLenOff: int
+    tcpMsgLen: int             ## expected message bytes, -1 until prefix complete
+    tcpRecvBuf: seq[byte]
+    tcpRecvOff: int
 
   DnsResolver* = ref object of RootObj
     loop: Loop
@@ -432,10 +444,228 @@ proc sendQuery(q: DnsQuery) =
     discard sendto(resolver.fd, unsafeAddr msg[0], msg.len.cint, 0,
                    cast[ptr Sockaddr](addr server), sLen)
 
+proc closeTcp(q: DnsQuery) =
+  ## Tear down a TCP fallback socket (if any): unregister the watcher and
+  ## close the fd. Safe to call when no TCP is in flight.
+  if q.tcpFd.int >= 0:
+    q.resolver.loop.unregister(q.tcpFd.int)
+    sockClose(q.tcpFd)
+    q.tcpFd = SocketHandle(-1)
+  q.tcpActive = false
+  q.tcpConnected = false
+
+# Forward declarations: the TCP fallback below retries through the same
+# timeout/fallback path as UDP.
+proc onTimeout(q: DnsQuery)
+proc startAFallback(q: DnsQuery)
+proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: cint;
+                qtype: uint16; cb: DnsCallback)
+proc onDnsResponse(q: DnsQuery; msg: openArray[byte]; fromTcp: bool)
+proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; mxs: seq[MxRecord];
+                   txts: seq[TxtRecord]; err: string)
+
+proc retryNextServer(q: DnsQuery) =
+  ## Shared retry step: the current attempt (UDP timeout or failed TCP
+  ## fallback) is spent — move to the next nameserver while attempts remain,
+  ## else AAAA→A fallback or a timeout error. The caller must have cleared
+  ## `q.timer` (fired or cancelled) before calling.
+  if q.done: return
+  dec q.attemptsLeft
+  if q.attemptsLeft > 0:
+    q.serverIdx = (q.serverIdx + 1) mod q.resolver.nameservers.len
+    q.resolver.queries.del(q.id)
+    q.id = q.resolver.nextQueryId()
+    q.resolver.queries[q.id] = q
+    q.sendQuery()
+    q.timer = q.resolver.loop.addTimer(q.resolver.timeoutMs) do (tid: int):
+      onTimeout(q)
+  elif q.qtype == DnsQtypeAAAA and q.mcb == nil:
+    startAFallback(q)
+  else:
+    q.completeQuery(@[], @[], @[],
+                    "DNS: timed out resolving " & q.hostname)
+
+proc failTcp(q: DnsQuery) =
+  ## A TCP fallback attempt failed (refused, reset, send/recv error,
+  ## oversize frame). Spend the attempt and continue on the next nameserver
+  ## via UDP — the same outcome as a UDP timeout.
+  if q.done: return
+  closeTcp(q)
+  if q.timer != TimerId(0):
+    q.resolver.loop.cancelTimer(q.timer)
+    q.timer = TimerId(0)
+  retryNextServer(q)
+
+proc pumpTcpSend(q: DnsQuery): bool =
+  ## Flush as much of the length-prefixed query as the socket takes.
+  ## Returns true when the whole frame is on the wire.
+  while q.tcpSendOff < q.tcpSendBuf.len:
+    let n = sockSend(q.tcpFd,
+                     unsafeAddr q.tcpSendBuf[q.tcpSendOff],
+                     q.tcpSendBuf.len - q.tcpSendOff)
+    if n > 0:
+      q.tcpSendOff += n
+    elif sockWouldBlock():
+      return false
+    else:
+      return false  # hard error — caller fails over via failTcp
+  return true
+
+proc pumpTcpRecv(q: DnsQuery): bool =
+  ## Drain the length-prefixed response. Returns true once the full message
+  ## is buffered (in `tcpRecvBuf`), false while more bytes are needed.
+  ## A hard error returns false with `tcpMsgLen` set to -2 as a poison flag.
+  while true:
+    if q.tcpLenOff < 2:
+      let n = sockRecv(q.tcpFd, addr q.tcpLenBuf[q.tcpLenOff], 2 - q.tcpLenOff)
+      if n > 0:
+        q.tcpLenOff += n
+        if q.tcpLenOff < 2:
+          continue
+        q.tcpMsgLen = (int(q.tcpLenBuf[0]) shl 8) or int(q.tcpLenBuf[1])
+        if q.tcpMsgLen < 12 or q.tcpMsgLen > 65535:
+          q.tcpMsgLen = -2  # poison: oversize/malformed frame
+          return false
+        q.tcpRecvBuf.setLen(q.tcpMsgLen)
+        q.tcpRecvOff = 0
+      elif n == 0:
+        q.tcpMsgLen = -2  # peer closed mid-frame
+        return false
+      elif sockWouldBlock():
+        return false
+      else:
+        q.tcpMsgLen = -2
+        return false
+    if q.tcpRecvOff < q.tcpMsgLen:
+      let n = sockRecv(q.tcpFd,
+                       addr q.tcpRecvBuf[q.tcpRecvOff],
+                       q.tcpMsgLen - q.tcpRecvOff)
+      if n > 0:
+        q.tcpRecvOff += n
+        if q.tcpRecvOff < q.tcpMsgLen:
+          continue
+        return true
+      elif n == 0:
+        q.tcpMsgLen = -2  # peer closed mid-message
+        return false
+      elif sockWouldBlock():
+        return false
+      else:
+        q.tcpMsgLen = -2
+        return false
+    return true
+
+proc onTcpEvent(q: DnsQuery; fd: int; ev: set[EventType]) =
+  if q.done or not q.tcpActive or q.tcpFd.int != fd:
+    return  # stale event after teardown / fd reuse
+  if not q.tcpConnected:
+    # kqueue reports a refused connect as Error with no Read/Hup — SO_ERROR
+    # may read 0 on that path, so refuse on the event set too (same rule as
+    # the TCP client connect path).
+    if Error in ev and Read notin ev and Hup notin ev:
+      failTcp(q)
+      return
+    var err: cint = 0
+    var errLen: SockLen = sizeof(err).SockLen
+    discard getsockopt(q.tcpFd, SOL_SOCKET, SO_ERROR, addr err, addr errLen)
+    if err != 0:
+      failTcp(q)
+      return
+    q.tcpConnected = true
+  if not q.tcpConnected:
+    return
+  if Write in ev or Hup in ev or Error in ev:
+    if q.tcpSendOff < q.tcpSendBuf.len:
+      let before = q.tcpSendOff
+      if not pumpTcpSend(q):
+        if q.tcpSendOff == before and not sockWouldBlock():
+          failTcp(q)
+          return
+        # Would-block or partial progress: if the socket errored, the next
+        # Read/Hup will surface it; keep waiting unless it was a hard error
+        # with no progress. A hard error surfaces as -1 without WouldBlock.
+        if q.tcpSendOff == before:
+          var err: cint = 0
+          var errLen: SockLen = sizeof(err).SockLen
+          discard getsockopt(q.tcpFd, SOL_SOCKET, SO_ERROR,
+                             addr err, addr errLen)
+          if err != 0:
+            failTcp(q)
+            return
+      if q.tcpSendOff >= q.tcpSendBuf.len:
+        # Request fully sent — reads from here on.
+        q.resolver.loop.modify(fd, {Read})
+  if Read in ev or Hup in ev:
+    if q.tcpSendOff < q.tcpSendBuf.len:
+      return  # still sending; reads wait their turn
+    if pumpTcpRecv(q):
+      let msg = q.tcpRecvBuf
+      closeTcp(q)
+      if q.timer != TimerId(0):
+        q.resolver.loop.cancelTimer(q.timer)
+        q.timer = TimerId(0)
+      onDnsResponse(q, msg, true)
+    elif q.tcpMsgLen == -2:
+      failTcp(q)
+    elif Hup in ev:
+      # Peer closed before delivering a full frame.
+      failTcp(q)
+  elif Error in ev:
+    failTcp(q)
+
+proc startTcpFallback(q: DnsQuery) =
+  ## Retry a truncated UDP answer over TCP (RFC 1035 §4.2.2): open a
+  ## non-blocking connection to the same nameserver, send the same query
+  ## length-prefixed, and parse the (untruncated) reply. Uses a raw socket +
+  ## loop watcher — never `tcp.connect`, which would recurse into DNS.
+  if q.done or q.tcpActive: return
+  let fd = socket(AF_INET, SOCK_STREAM, 0)
+  if fd.int < 0:
+    return  # no fd: keep the truncated error path below
+  setNonBlocking(fd)
+  var server = q.server
+  let sLen = getSockLen(addr server)
+  let ret = connect(fd, cast[ptr Sockaddr](addr server), sLen)
+  if ret < 0 and not sockInProgress():
+    sockClose(fd)
+    return
+  let msg = buildQuery(q.id, q.hostname, q.qtype)
+  q.tcpSendBuf = newSeq[byte](msg.len + 2)
+  q.tcpSendBuf[0] = byte((msg.len shr 8) and 0xFF)
+  q.tcpSendBuf[1] = byte(msg.len and 0xFF)
+  for i, b in msg: q.tcpSendBuf[2 + i] = b
+  q.tcpSendOff = 0
+  q.tcpLenOff = 0
+  q.tcpMsgLen = -1
+  q.tcpRecvBuf = @[]
+  q.tcpRecvOff = 0
+  q.tcpFd = fd
+  q.tcpActive = true
+  q.tcpConnected = (ret == 0)
+  # The UDP retry timer becomes the TCP deadline.
+  if q.timer != TimerId(0):
+    q.resolver.loop.cancelTimer(q.timer)
+    q.timer = TimerId(0)
+  q.timer = q.resolver.loop.addTimer(q.resolver.timeoutMs) do (tid: int):
+    onTimeout(q)
+  let loop = q.resolver.loop
+  if q.tcpConnected:
+    # Loopback-fast connect: try an eager send before arming the watcher.
+    if pumpTcpSend(q):
+      loop.register(fd.int, {Read},
+        callback = proc(rfd: int, ev: set[EventType]) = onTcpEvent(q, rfd, ev))
+    else:
+      loop.register(fd.int, {Read, Write},
+        callback = proc(rfd: int, ev: set[EventType]) = onTcpEvent(q, rfd, ev))
+  else:
+    loop.register(fd.int, {Read, Write},
+      callback = proc(rfd: int, ev: set[EventType]) = onTcpEvent(q, rfd, ev))
+
 proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; mxs: seq[MxRecord];
                    txts: seq[TxtRecord]; err: string) =
   if q.done: return
   q.done = true
+  closeTcp(q)
   q.resolver.queries.del(q.id)
   if q.timer != TimerId(0):
     q.resolver.loop.cancelTimer(q.timer)
@@ -462,12 +692,10 @@ proc completeQuery(q: DnsQuery; addrs: seq[ResolvedIp]; mxs: seq[MxRecord];
       q.cb(newSeq[Sockaddr_storage](),
            if err.len > 0: err else: "DNS: no addresses for " & q.hostname)
 
-proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: cint;
-                qtype: uint16; cb: DnsCallback)
-
 proc startAFallback(q: DnsQuery) =
   ## The AAAA query yielded nothing usable — retry with an A query.
   q.done = true
+  closeTcp(q)
   q.resolver.queries.del(q.id)
   if q.timer != TimerId(0):
     q.resolver.loop.cancelTimer(q.timer)
@@ -476,30 +704,27 @@ proc startAFallback(q: DnsQuery) =
 
 proc onTimeout(q: DnsQuery) =
   if q.done: return
+  closeTcp(q)
   q.timer = TimerId(0)
-  dec q.attemptsLeft
-  if q.attemptsLeft > 0:
-    q.serverIdx = (q.serverIdx + 1) mod q.resolver.nameservers.len
-    q.resolver.queries.del(q.id)
-    q.id = q.resolver.nextQueryId()
-    q.resolver.queries[q.id] = q
-    q.sendQuery()
-    q.timer = q.resolver.loop.addTimer(q.resolver.timeoutMs) do (tid: int):
-      onTimeout(q)
-  elif q.qtype == DnsQtypeAAAA and q.mcb == nil:
-    startAFallback(q)
-  else:
-    q.completeQuery(@[], @[], @[],
-                    "DNS: timed out resolving " & q.hostname)
+  retryNextServer(q)
 
-proc onDnsResponse(q: DnsQuery; msg: openArray[byte]) =
+proc onDnsResponse(q: DnsQuery; msg: openArray[byte]; fromTcp: bool) =
   if q.done: return
   let (rcode, addrs, mxs, txts, minTtl, truncated) = parseResponse(msg)
   let resolver = q.resolver
   let key = cacheKey(q.hostname, q.qtype)
   if truncated:
-    q.completeQuery(@[], @[], @[],
-      "DNS: truncated response for " & q.hostname & " (TCP fallback not implemented)")
+    if fromTcp:
+      # A truncated answer over TCP (should not happen) — fail rather than
+      # recurse into another TCP connection.
+      q.completeQuery(@[], @[], @[],
+        "DNS: truncated response over TCP for " & q.hostname)
+    else:
+      startTcpFallback(q)
+      if not q.tcpActive:
+        # No fd available: surface the truncation as an error.
+        q.completeQuery(@[], @[], @[],
+          "DNS: truncated response for " & q.hostname)
     return
   if rcode != 0:
     if rcode == 3:
@@ -548,7 +773,7 @@ proc startQuery(resolver: DnsResolver; hostname: string; port: int; sockType: ci
     id: id, hostname: hostname, port: port, sockType: sockType,
     qtype: qtype, cb: cb, resolver: resolver,
     serverIdx: 0, attemptsLeft: resolver.attempts, timer: TimerId(0),
-    done: false,
+    done: false, tcpFd: SocketHandle(-1), tcpMsgLen: -1,
   )
   resolver.queries[id] = q
   q.sendQuery()
@@ -564,7 +789,7 @@ proc startMxQuery(resolver: DnsResolver; domain: string; mcb: MxCallback) =
     id: id, hostname: domain, port: 0, sockType: 0,
     qtype: DnsQtypeMX, mcb: mcb, resolver: resolver,
     serverIdx: 0, attemptsLeft: resolver.attempts, timer: TimerId(0),
-    done: false,
+    done: false, tcpFd: SocketHandle(-1), tcpMsgLen: -1,
   )
   resolver.queries[id] = q
   q.sendQuery()
@@ -580,7 +805,7 @@ proc startTxtQuery(resolver: DnsResolver; hostname: string; tcb: TxtCallback) =
     id: id, hostname: hostname, port: 0, sockType: 0,
     qtype: DnsQtypeTXT, tcb: tcb, resolver: resolver,
     serverIdx: 0, attemptsLeft: resolver.attempts, timer: TimerId(0),
-    done: false,
+    done: false, tcpFd: SocketHandle(-1), tcpMsgLen: -1,
   )
   resolver.queries[id] = q
   q.sendQuery()
@@ -600,7 +825,7 @@ when iouEnabled:
       return
     if not sameEndpoint(sender, q.server):
       return   # not from the nameserver we queried — ignore
-    onDnsResponse(q, data)
+    onDnsResponse(q, data, false)
 else:
   proc onDnsReadable(resolver: DnsResolver) =
     var buf: array[DnsRecvBufSize, byte]
@@ -619,7 +844,7 @@ else:
         continue
       if not sameEndpoint(src, q.server):
         continue   # not from the nameserver we queried — ignore
-      onDnsResponse(q, buf.toOpenArray(0, n - 1))
+      onDnsResponse(q, buf.toOpenArray(0, n - 1), false)
 
 # ── Resolver lifecycle ────────────────────────────────────────────────────────
 
@@ -685,6 +910,7 @@ proc createResolver(loop: Loop): DnsResolver =
         sockClose(resolver.fd)
         resolver.fd = SocketHandle(-1)
     for q in resolver.queries.values:
+      closeTcp(q)
       if q.timer != TimerId(0):
         loop.cancelTimer(q.timer)
     resolver.queries.clear()
@@ -964,6 +1190,7 @@ proc closeDns*(loop: Loop) =
         sockClose(r.fd)
         r.fd = SocketHandle(-1)
     for q in r.queries.values:
+      closeTcp(q)
       if q.timer != TimerId(0):
         r.loop.cancelTimer(q.timer)
     r.queries.clear()
