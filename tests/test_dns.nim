@@ -153,7 +153,7 @@ proc startFakeDnsTcp(loop: Loop; port: int; fake: FakeDns): FakeDnsTcp =
   t.server.listen("127.0.0.1", port)
   result = t
 
-proc startFakeDns(loop: Loop; port: int): FakeDns =
+proc startFakeDns(loop: Loop; port: int; bindAddr = "127.0.0.1"): FakeDns =
   let fake = FakeDns(
     queries: 0,
     answers: initTable[string, seq[string]](),
@@ -161,7 +161,7 @@ proc startFakeDns(loop: Loop; port: int): FakeDns =
     truncateHosts: @[],
     sock: nil,
   )
-  fake.sock = loop.bindUdp("127.0.0.1", port,
+  fake.sock = loop.bindUdp(bindAddr, port,
     onData = proc(sender: Sockaddr_storage; data: openArray[byte]) =
       inc fake.queries
       if data.len < 12:
@@ -793,3 +793,233 @@ test "test_dns_tcp_refused_falls_back_to_next_server":
   stopFakeDns(loop, fake1)
   stopFakeDns(loop, fake2)
   loop.close()
+
+test "test_dns_resolv_conf_parsing":
+  let c = parseResolvConfContent("""
+# comment line
+; another comment
+nameserver 8.8.8.8
+nameserver 2001:4860:4860::8888
+nameserver fe80::1%3
+nameserver bogus
+search example.com corp
+options ndots:2 timeout:1 attempts:3
+domain ignored.example
+search final.example
+""")
+  # bogus is skipped; scope %3 parsed numerically.
+  assert c.nameservers.len == 3, "expected 3 nameservers, got " & $c.nameservers.len
+  assert c.timeoutMs == 1000, "timeout: form must parse"
+  assert c.attempts == 3
+  assert c.ndots == 2
+  # last of search/domain wins.
+  assert c.search == @["final.example"], "unexpected search list: " & $c.search
+  # entries are ResolvedIp (family applied by makeSockaddr at send time);
+  # the numeric scope must survive on the third entry. IPv6 handling itself
+  # is covered end-to-end by test_dns_ipv6_nameserver below.
+  assert c.nameservers[2].scope == 3, "numeric scope must survive"
+  # '=' separator form also parses.
+  let c2 = parseResolvConfContent("options ndots=4 timeout=2 attempts=1\n")
+  assert c2.ndots == 4
+  assert c2.timeoutMs == 2000
+  assert c2.attempts == 1
+  when not defined(windows):
+    # Interface-name scopes resolve via if_nametoindex.
+    when defined(linux):
+      const loName = "lo"
+    else:
+      const loName = "lo0"
+    let scoped = parseNameserverIp("fe80::1%" & loName)
+    assert scoped.scope != 0, "if_nametoindex should resolve loopback"
+
+test "test_dns_search_expansion":
+  # Short name with 0 dots (< default ndots 1) tries the search domain first.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 30001)])
+  loop.configureDns(300, 2)
+  loop.setSearchDomains(["example"])
+  var fake = startFakeDns(loop, 30001)
+  fake.answers["web.example"] = @["10.0.1.1"]
+
+  var got: seq[Sockaddr_storage] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveAddr("web", 80, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      errMsg = err
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire after search expansion"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected one address, got " & $got.len
+  var resolved = sockaddrFromIp("10.0.1.1", 80)
+  let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
+  let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
+  assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
+    "resolved IP mismatch"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_search_absolute_first":
+  # "abs.example" has 1 dot (>= default ndots 1): absolute first, even
+  # though the expansion would also answer.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 30002)])
+  loop.configureDns(300, 2)
+  loop.setSearchDomains(["search"])
+  var fake = startFakeDns(loop, 30002)
+  fake.answers["abs.example"] = @["10.0.1.11"]
+  fake.answers["abs.example.search"] = @["10.0.1.12"]
+
+  var got: seq[Sockaddr_storage] = @[]
+  var called = false
+  loop.resolveAddr("abs.example", 80, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire"
+  assert got.len == 1, "expected one address, got " & $got.len
+  var resolved = sockaddrFromIp("10.0.1.11", 80)
+  let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
+  let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
+  assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
+    "absolute must win over the search expansion"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_search_ndots_order":
+  # With ndots=2, "a.b" (1 dot) tries the search domain FIRST.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 30003)])
+  loop.configureDns(300, 2)
+  loop.setSearchDomains(["s"])
+  loop.setNdots(2)
+  var fake = startFakeDns(loop, 30003)
+  fake.answers["a.b"] = @["10.0.1.14"]
+  fake.answers["a.b.s"] = @["10.0.1.13"]
+
+  var got: seq[Sockaddr_storage] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveAddr("a.b", 80, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      errMsg = err
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected one address, got " & $got.len
+  var resolved = sockaddrFromIp("10.0.1.13", 80)
+  let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
+  let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
+  assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
+    "search expansion must win when dots < ndots"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_trailing_dot_no_search":
+  # A trailing dot disables the search list entirely.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 30004)])
+  loop.configureDns(300, 2)
+  loop.setSearchDomains(["example"])
+  var fake = startFakeDns(loop, 30004)
+  fake.answers["web.example"] = @["10.0.1.1"]
+
+  var got: seq[Sockaddr_storage] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveAddr("web.example.", 80, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      errMsg = err
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected one address, got " & $got.len
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_search_nxdomain_continues":
+  # NXDOMAIN on the first candidate continues to the next search domain.
+  let loop = newLoop()
+  loop.setDnsServers([("127.0.0.1", 30005)])
+  loop.configureDns(300, 2)
+  loop.setSearchDomains(["s1", "s2"])
+  var fake = startFakeDns(loop, 30005)
+  fake.answers["h.s1"] = @["nx"]
+  fake.answers["h.s2"] = @["10.0.1.15"]
+
+  var got: seq[Sockaddr_storage] = @[]
+  var errMsg = ""
+  var called = false
+  loop.resolveAddr("h", 80, SOCK_STREAM,
+    proc(addrs: seq[Sockaddr_storage]; err: string) =
+      got = addrs
+      errMsg = err
+      called = true
+  )
+  discard pollUntil(loop, proc(): bool = called, 20_000)
+  assert called, "callback should fire after NXDOMAIN continue"
+  assert errMsg.len == 0, "no error expected, got: " & errMsg
+  assert got.len == 1, "expected one address, got " & $got.len
+  var resolved = sockaddrFromIp("10.0.1.15", 80)
+  let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
+  let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
+  assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
+    "expected second-domain IP"
+  stopFakeDns(loop, fake)
+  loop.close()
+
+test "test_dns_ipv6_nameserver":
+  # Queries work over an IPv6 nameserver (::1). Skipped where the host
+  # has no IPv6 stack.
+  let loop = newLoop()
+  var fake: FakeDns = nil
+  var skipReason = ""
+  try:
+    fake = startFakeDns(loop, 30006, "::1")
+  except CatchableError as e:
+    skipReason = "no IPv6 bind: " & e.msg
+  if skipReason.len == 0:
+    try:
+      loop.setDnsServers([("::1", 30006)])
+    except NetError as e:
+      skipReason = "no IPv6 stack: " & e.msg
+  if skipReason.len > 0:
+    echo "  (skip: ", skipReason, ")"
+    if fake != nil:
+      stopFakeDns(loop, fake)
+    loop.close()
+  else:
+    loop.configureDns(300, 2)
+    fake.answers["v6.example"] = @["10.0.2.1"]
+
+    var got: seq[Sockaddr_storage] = @[]
+    var errMsg = ""
+    var called = false
+    loop.resolveAddr("v6.example", 80, SOCK_STREAM,
+      proc(addrs: seq[Sockaddr_storage]; err: string) =
+        got = addrs
+        errMsg = err
+        called = true
+    )
+    discard pollUntil(loop, proc(): bool = called, 20_000)
+    assert called, "callback should fire via IPv6 nameserver"
+    assert errMsg.len == 0, "no error expected, got: " & errMsg
+    assert got.len == 1, "expected one address, got " & $got.len
+    var resolved = sockaddrFromIp("10.0.2.1", 80)
+    let got4 = cast[ptr Sockaddr_in](unsafeAddr got[0])
+    let exp4 = cast[ptr Sockaddr_in](unsafeAddr resolved)
+    assert cmpMem(addr got4.sin_addr, addr exp4.sin_addr, 4) == 0,
+      "resolved IP mismatch"
+    stopFakeDns(loop, fake)
+    loop.close()

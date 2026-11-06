@@ -8,11 +8,13 @@
 ##
 ## Resolves hostnames to socket addresses entirely on the event loop, without
 ## blocking `getaddrinfo`. It reads the system resolver config (`/etc/hosts`
-## and `/etc/resolv.conf` on POSIX), sends A/AAAA queries over a UDP socket
-## owned by the loop, retries with the configured timeout/attempts, and caches
-## results by their TTL. Truncated (TC=1) UDP answers are retried over TCP
-## (RFC 1035 §4.2.2) on a transient non-blocking connection to the same
-## nameserver — no worker threads, no `--threads:on` requirement.
+## and `/etc/resolv.conf` on POSIX): `search`/`domain` + `ndots` expand short
+## names to candidate FQDNs (trailing dot disables expansion), `timeout` /
+## `attempts` bound retries, and IPv4 + IPv6 nameservers (with optional
+## `%scope`) are each served by their own UDP socket owned by the loop.
+## Truncated (TC=1) UDP answers are retried over TCP (RFC 1035 §4.2.2) on a
+## transient non-blocking connection to the same nameserver, and results are
+## cached by their TTL — no worker threads, no `--threads:on` requirement.
 ##
 ## `tcp.connect` uses this resolver, so outbound TCP connections no longer
 ## block the loop on DNS. The resolver runs with no worker threads and no
@@ -36,6 +38,8 @@ when iouEnabled:
 const
   DefaultDnsTimeoutMs = 5_000
   DefaultDnsAttempts  = 2
+  DefaultNdots        = 1
+  MaxSearchDomains    = 6   ## glibc MAXDNSRCH: at most 6 search domains
   DnsPort             = 53
   MaxOutstandingQueries = 256
   NegativeCacheMs     = 30_000
@@ -81,6 +85,9 @@ type
     af: cint
     addr4: array[4, byte]
     addr6: array[16, byte]
+    scope*: uint32
+      ## IPv6 scope ID (e.g. from `fe80::1%eth0` in resolv.conf). Zero means
+      ## no scope; only meaningful when `af` is AF_INET6.
 
   DnsCacheEntry* = object
     addrs: seq[ResolvedIp]
@@ -121,14 +128,20 @@ type
       sock: UdpSocket
     else:
       fd: SocketHandle
+    fd6: SocketHandle       ## IPv6 UDP socket, -1 when no IPv6 nameserver
     nextId: uint16
     queries: Table[uint16, DnsQuery]
     cache: Table[string, DnsCacheEntry]
     nameservers: seq[Sockaddr_storage]
     timeoutMs: int
     attempts: int
+    searchDomains: seq[string]  ## resolv.conf `search`/`domain` (lowercased)
+    ndots: int                  ## minimum dots for absolute-first (default 1)
 
 # ── IP helpers ────────────────────────────────────────────────────────────────
+
+when not defined(windows):
+  proc if_nametoindex(ifname: cstring): cuint {.importc, header: "<net/if.h>".}
 
 proc parseIpLiteral(ip: string): ResolvedIp =
   result.af = AF_INET.cint
@@ -138,6 +151,39 @@ proc parseIpLiteral(ip: string): ResolvedIp =
   if inet_pton(AF_INET6, ip.cstring, cast[pointer](addr result.addr6[0])) == 1:
     return
   raise newException(NetError, "invalid IP literal: " & ip)
+
+proc parseNameserverIp*(s: string): ResolvedIp =
+  ## Parse a nameserver address, accepting an optional `%scope` suffix on
+  ## IPv6 literals (`fe80::1%eth0` or `fe80::1%3` as found in resolv.conf).
+  ## Interface names resolve via `if_nametoindex`; plain numbers are used
+  ## directly. Raises NetError on invalid input.
+  var host = s
+  var scope: uint32 = 0
+  let pct = s.find('%')
+  if pct >= 0:
+    host = s[0 ..< pct]
+    let iface = s[pct + 1 .. ^1]
+    if iface.len == 0:
+      raise newException(NetError, "invalid nameserver address: " & s)
+    var parsed = false
+    try:
+      scope = parseUInt(iface).uint32
+      parsed = true
+    except ValueError:
+      discard
+    if not parsed:
+      when not defined(windows):
+        let idx = if_nametoindex(iface.cstring)
+        if idx == 0:
+          raise newException(NetError, "unknown interface: " & iface)
+        scope = idx
+      else:
+        raise newException(NetError, "scoped IPv6 unsupported: " & s)
+  result = parseIpLiteral(host)
+  if scope != 0:
+    if result.af != AF_INET6.cint:
+      raise newException(NetError, "scope on non-IPv6 address: " & s)
+    result.scope = scope
 
 proc makeSockaddr(ip: ResolvedIp; port: int): Sockaddr_storage =
   var res: Sockaddr_storage
@@ -158,6 +204,10 @@ proc makeSockaddr(ip: ResolvedIp; port: int): Sockaddr_storage =
       sai6.sin6_family = TSa_Family(AF_INET6)
     sai6.sin6_port = htons(port.uint16)
     copyMem(addr sai6.sin6_addr, unsafeAddr ip.addr6[0], 16)
+    when defined(windows):
+      sai6.sin6_scope_id = ip.scope.int32
+    else:
+      sai6.sin6_scope_id = ip.scope
     copyMem(addr res, addr sai6, sizeof(sai6))
   result = res
 
@@ -370,44 +420,78 @@ proc getHosts(): Table[string, seq[ResolvedIp]] =
     parsedHosts["localhost"] = @[parseIpLiteral("127.0.0.1")]
   result = parsedHosts
 
-proc parseResolvConf(): tuple[nameservers: seq[ResolvedIp], timeoutMs: int, attempts: int] =
-  result = (newSeq[ResolvedIp](), DefaultDnsTimeoutMs, DefaultDnsAttempts)
+proc parseResolvConfContent*(content: string):
+    tuple[nameservers: seq[ResolvedIp], timeoutMs: int, attempts: int,
+          search: seq[string], ndots: int] =
+  ## Parse resolv.conf text (pure function of the content, so it is directly
+  ## unit-testable). Understands `nameserver` (IPv4 and IPv6 with optional
+  ## `%scope`), `search` / `domain` (last one wins, capped at 6), and
+  ## `options timeout:` / `attempts:` / `ndots:` (both `:` and `=` forms).
+  result = (newSeq[ResolvedIp](), DefaultDnsTimeoutMs, DefaultDnsAttempts,
+            newSeq[string](), DefaultNdots)
+  for line in content.splitLines():
+    let line = line.strip()
+    if line.len == 0 or line[0] == '#' or line[0] == ';':
+      continue
+    let parts = line.splitWhitespace()
+    if parts.len < 2:
+      continue
+    case parts[0]
+    of "nameserver":
+      try:
+        result.nameservers.add(parseNameserverIp(parts[1]))
+      except NetError:
+        discard
+    of "search":
+      result.search.setLen(0)
+      for d in parts[1 .. ^1]:
+        if result.search.len >= MaxSearchDomains:
+          break
+        let dd = d.strip(chars = {'.'}).toLowerAscii()
+        if dd.len > 0:
+          result.search.add(dd)
+    of "domain":
+      # `search` and `domain` are mutually exclusive; the last one in file
+      # order wins, so both simply overwrite.
+      let dd = parts[1].strip(chars = {'.'}).toLowerAscii()
+      result.search = if dd.len > 0: @[dd] else: @[]
+    of "options":
+      for opt in parts[1 .. ^1]:
+        var sep = opt.find(':')
+        if sep < 0:
+          sep = opt.find('=')
+        if sep > 0:
+          let key = opt[0 ..< sep]
+          let val = opt[sep + 1 .. ^1]
+          case key
+          of "timeout":
+            try:
+              let v = parseInt(val)
+              if v > 0: result.timeoutMs = v * 1000
+            except ValueError:
+              discard
+          of "attempts":
+            try:
+              let v = parseInt(val)
+              if v > 0: result.attempts = v
+            except ValueError:
+              discard
+          of "ndots":
+            try:
+              let v = parseInt(val)
+              if v >= 0 and v <= 15: result.ndots = v
+            except ValueError:
+              discard
+          else: discard
+    else: discard
+
+proc parseResolvConf(): tuple[nameservers: seq[ResolvedIp], timeoutMs: int,
+                              attempts: int, search: seq[string], ndots: int] =
+  result = (newSeq[ResolvedIp](), DefaultDnsTimeoutMs, DefaultDnsAttempts,
+            newSeq[string](), DefaultNdots)
   when not defined(windows):
     if fileExists(ResolvConfPath):
-      for line in ResolvConfPath.readFile().splitLines():
-        let line = line.strip()
-        if line.len == 0 or line[0] == '#' or line[0] == ';':
-          continue
-        let parts = line.splitWhitespace()
-        if parts.len < 2:
-          continue
-        case parts[0]
-        of "nameserver":
-          try:
-            result.nameservers.add(parseIpLiteral(parts[1]))
-          except NetError:
-            discard
-        of "options":
-          for opt in parts[1 .. ^1]:
-            let eq = opt.find('=')
-            if eq > 0:
-              let key = opt[0 ..< eq]
-              let val = opt[eq + 1 .. ^1]
-              case key
-              of "timeout":
-                try:
-                  let v = parseInt(val)
-                  if v > 0: result.timeoutMs = v * 1000
-                except ValueError:
-                  discard
-              of "attempts":
-                try:
-                  let v = parseInt(val)
-                  if v > 0: result.attempts = v
-                except ValueError:
-                  discard
-              else: discard
-        else: discard
+      result = parseResolvConfContent(ResolvConfPath.readFile())
 
 proc defaultNameservers(): seq[ResolvedIp] =
   @[parseIpLiteral("8.8.8.8"), parseIpLiteral("1.1.1.1")]
@@ -432,17 +516,27 @@ proc nextQueryId(resolver: DnsResolver): uint16 =
     if resolver.nextId notin resolver.queries:
       return resolver.nextId
 
+proc serverFamily(server: Sockaddr_storage): cushort {.inline.} =
+  cast[ptr Sockaddr](unsafeAddr server).sa_family
+
 proc sendQuery(q: DnsQuery) =
   let resolver = q.resolver
   let server = resolver.nameservers[q.serverIdx mod resolver.nameservers.len]
   q.server = server
   let msg = buildQuery(q.id, q.hostname, q.qtype)
-  when iouEnabled:
-    discard resolver.sock.sendTo(msg, server)
-  else:
+  if serverFamily(server) == AF_INET6.cushort:
+    # IPv6 nameserver: raw socket shared by both backends (a second
+    # op-driven UdpSocket would need buffer registration before bind).
     let sLen = getSockLen(addr server)
-    discard sendto(resolver.fd, unsafeAddr msg[0], msg.len.cint, 0,
+    discard sendto(resolver.fd6, unsafeAddr msg[0], msg.len.cint, 0,
                    cast[ptr Sockaddr](addr server), sLen)
+  else:
+    when iouEnabled:
+      discard resolver.sock.sendTo(msg, server)
+    else:
+      let sLen = getSockLen(addr server)
+      discard sendto(resolver.fd, unsafeAddr msg[0], msg.len.cint, 0,
+                     cast[ptr Sockaddr](addr server), sLen)
 
 proc closeTcp(q: DnsQuery) =
   ## Tear down a TCP fallback socket (if any): unregister the watcher and
@@ -619,11 +713,12 @@ proc startTcpFallback(q: DnsQuery) =
   ## length-prefixed, and parse the (untruncated) reply. Uses a raw socket +
   ## loop watcher — never `tcp.connect`, which would recurse into DNS.
   if q.done or q.tcpActive: return
-  let fd = socket(AF_INET, SOCK_STREAM, 0)
+  var server = q.server
+  let fam = serverFamily(server)
+  let fd = socket(fam.cint, SOCK_STREAM, 0)
   if fd.int < 0:
     return  # no fd: keep the truncated error path below
   setNonBlocking(fd)
-  var server = q.server
   let sLen = getSockLen(addr server)
   let ret = connect(fd, cast[ptr Sockaddr](addr server), sLen)
   if ret < 0 and not sockInProgress():
@@ -814,39 +909,89 @@ proc startTxtQuery(resolver: DnsResolver; hostname: string; tcb: TxtCallback) =
 
 # ── Receive dispatch ──────────────────────────────────────────────────────────
 
+proc onDnsPacket(resolver: DnsResolver; sender: Sockaddr_storage;
+                 data: openArray[byte]) =
+  ## Shared receive path (both backends, UDP and TCP-fallback adjacent):
+  ## match a datagram to its query, ignoring spoofed/short packets.
+  if data.len < 12:
+    return
+  let id = (uint16(data[0]) shl 8) or data[1]
+  let q = resolver.queries.getOrDefault(id)
+  if q == nil or q.done:
+    return
+  if not sameEndpoint(sender, q.server):
+    return   # not from the nameserver we queried — ignore
+  onDnsResponse(q, data, false)
+
 when iouEnabled:
   proc onDnsDatagram(resolver: DnsResolver; sender: Sockaddr_storage;
                      data: openArray[byte]) =
-    if data.len < 12:
-      return
-    let id = (uint16(data[0]) shl 8) or data[1]
+    resolver.onDnsPacket(sender, data)
+
+proc onDnsReadable(resolver: DnsResolver; fd: SocketHandle) =
+  ## Drain a raw readiness-watched UDP socket: the IPv4 socket on the
+  ## readiness backend, and the IPv6 socket on both backends (a POLL_ADD
+  ## watcher also works under io_uring).
+  var buf: array[DnsRecvBufSize, byte]
+  while true:
+    var src {.noInit.}: Sockaddr_storage
+    var srcLen: SockLen = sizeof(src).SockLen
+    let n = recvfrom(fd, addr buf[0], buf.len.cint, 0,
+                     cast[ptr Sockaddr](addr src), addr srcLen)
+    if n <= 0:
+      break
+    if n < 12:
+      continue
+    let id = (uint16(buf[0]) shl 8) or buf[1]
     let q = resolver.queries.getOrDefault(id)
     if q == nil or q.done:
-      return
-    if not sameEndpoint(sender, q.server):
-      return   # not from the nameserver we queried — ignore
-    onDnsResponse(q, data, false)
-else:
-  proc onDnsReadable(resolver: DnsResolver) =
-    var buf: array[DnsRecvBufSize, byte]
-    while true:
-      var src {.noInit.}: Sockaddr_storage
-      var srcLen: SockLen = sizeof(src).SockLen
-      let n = recvfrom(resolver.fd, addr buf[0], buf.len.cint, 0,
-                       cast[ptr Sockaddr](addr src), addr srcLen)
-      if n <= 0:
-        break
-      if n < 12:
-        continue
-      let id = (uint16(buf[0]) shl 8) or buf[1]
-      let q = resolver.queries.getOrDefault(id)
-      if q == nil or q.done:
-        continue
-      if not sameEndpoint(src, q.server):
-        continue   # not from the nameserver we queried — ignore
-      onDnsResponse(q, buf.toOpenArray(0, n - 1), false)
+      continue
+    if not sameEndpoint(src, q.server):
+      continue   # not from the nameserver we queried — ignore
+    onDnsResponse(q, buf.toOpenArray(0, n - 1), false)
 
 # ── Resolver lifecycle ────────────────────────────────────────────────────────
+
+proc ensureV6Socket(resolver: DnsResolver): bool =
+  ## Create the IPv6 UDP socket when an IPv6 nameserver is configured and no
+  ## v6 socket exists yet (shared by both backends: a raw readiness watcher
+  ## also works under io_uring). On failure (no IPv6 stack) returns false and
+  ## the caller drops IPv6 nameservers so queries stay on IPv4.
+  var needV6 = false
+  for ns in resolver.nameservers:
+    if serverFamily(ns) == AF_INET6.cushort:
+      needV6 = true
+      break
+  if not needV6:
+    return true
+  if resolver.fd6.int >= 0:
+    return true
+  let fd6 = socket(AF_INET6.cint, SOCK_DGRAM, 0)
+  if fd6.cint < 0:
+    return false
+  setNonBlocking(fd6)
+  setIpv6Only(fd6)
+  var local6: Sockaddr_in6
+  when defined(windows):
+    local6.sin6_family = AF_INET6.cushort
+  else:
+    local6.sin6_family = TSa_Family(AF_INET6)
+  local6.sin6_port = 0
+  if bindSocket(fd6, cast[ptr Sockaddr](addr local6),
+                sizeof(local6).SockLen) < 0:
+    sockClose(fd6)
+    return false
+  resolver.fd6 = fd6
+  let loop = resolver.loop
+  loop.register(fd6.int, {Read},
+    edgeTriggered = true,
+    callback = proc(rfd: int, ev: set[EventType]) =
+      if Error in ev or Hup in ev:
+        return
+      if Read in ev:
+        resolver.onDnsReadable(fd6)
+  )
+  return true
 
 proc createResolver(loop: Loop): DnsResolver =
   let resolver = DnsResolver(
@@ -857,15 +1002,17 @@ proc createResolver(loop: Loop): DnsResolver =
     nameservers: @[],
     timeoutMs: DefaultDnsTimeoutMs,
     attempts: DefaultDnsAttempts,
+    searchDomains: @[],
+    ndots: DefaultNdots,
+    fd6: SocketHandle(-1),
   )
   let conf = parseResolvConf()
   resolver.timeoutMs = conf.timeoutMs
   resolver.attempts = conf.attempts
+  resolver.searchDomains = conf.search
+  resolver.ndots = conf.ndots
   for ns in conf.nameservers:
-    # The resolver socket is AF_INET — IPv6 nameservers (e.g. fe80::1%en0 in
-    # resolv.conf) cannot be queried and sendto() fails with EINVAL.
-    if ns.af == AF_INET.cint:
-      resolver.nameservers.add(makeSockaddr(ns, DnsPort))
+    resolver.nameservers.add(makeSockaddr(ns, DnsPort))
   if resolver.nameservers.len == 0:
     for ip in defaultNameservers():
       resolver.nameservers.add(makeSockaddr(ip, DnsPort))
@@ -895,8 +1042,19 @@ proc createResolver(loop: Loop): DnsResolver =
         if Error in ev or Hup in ev:
           return
         if Read in ev:
-          resolver.onDnsReadable()
+          resolver.onDnsReadable(fd)
     )
+
+  if not resolver.ensureV6Socket():
+    # No IPv6 stack: drop IPv6 nameservers so queries stay on IPv4.
+    var v4: seq[Sockaddr_storage]
+    for ns in resolver.nameservers:
+      if serverFamily(ns) != AF_INET6.cushort:
+        v4.add(ns)
+    resolver.nameservers = v4
+  if resolver.nameservers.len == 0:
+    for ip in defaultNameservers():
+      resolver.nameservers.add(makeSockaddr(ip, DnsPort))
 
   loop.dns = resolver
   loop.addCleanup(proc() =
@@ -909,6 +1067,10 @@ proc createResolver(loop: Loop): DnsResolver =
         loop.unregister(resolver.fd.int)
         sockClose(resolver.fd)
         resolver.fd = SocketHandle(-1)
+    if resolver.fd6.int >= 0:
+      loop.unregister(resolver.fd6.int)
+      sockClose(resolver.fd6)
+      resolver.fd6 = SocketHandle(-1)
     for q in resolver.queries.values:
       closeTcp(q)
       if q.timer != TimerId(0):
@@ -923,28 +1085,38 @@ proc getResolver(loop: Loop): DnsResolver =
   else:
     result = cast[DnsResolver](loop.dns)
 
+proc searchCandidates(resolver: DnsResolver; hostname: string): seq[string] =
+  ## Search-list expansion (man resolv.conf): a trailing dot disables the
+  ## search list entirely; names with at least `ndots` dots are tried absolute
+  ## first, shorter names try each search domain first. Always returns at
+  ## least one (lowercased) candidate.
+  let lower = hostname.toLowerAscii()
+  if lower.endsWith('.'):
+    if lower.len > 1:
+      return @[lower[0 .. ^2]]
+    return @[lower]
+  if resolver.searchDomains.len == 0:
+    return @[lower]
+  var dots = 0
+  for ch in lower:
+    if ch == '.': inc dots
+  if dots >= resolver.ndots:
+    result = @[lower]
+    for d in resolver.searchDomains:
+      result.add(lower & "." & d)
+  else:
+    for d in resolver.searchDomains:
+      result.add(lower & "." & d)
+    result.add(lower)
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
-proc resolveAddr*(loop: Loop; address: string; port: int;
-                       sockType: cint;
-                       cb: proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.}) =
-  ## Resolve `address:port` asynchronously on `loop`. `cb` runs on the loop
-  ## thread with ALL resolved socket addresses (or an empty seq plus a
-  ## non-empty `err` on failure). Never blocks the loop on DNS.
-  ##
-  ## Numeric IPv4/IPv6 literals resolve immediately without any DNS I/O.
-  if isIpAddress(address):
-    var addrBuf: Sockaddr_storage
-    try:
-      addrBuf = sockaddrFromIp(address, port)
-    except NetError as e:
-      cb(newSeq[Sockaddr_storage](), e.msg)
-      return
-    cb(@[addrBuf], "")
-    return
-
-  let name = address.toLowerAscii()
-
+proc resolveAddrCandidate(loop: Loop; name: string; port: int;
+                              sockType: cint;
+                              cb: proc(addrs: seq[Sockaddr_storage];
+                                       err: string) {.closure.}) =
+  ## Single-candidate address resolution (no search expansion): cache, then
+  ## /etc/hosts, then an AAAA query with A fallback on the loop.
   if loop.dns != nil:
     let r = cast[DnsResolver](loop.dns)
     # The single-family path prefers AAAA but may have fallen back to A in a
@@ -954,7 +1126,7 @@ proc resolveAddr*(loop: Loop; address: string; port: int;
       if cached.addrs.len > 0 or cached.negative:
         if cached.expiresAt > monoMs():
           if cached.negative:
-            cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & address)
+            cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & name)
           else:
             var outAddrs: seq[Sockaddr_storage]
             for ip in cached.addrs:
@@ -977,23 +1149,70 @@ proc resolveAddr*(loop: Loop; address: string; port: int;
   except CatchableError as e:
     cb(newSeq[Sockaddr_storage](), e.msg)
     return
-  startQuery(resolver, address, port, sockType, DnsQtypeAAAA, cb)
+  startQuery(resolver, name, port, sockType, DnsQtypeAAAA, cb)
 
-proc resolveMx*(loop: Loop; domain: string; mcb: MxCallback) =
-  ## Resolve MX records for `domain` asynchronously on `loop`. `mcb` runs on
-  ## the loop thread with the records sorted by ascending preference (or an
-  ## empty seq when the name exists but publishes no MX — callers decide
-  ## whether to fall back to address resolution, e.g. RFC 5321 §5.1). A
-  ## non-empty `err` signals NXDOMAIN or a resolver failure. Never blocks the
-  ## loop on DNS.
-  let key = cacheKey(domain, DnsQtypeMX)
+proc resolveAddr*(loop: Loop; address: string; port: int;
+                  sockType: cint;
+                  cb: proc(addrs: seq[Sockaddr_storage];
+                           err: string) {.closure.}) =
+  ## Resolve `address:port` asynchronously on `loop`. `cb` runs on the loop
+  ## thread with ALL resolved socket addresses (or an empty seq plus a
+  ## non-empty `err` on failure). Never blocks the loop on DNS.
+  ##
+  ## Numeric IPv4/IPv6 literals resolve immediately without any DNS I/O.
+  ## Other names expand through the search list (`setSearchDomains`,
+  ## `ndots` rule): candidates are tried in order until one succeeds, and
+  ## the last error is reported when all fail.
+  if isIpAddress(address):
+    var addrBuf: Sockaddr_storage
+    try:
+      addrBuf = sockaddrFromIp(address, port)
+    except NetError as e:
+      cb(newSeq[Sockaddr_storage](), e.msg)
+      return
+    cb(@[addrBuf], "")
+    return
+
+  var resolver: DnsResolver
+  try:
+    resolver = loop.getResolver()
+  except CatchableError as e:
+    cb(newSeq[Sockaddr_storage](), e.msg)
+    return
+  let cands = resolver.searchCandidates(address)
+  if cands.len == 1:
+    resolveAddrCandidate(loop, cands[0], port, sockType, cb)
+    return
+  var i = 0
+  var lastErr = ""
+  proc tryNext() {.closure.} =
+    if i >= cands.len:
+      cb(newSeq[Sockaddr_storage](),
+         if lastErr.len > 0: lastErr else: "DNS: no addresses for " & address)
+      return
+    let nm = cands[i]
+    inc i
+    resolveAddrCandidate(loop, nm, port, sockType,
+      proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.} =
+        if err.len == 0:
+          cb(addrs, "")
+        elif "too many outstanding" in err:
+          cb(newSeq[Sockaddr_storage](), err)
+        else:
+          lastErr = err
+          tryNext())
+  tryNext()
+
+proc resolveMxCandidate(loop: Loop; name: string; mcb: MxCallback) =
+  ## Single-candidate MX resolution (no search expansion).
+  let key = cacheKey(name, DnsQtypeMX)
   if loop.dns != nil:
     let r = cast[DnsResolver](loop.dns)
     let cached = r.cache.getOrDefault(key)
     if cached.expiresAt != 0:
       if cached.expiresAt > monoMs():
         if cached.negative:
-          mcb(newSeq[MxRecord](), "DNS: host not found: " & domain)
+          mcb(newSeq[MxRecord](), "DNS: host not found: " & name)
         else:
           mcb(cached.mxs, "")
         return
@@ -1005,22 +1224,56 @@ proc resolveMx*(loop: Loop; domain: string; mcb: MxCallback) =
   except CatchableError as e:
     mcb(newSeq[MxRecord](), e.msg)
     return
-  startMxQuery(resolver, domain, mcb)
+  startMxQuery(resolver, name, mcb)
 
-proc resolveTxt*(loop: Loop; hostname: string; tcb: TxtCallback) =
-  ## Resolve TXT records for `hostname` asynchronously on `loop`. `tcb` runs
-  ## on the loop thread with ALL TXT records found (or an empty seq plus an
-  ## empty `err` when the name exists but publishes no TXT records — the
-  ## caller decides what that means). A non-empty `err` signals NXDOMAIN or
-  ## a resolver failure. Never blocks the loop on DNS.
-  let key = cacheKey(hostname, DnsQtypeTXT)
+proc resolveMx*(loop: Loop; domain: string; mcb: MxCallback) =
+  ## Resolve MX records for `domain` asynchronously on `loop`. `mcb` runs on
+  ## the loop thread with the records sorted by ascending preference (or an
+  ## empty seq when the name exists but publishes no MX — callers decide
+  ## whether to fall back to address resolution, e.g. RFC 5321 §5.1). A
+  ## non-empty `err` signals NXDOMAIN or a resolver failure. Never blocks the
+  ## loop on DNS. Search-list candidates are tried in order; the last error
+  ## is reported when all fail.
+  var resolver: DnsResolver
+  try:
+    resolver = loop.getResolver()
+  except CatchableError as e:
+    mcb(newSeq[MxRecord](), e.msg)
+    return
+  let cands = resolver.searchCandidates(domain)
+  if cands.len == 1:
+    resolveMxCandidate(loop, cands[0], mcb)
+    return
+  var i = 0
+  var lastErr = ""
+  proc tryNext() {.closure.} =
+    if i >= cands.len:
+      mcb(newSeq[MxRecord](),
+          if lastErr.len > 0: lastErr else: "DNS: no records for " & domain)
+      return
+    let nm = cands[i]
+    inc i
+    resolveMxCandidate(loop, nm,
+      proc(records: seq[MxRecord]; err: string) {.closure.} =
+        if err.len == 0:
+          mcb(records, "")
+        elif "too many outstanding" in err:
+          mcb(newSeq[MxRecord](), err)
+        else:
+          lastErr = err
+          tryNext())
+  tryNext()
+
+proc resolveTxtCandidate(loop: Loop; name: string; tcb: TxtCallback) =
+  ## Single-candidate TXT resolution (no search expansion).
+  let key = cacheKey(name, DnsQtypeTXT)
   if loop.dns != nil:
     let r = cast[DnsResolver](loop.dns)
     let cached = r.cache.getOrDefault(key)
     if cached.expiresAt != 0:
       if cached.expiresAt > monoMs():
         if cached.negative:
-          tcb(newSeq[TxtRecord](), "DNS: host not found: " & hostname)
+          tcb(newSeq[TxtRecord](), "DNS: host not found: " & name)
         else:
           tcb(cached.txts, "")
         return
@@ -1032,26 +1285,50 @@ proc resolveTxt*(loop: Loop; hostname: string; tcb: TxtCallback) =
   except CatchableError as e:
     tcb(newSeq[TxtRecord](), e.msg)
     return
-  startTxtQuery(resolver, hostname, tcb)
+  startTxtQuery(resolver, name, tcb)
 
-proc resolveAddrBoth*(loop: Loop; address: string; port: int;
-                           cb: DnsCallback) =
-  ## Resolve both address families for `address` and deliver all socket
-  ## addresses ordered IPv6-first (RFC 8305 family-block order) — the input
-  ## for Happy Eyeballs connection attempts. If one family fails or is
-  ## empty, the other is still delivered; only when both yield nothing does
-  ## `cb` fire with an error. Never blocks the loop on DNS.
-  if isIpAddress(address):
-    var addrBuf: Sockaddr_storage
-    try:
-      addrBuf = sockaddrFromIp(address, port)
-    except NetError as e:
-      cb(newSeq[Sockaddr_storage](), e.msg)
-      return
-    cb(@[addrBuf], "")
+proc resolveTxt*(loop: Loop; hostname: string; tcb: TxtCallback) =
+  ## Resolve TXT records for `hostname` asynchronously on `loop`. `tcb` runs
+  ## on the loop thread with ALL TXT records found (or an empty seq plus an
+  ## empty `err` when the name exists but publishes no TXT records — the
+  ## caller decides what that means). A non-empty `err` signals NXDOMAIN or
+  ## a resolver failure. Never blocks the loop on DNS. Search-list candidates
+  ## are tried in order; the last error is reported when all fail.
+  var resolver: DnsResolver
+  try:
+    resolver = loop.getResolver()
+  except CatchableError as e:
+    tcb(newSeq[TxtRecord](), e.msg)
     return
+  let cands = resolver.searchCandidates(hostname)
+  if cands.len == 1:
+    resolveTxtCandidate(loop, cands[0], tcb)
+    return
+  var i = 0
+  var lastErr = ""
+  proc tryNext() {.closure.} =
+    if i >= cands.len:
+      tcb(newSeq[TxtRecord](),
+          if lastErr.len > 0: lastErr else: "DNS: no records for " & hostname)
+      return
+    let nm = cands[i]
+    inc i
+    resolveTxtCandidate(loop, nm,
+      proc(records: seq[TxtRecord]; err: string) {.closure.} =
+        if err.len == 0:
+          tcb(records, "")
+        elif "too many outstanding" in err:
+          tcb(newSeq[TxtRecord](), err)
+        else:
+          lastErr = err
+          tryNext())
+  tryNext()
 
-  let key = "both/" & address.toLowerAscii()
+proc resolveBothCandidate(loop: Loop; name: string; port: int;
+                              cb: DnsCallback) =
+  ## Single-candidate dual-family resolution (no search expansion).
+  ## Family-block order (IPv6 first) is preserved per candidate.
+  let key = "both/" & name
 
   if loop.dns != nil:
     let r = cast[DnsResolver](loop.dns)
@@ -1059,7 +1336,7 @@ proc resolveAddrBoth*(loop: Loop; address: string; port: int;
     if cached.expiresAt != 0:
       if cached.expiresAt > monoMs():
         if cached.negative:
-          cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & address)
+          cb(newSeq[Sockaddr_storage](), "DNS: host not found: " & name)
         else:
           var outAddrs: seq[Sockaddr_storage]
           for ip in cached.addrs:
@@ -1068,7 +1345,7 @@ proc resolveAddrBoth*(loop: Loop; address: string; port: int;
         return
       r.cache.del(key)
 
-  let h = getHosts().getOrDefault(address.toLowerAscii())
+  let h = getHosts().getOrDefault(name)
   if h.len > 0:
     var outAddrs: seq[Sockaddr_storage]
     for ip in h:
@@ -1100,7 +1377,7 @@ proc resolveAddrBoth*(loop: Loop; address: string; port: int;
     if bs.v6.len == 0 and bs.v4.len == 0:
       var err = if bs.errA.len > 0: bs.errA else: bs.errAaaa
       if err.len == 0:
-        err = "DNS: no addresses for " & address
+        err = "DNS: no addresses for " & name
       cb(newSeq[Sockaddr_storage](), err)
       return
     # Cache the merged list under a short TTL (the per-family entries carry
@@ -1145,12 +1422,60 @@ proc resolveAddrBoth*(loop: Loop; address: string; port: int;
     if bs.pending == 0:
       finish()
 
-  startQuery(resolver, address, port, SOCK_STREAM, DnsQtypeAAAA,
+  startQuery(resolver, name, port, SOCK_STREAM, DnsQtypeAAAA,
              proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.} =
                settle(DnsQtypeAAAA, addrs, err))
-  startQuery(resolver, address, port, SOCK_STREAM, DnsQtypeA,
+  startQuery(resolver, name, port, SOCK_STREAM, DnsQtypeA,
              proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.} =
                settle(DnsQtypeA, addrs, err))
+
+proc resolveAddrBoth*(loop: Loop; address: string; port: int;
+                      cb: DnsCallback) =
+  ## Resolve both address families for `address` and deliver all socket
+  ## addresses ordered IPv6-first (RFC 8305 family-block order) — the input
+  ## for Happy Eyeballs connection attempts. If one family fails or is
+  ## empty, the other is still delivered; only when both yield nothing does
+  ## `cb` fire with an error. Never blocks the loop on DNS. Search-list
+  ## candidates are tried in order; the last error is reported when all fail.
+  if isIpAddress(address):
+    var addrBuf: Sockaddr_storage
+    try:
+      addrBuf = sockaddrFromIp(address, port)
+    except NetError as e:
+      cb(newSeq[Sockaddr_storage](), e.msg)
+      return
+    cb(@[addrBuf], "")
+    return
+
+  var resolver: DnsResolver
+  try:
+    resolver = loop.getResolver()
+  except CatchableError as e:
+    cb(newSeq[Sockaddr_storage](), e.msg)
+    return
+  let cands = resolver.searchCandidates(address)
+  if cands.len == 1:
+    resolveBothCandidate(loop, cands[0], port, cb)
+    return
+  var i = 0
+  var lastErr = ""
+  proc tryNext() {.closure.} =
+    if i >= cands.len:
+      cb(newSeq[Sockaddr_storage](),
+         if lastErr.len > 0: lastErr else: "DNS: no addresses for " & address)
+      return
+    let nm = cands[i]
+    inc i
+    resolveBothCandidate(loop, nm, port,
+      proc(addrs: seq[Sockaddr_storage]; err: string) {.closure.} =
+        if err.len == 0:
+          cb(addrs, "")
+        elif "too many outstanding" in err:
+          cb(newSeq[Sockaddr_storage](), err)
+        else:
+          lastErr = err
+          tryNext())
+  tryNext()
 
 proc configureDns*(loop: Loop; timeoutMs: int; attempts: int) =
   ## Override the resolver's timeout/attempts (e.g. for tests). Values <= 0
@@ -1164,16 +1489,43 @@ proc configureDns*(loop: Loop; timeoutMs: int; attempts: int) =
 proc setDnsServers*(loop: Loop; servers: openArray[(string, int)]) =
   ## Point the resolver at specific DNS servers `(address, port)` — e.g. a
   ## local test responder, or ("8.8.8.8", 53). Creates the resolver if not
-  ## yet used. Only IPv4 servers are accepted (the resolver socket is AF_INET).
+  ## yet used. IPv4 and IPv6 (with optional `%scope`) are accepted; IPv6
+  ## entries are dropped when the host has no IPv6 stack. Raises NetError
+  ## when nothing usable remains.
   let resolver = loop.getResolver()
   resolver.nameservers.setLen(0)
   for (address, port) in servers:
     try:
-      let ip = parseIpLiteral(address)
-      if ip.af == AF_INET.cint:
-        resolver.nameservers.add(makeSockaddr(ip, port))
+      resolver.nameservers.add(makeSockaddr(parseNameserverIp(address), port))
     except NetError:
       discard
+  if not resolver.ensureV6Socket():
+    var v4: seq[Sockaddr_storage]
+    for ns in resolver.nameservers:
+      if serverFamily(ns) != AF_INET6.cushort:
+        v4.add(ns)
+    resolver.nameservers = v4
+  if resolver.nameservers.len == 0:
+    raise newException(NetError, "setDnsServers: no usable nameservers")
+
+proc setSearchDomains*(loop: Loop; domains: openArray[string]) =
+  ## Override the resolver's search list (e.g. from DHCP or for tests).
+  ## Entries are lowercased with trailing dots stripped, capped at 6.
+  ## Creates the resolver if not yet used.
+  let resolver = loop.getResolver()
+  resolver.searchDomains.setLen(0)
+  for d in domains:
+    var dd = d.strip(chars = {'.'}).toLowerAscii()
+    if dd.len > 0 and resolver.searchDomains.len < MaxSearchDomains:
+      resolver.searchDomains.add(dd)
+
+proc setNdots*(loop: Loop; n: int) =
+  ## Override the `ndots` threshold: names with at least `n` dots are tried
+  ## absolute first, others try the search list first (default 1, max 15).
+  ## Creates the resolver if not yet used.
+  let resolver = loop.getResolver()
+  if n >= 0 and n <= 15:
+    resolver.ndots = n
 
 proc closeDns*(loop: Loop) =
   ## Force-close the resolver (frees its UDP socket and pending queries).
@@ -1189,6 +1541,10 @@ proc closeDns*(loop: Loop) =
         r.loop.unregister(r.fd.int)
         sockClose(r.fd)
         r.fd = SocketHandle(-1)
+    if r.fd6.int >= 0:
+      r.loop.unregister(r.fd6.int)
+      sockClose(r.fd6)
+      r.fd6 = SocketHandle(-1)
     for q in r.queries.values:
       closeTcp(q)
       if q.timer != TimerId(0):
