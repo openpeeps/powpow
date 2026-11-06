@@ -207,7 +207,9 @@ proc makeSockaddr(ip: ResolvedIp; port: int): Sockaddr_storage =
     when defined(windows):
       sai6.sin6_scope_id = ip.scope.int32
     else:
-      sai6.sin6_scope_id = ip.scope
+      # sin6_scope_id is uint32 on some libcs (macOS, Linux x64) and int32
+      # on others (Linux ARM64 bindings) — convert to the field's own type.
+      sai6.sin6_scope_id = typeof(sai6.sin6_scope_id)(ip.scope)
     copyMem(addr res, addr sai6, sizeof(sai6))
   result = res
 
@@ -1162,7 +1164,9 @@ proc resolveAddr*(loop: Loop; address: string; port: int;
   ## Numeric IPv4/IPv6 literals resolve immediately without any DNS I/O.
   ## Other names expand through the search list (`setSearchDomains`,
   ## `ndots` rule): candidates are tried in order until one succeeds, and
-  ## the last error is reported when all fail.
+  ## the last error is reported when all fail. `/etc/hosts` is consulted
+  ## for the literal input name first (nsswitch `files` before `dns`), so
+  ## hosts entries never trigger search-expansion I/O.
   if isIpAddress(address):
     var addrBuf: Sockaddr_storage
     try:
@@ -1171,6 +1175,14 @@ proc resolveAddr*(loop: Loop; address: string; port: int;
       cb(newSeq[Sockaddr_storage](), e.msg)
       return
     cb(@[addrBuf], "")
+    return
+
+  let h0 = getHosts().getOrDefault(address.toLowerAscii())
+  if h0.len > 0:
+    var outAddrs: seq[Sockaddr_storage]
+    for ip in h0:
+      outAddrs.add(makeSockaddr(ip, port))
+    cb(outAddrs, "")
     return
 
   var resolver: DnsResolver
@@ -1437,6 +1449,8 @@ proc resolveAddrBoth*(loop: Loop; address: string; port: int;
   ## empty, the other is still delivered; only when both yield nothing does
   ## `cb` fire with an error. Never blocks the loop on DNS. Search-list
   ## candidates are tried in order; the last error is reported when all fail.
+  ## `/etc/hosts` is consulted for the literal input name first (nsswitch
+  ## `files` before `dns`), so hosts entries never trigger search-expansion I/O.
   if isIpAddress(address):
     var addrBuf: Sockaddr_storage
     try:
@@ -1445,6 +1459,14 @@ proc resolveAddrBoth*(loop: Loop; address: string; port: int;
       cb(newSeq[Sockaddr_storage](), e.msg)
       return
     cb(@[addrBuf], "")
+    return
+
+  let h0 = getHosts().getOrDefault(address.toLowerAscii())
+  if h0.len > 0:
+    var outAddrs: seq[Sockaddr_storage]
+    for ip in h0:
+      outAddrs.add(makeSockaddr(ip, port))
+    cb(outAddrs, "")
     return
 
   var resolver: DnsResolver

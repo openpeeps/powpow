@@ -154,6 +154,9 @@ proc startFakeDnsTcp(loop: Loop; port: int; fake: FakeDns): FakeDnsTcp =
   result = t
 
 proc startFakeDns(loop: Loop; port: int; bindAddr = "127.0.0.1"): FakeDns =
+  # Hermetic by default: clear the system search list so tests never expand
+  # through the machine's resolv.conf (tests for expansion set their own).
+  loop.setSearchDomains(@[])
   let fake = FakeDns(
     queries: 0,
     answers: initTable[string, seq[string]](),
@@ -837,8 +840,8 @@ test "test_dns_search_expansion":
   let loop = newLoop()
   loop.setDnsServers([("127.0.0.1", 30001)])
   loop.configureDns(300, 2)
-  loop.setSearchDomains(["example"])
   var fake = startFakeDns(loop, 30001)
+  loop.setSearchDomains(["example"])
   fake.answers["web.example"] = @["10.0.1.1"]
 
   var got: seq[Sockaddr_storage] = @[]
@@ -868,8 +871,8 @@ test "test_dns_search_absolute_first":
   let loop = newLoop()
   loop.setDnsServers([("127.0.0.1", 30002)])
   loop.configureDns(300, 2)
-  loop.setSearchDomains(["search"])
   var fake = startFakeDns(loop, 30002)
+  loop.setSearchDomains(["search"])
   fake.answers["abs.example"] = @["10.0.1.11"]
   fake.answers["abs.example.search"] = @["10.0.1.12"]
 
@@ -896,9 +899,9 @@ test "test_dns_search_ndots_order":
   let loop = newLoop()
   loop.setDnsServers([("127.0.0.1", 30003)])
   loop.configureDns(300, 2)
+  var fake = startFakeDns(loop, 30003)
   loop.setSearchDomains(["s"])
   loop.setNdots(2)
-  var fake = startFakeDns(loop, 30003)
   fake.answers["a.b"] = @["10.0.1.14"]
   fake.answers["a.b.s"] = @["10.0.1.13"]
 
@@ -928,8 +931,8 @@ test "test_dns_trailing_dot_no_search":
   let loop = newLoop()
   loop.setDnsServers([("127.0.0.1", 30004)])
   loop.configureDns(300, 2)
-  loop.setSearchDomains(["example"])
   var fake = startFakeDns(loop, 30004)
+  loop.setSearchDomains(["example"])
   fake.answers["web.example"] = @["10.0.1.1"]
 
   var got: seq[Sockaddr_storage] = @[]
@@ -953,8 +956,8 @@ test "test_dns_search_nxdomain_continues":
   let loop = newLoop()
   loop.setDnsServers([("127.0.0.1", 30005)])
   loop.configureDns(300, 2)
-  loop.setSearchDomains(["s1", "s2"])
   var fake = startFakeDns(loop, 30005)
+  loop.setSearchDomains(["s1", "s2"])
   fake.answers["h.s1"] = @["nx"]
   fake.answers["h.s2"] = @["10.0.1.15"]
 
