@@ -116,11 +116,9 @@ type
     tcpConnected: bool         ## TCP three-way handshake completed
     tcpSendBuf: seq[byte]      ## length-prefixed query (RFC 1035 §4.2.2)
     tcpSendOff: int
-    tcpLenBuf: array[2, byte]  ## 2-byte TCP length prefix being received
-    tcpLenOff: int
-    tcpMsgLen: int             ## expected message bytes, -1 until prefix complete
-    tcpRecvBuf: seq[byte]
-    tcpRecvOff: int
+    tcpInBuf: seq[byte]        ## received-but-unparsed byte stream
+    tcpMsgLen: int             ## -1 until the length prefix arrives, -2 = poisoned
+    tcpRecvBuf: seq[byte]      ## the parsed frame (without prefix) once complete
 
   DnsResolver* = ref object of RootObj
     loop: Loop
@@ -608,48 +606,61 @@ proc pumpTcpSend(q: DnsQuery): bool =
   return true
 
 proc pumpTcpRecv(q: DnsQuery): bool =
-  ## Drain the length-prefixed response. Returns true once the full message
-  ## is buffered (in `tcpRecvBuf`), false while more bytes are needed.
-  ## A hard error returns false with `tcpMsgLen` set to -2 as a poison flag.
-  while true:
-    if q.tcpLenOff < 2:
-      let n = sockRecv(q.tcpFd, addr q.tcpLenBuf[q.tcpLenOff], 2 - q.tcpLenOff)
+  ## Drain the length-prefixed response. Returns true once a full frame is
+  ## available in `tcpRecvBuf` (prefix stripped), false while more bytes are
+  ## needed. A hard error returns false with `tcpMsgLen` set to -2 as a
+  ## poison flag.
+  ##
+  ## Transport reads differ by platform: on Windows the IOCP backend serves
+  ## inbound bytes from its per-fd WSARecv buffer (`getReadData`) — a raw
+  ## recv() would race the posted WSARecv and starve. Whole completions
+  ## (<= 4096 bytes, the platform buffer size) are drained at once so a
+  ## partially-consumed completion is never truncated and lost.
+  const TcpReadChunk = 4096
+  when defined(windows):
+    var tmp: array[TcpReadChunk, byte]
+    let n = q.resolver.loop.platform.getReadData(q.tcpFd.int,
+      cast[ptr UncheckedArray[byte]](addr tmp[0]), TcpReadChunk)
+    if n > 0:
+      let prev = q.tcpInBuf.len
+      q.tcpInBuf.setLen(prev + n)
+      copyMem(addr q.tcpInBuf[prev], addr tmp[0], n)
+    elif n == 0:
+      q.tcpMsgLen = -2  # peer closed / socket broken
+      return false
+    else:
+      return false  # nothing completed yet (-1); wait for the next Read
+  else:
+    var chunk: array[TcpReadChunk, byte]
+    while true:
+      let n = sockRecv(q.tcpFd, addr chunk[0], chunk.len)
       if n > 0:
-        q.tcpLenOff += n
-        if q.tcpLenOff < 2:
-          continue
-        q.tcpMsgLen = (int(q.tcpLenBuf[0]) shl 8) or int(q.tcpLenBuf[1])
-        if q.tcpMsgLen < 12 or q.tcpMsgLen > 65535:
-          q.tcpMsgLen = -2  # poison: oversize/malformed frame
-          return false
-        q.tcpRecvBuf.setLen(q.tcpMsgLen)
-        q.tcpRecvOff = 0
-      elif n == 0:
-        q.tcpMsgLen = -2  # peer closed mid-frame
-        return false
-      elif sockWouldBlock():
-        return false
-      else:
-        q.tcpMsgLen = -2
-        return false
-    if q.tcpRecvOff < q.tcpMsgLen:
-      let n = sockRecv(q.tcpFd,
-                       addr q.tcpRecvBuf[q.tcpRecvOff],
-                       q.tcpMsgLen - q.tcpRecvOff)
-      if n > 0:
-        q.tcpRecvOff += n
-        if q.tcpRecvOff < q.tcpMsgLen:
-          continue
-        return true
+        let prev = q.tcpInBuf.len
+        q.tcpInBuf.setLen(prev + n)
+        copyMem(addr q.tcpInBuf[prev], addr chunk[0], n)
       elif n == 0:
         q.tcpMsgLen = -2  # peer closed mid-message
         return false
       elif sockWouldBlock():
-        return false
+        break
       else:
         q.tcpMsgLen = -2
         return false
-    return true
+  # Frame parse: 2-byte length prefix, then exactly that many bytes.
+  if q.tcpInBuf.len > 2 + 65535:
+    q.tcpMsgLen = -2  # peer is streaming garbage; bound the staging buffer
+    return false
+  if q.tcpInBuf.len < 2:
+    return false
+  let msgLen = (int(q.tcpInBuf[0]) shl 8) or int(q.tcpInBuf[1])
+  if msgLen < 12 or msgLen > 65535:
+    q.tcpMsgLen = -2  # poison: oversize/malformed frame
+    return false
+  if q.tcpInBuf.len < 2 + msgLen:
+    return false
+  q.tcpRecvBuf = q.tcpInBuf[2 ..< 2 + msgLen]
+  q.tcpMsgLen = msgLen
+  return true
 
 proc onTcpEvent(q: DnsQuery; fd: int; ev: set[EventType]) =
   if q.done or not q.tcpActive or q.tcpFd.int != fd:
@@ -732,10 +743,9 @@ proc startTcpFallback(q: DnsQuery) =
   q.tcpSendBuf[1] = byte(msg.len and 0xFF)
   for i, b in msg: q.tcpSendBuf[2 + i] = b
   q.tcpSendOff = 0
-  q.tcpLenOff = 0
+  q.tcpInBuf = @[]
   q.tcpMsgLen = -1
   q.tcpRecvBuf = @[]
-  q.tcpRecvOff = 0
   q.tcpFd = fd
   q.tcpActive = true
   q.tcpConnected = (ret == 0)
