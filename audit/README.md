@@ -49,3 +49,5 @@ we actually patch (not a stale nimble-installed copy).
 | `h2_flow_control.nim` | H2 pin — window accounting under burst, IWS=0 stall/release | (all green; conn-level backstop unreachable by design) |
 | `h2_frame_size.nim` | H2 pin — fixed-length violations, split/incomplete reassembly, padding, extensions | (all green) |
 | `h2_goaway_drain.nim` | H2 pin — lastStreamId accuracy, in-flight counting, post-teardown silence | (all green) |
+| `dns_hostile.nim` | DNS pin — hostile resolv.conf/nameserver literals fail closed; pointer-loop/ANCOUNT/truncated wire replies error, spoofed TXID ignored, max TTL resolves | (all green; guards `parseResolvConfContent`/`parseNameserverIp`/`parseResponse` dispatch) |
+| `proxy_limits.nim` | proxy pin — missing/refused upstream fails closed, half-close tears down pairs, `maxConnections` caps frontend, proxy stays usable | (all green) |
