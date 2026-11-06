@@ -152,25 +152,29 @@
 ##   whenever anything is missing, powpow uses userspace TLS unchanged
 
 
+## Opt-in modules (NOT exported here — import them specifically):
+## - `powpow/ws` — high-level `WsClient` facade (standalone `WsServer` and
+##   upgrades live in `proto/ws`, which `powpow/proto` still exports)
+## - `powpow/threadpool` — self-managed worker pool (`newThreadPool`, ...)
+## - `powpow/fswatch` — file system monitoring (`newFileWatcher`, ...)
+## - `powpow/signal` — in-process relay + OS signals (`newSignalRelay`, ...)
+## Importing them directly keeps the default `import powpow` surface lean:
+##
+##   import powpow
+##   import powpow/ws  # only when you need the WsClient facade
+
+
 import powpow/types
 export types
 
 when iouEnabled:
-  import powpow/[loop, net, proto, signal, fswatch, threadpool, ws]
+  import powpow/[loop, net, proto]
   export loop  # close is on Loop
   export net
   export proto
-  export signal
-  export fswatch
-  export threadpool
-  export ws
 else:
-  import powpow/[platform, loop, net, proto, signal, fswatch, threadpool, ws]
+  import powpow/[platform, loop, net, proto]
   export platform except close  # close is on Loop
   export loop
   export net
   export proto
-  export signal
-  export fswatch
-  export threadpool
-  export ws

@@ -1,6 +1,7 @@
 ## tests/test_signal.nim — Tests for the powpow Signal/Relay system.
 
 import ../src/powpow
+import ../src/powpow/signal
 import std/unittest
 when not defined(windows):
   import std/posix as osposix

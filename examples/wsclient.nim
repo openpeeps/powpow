@@ -15,6 +15,7 @@
 ## WsConnection on YOUR loop (see docs/websocket.md for both flavors).
 
 import ../src/powpow
+import ../src/powpow/ws
 import std/strutils
 
 const Url = "ws://127.0.0.1:9001"

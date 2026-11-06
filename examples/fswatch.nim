@@ -9,6 +9,7 @@
 ##   rm /tmp/powpow-test2.txt
 
 import ../src/powpow
+import ../src/powpow/fswatch
 import std/[os, posix]
 
 let loop = newLoop()

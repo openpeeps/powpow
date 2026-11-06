@@ -13,6 +13,7 @@
 ##   curl "http://localhost:9005/emit?signal=3"     # nobody listening anymore
 
 import ../src/powpow
+import ../src/powpow/signal
 import std/httpcore except HttpMethod
 import std/strutils
 

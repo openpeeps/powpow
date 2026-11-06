@@ -4,6 +4,7 @@
 import std/httpcore except HttpMethod
 import std/unittest
 import ../src/powpow
+import ../src/powpow/ws
 
 test "ws_client_echo_roundtrip":
   ## Text + binary echo, then a client-initiated close that the server parses.

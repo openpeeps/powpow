@@ -8,6 +8,7 @@
 
 import std/[locks, os, times, unittest]
 import ../src/powpow
+import ../src/powpow/threadpool
 
 # ── Shared test helpers ──────────────────────────────────────────────────────
 
