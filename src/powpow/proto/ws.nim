@@ -31,6 +31,7 @@
 import std/httpcore except HttpMethod
 import std/[base64, tables, strutils, random]
 import pkg/checksums/sha1
+import pkg/archive/[flate, io]
 when defined(threads):
   import std/threads
 
@@ -80,6 +81,11 @@ type
     assembling:  bool
     fragOpcode:  int
     assembleBuf: seq[byte]
+    fragCompressed: bool     ## assembling message arrived with RSV1 (deflate)
+    # permessage-deflate (RFC 7692, no-context-takeover only both directions —
+    # each message is one stateless one-shot; context takeover is refused).
+    offerDeflate: bool       ## client: offer deflate in the upgrade request
+    permessageDeflate*: bool ## negotiated: compress/decompress data messages
     # Post-upgrade idle/read timeout (0 = disabled). Bumped on every parsed
     # frame; a sweep/one-shot timer closes the connection if no frame arrives
     # within `idleTimeoutMs` — an upgraded but silent client must not hold the
@@ -106,6 +112,12 @@ type
   WsError* = object of CatchableError
     ## Raised by client-side helpers on invalid input (e.g. parseWsUrl).
 
+  WsDeflateError* = object of CatchableError
+    ## Compressed payload corrupt (connection fails with 1002).
+
+  WsDeflateTooLarge* = object of WsDeflateError
+    ## Decompressed payload over the size cap (connection fails with 1009).
+
   WsMessageCb* = proc(ws: WsConnection, kind: WsFrameKind,
                        data: openArray[byte]) {.closure.}
   WsCloseCb*   = proc(ws: WsConnection, code: int,
@@ -126,6 +138,7 @@ type
     phase:       WsParsePhase
     # Parsed fields from the current frame
     fin:         bool
+    rsv1:        bool
     opcode:      int
     masked:      bool
     payloadLen:  uint64
@@ -154,6 +167,12 @@ type
       ## Close upgraded connections that send no frames within this many ms
       ## (0 = disabled). Prevents post-upgrade idle connections from holding a
       ## connection + fd forever.
+    pingIntervalMs*: int
+      ## Send a ping to every upgraded connection on this interval (0 =
+      ## disabled). Keeps NAT mappings alive and surfaces dead peers.
+    permessageDeflate*: bool
+      ## Accept RFC 7692 permessage-deflate (no-context-takeover only) when
+      ## the client offers it. Negotiated sessions compress data messages.
     maxHandshakeSessions*: int
       ## Hard cap on in-flight handshake sessions (0 = unlimited).
     # User callbacks (applied to all connections)
@@ -174,12 +193,108 @@ proc reset*(p: WsFrameParser) =
   ## Reset the parser for the next frame.
   p.phase = WsPhaseHeader
   p.fin = false
+  p.rsv1 = false
   p.opcode = 0
   p.masked = false
   p.payloadLen = 0
   p.maskIdx = 0
   p.lengthIdx = 0
   p.payloadOff = 0
+
+# ── permessage-deflate (RFC 7692, no-context-takeover only) ───────────────────
+
+const WsDeflateTail = [0x00'u8, 0x00, 0xFF, 0xFF, 0x01, 0x00, 0x00, 0xFF, 0xFF]
+  ## Suffix appended before inflate: the stripped sync-flush marker (empty
+  ## stored block, BFINAL=0) plus a final empty stored block (BFINAL=1) so the
+  ## stock one-shot `inflateInto` — which loops until BFINAL — terminates.
+
+proc wsDeflate*(data: openArray[byte]): string =
+  ## Compress one message with a stateless one-shot (fixed-Huffman block).
+  ## The single block leaves `deflateFixed` with BFINAL=1; flipping it makes
+  ## the payload the non-final prefix the peer expects, and the sync-flush
+  ## tail `00 00 FF FF` is stripped per RFC 7692 §4.
+  ##
+  ## The stripped tail's empty stored block starts at the EOB end bit P, but
+  ## `deflateFixed` flushes at round_up(P/8) while the receiver's handoff
+  ## lands at round_up((P+3)/8) — one byte further exactly when P mod 8 is 0,
+  ## 6 or 7 (measured with a decode walk of our own single-block output).
+  ## In that case one extra zero byte carries the header bits; otherwise the
+  ## flush padding already covers them. Raises FlateError on (unexpected)
+  ## compressor failure.
+  var s = newString(data.len)
+  if data.len > 0:
+    copyMem(addr s[0], unsafeAddr data[0], data.len)
+  var c = deflateFixed(s)
+  let inp = openInputString(c)
+  let endBit = inflateStreamPtr(basePointer(inp), inputLen(inp), 0,
+                                newOutput())
+  c[0] = char(byte(c[0]) xor 0x01)  # BFINAL 1 -> 0 (LSB of first byte)
+  if endBit mod 8 == 0 or endBit mod 8 > 5:
+    c.add('\x00')
+  c
+
+proc wsDeflate*(data: string): string =
+  ## String convenience overload.
+  if data.len == 0:
+    wsDeflate([])
+  else:
+    wsDeflate(data.toOpenArrayByte(0, data.high))
+
+proc wsInflate*(data: openArray[byte], maxSize: int): string =
+  ## Decompress one permessage-deflate payload, capped at `maxSize` bytes.
+  ## Raises WsDeflateError when corrupt or over the cap (caller fails the
+  ## connection — 1002 for corrupt, 1009 for oversize).
+  if data.len == 0:
+    # An empty compressed payload is never valid: even an empty message
+    # compresses to a 2-byte block. Treat as corrupt, not as empty.
+    raise newException(WsDeflateError, "empty deflate payload")
+  var s = newString(data.len + WsDeflateTail.len)
+  copyMem(addr s[0], unsafeAddr data[0], data.len)
+  for i, b in WsDeflateTail:
+    s[data.len + i] = char(b)
+  try:
+    result = inflateAll(s)
+  except FlateError as e:
+    raise newException(WsDeflateError, "deflate corrupt: " & e.msg)
+  if result.len > maxSize:
+    raise newException(WsDeflateTooLarge,
+      "decompressed message exceeds limit")
+
+proc wsInflate*(data: string, maxSize: int): string =
+  ## String convenience overload.
+  if data.len == 0:
+    wsInflate([], maxSize)
+  else:
+    wsInflate(data.toOpenArrayByte(0, data.high), maxSize)
+
+func parseDeflateOffer*(extHeader: string): bool =
+  ## True when `extHeader` (Sec-WebSocket-Extensions value) offers
+  ## permessage-deflate with *both* client_no_context_takeover and
+  ## server_no_context_takeover. Anything else using the extension name —
+  ## window-bits params, context takeover — is refused (returns false):
+  ## this endpoint only does stateless one-shots.
+  for ext in extHeader.split(','):
+    let parts = ext.split(';')
+    if parts.len == 0: continue
+    if parts[0].strip().toLowerAscii() != "permessage-deflate": continue
+    var clientNoTakeover = false
+    var serverNoTakeover = false
+    for i in 1 ..< parts.len:
+      let kv = parts[i].split('=', maxsplit = 1)
+      let k = kv[0].strip().toLowerAscii()
+      if k == "client_no_context_takeover" and kv.len == 1:
+        clientNoTakeover = true
+      elif k == "server_no_context_takeover" and kv.len == 1:
+        serverNoTakeover = true
+      elif k in ["client_max_window_bits", "server_max_window_bits"]:
+        return false  # window-bits tuning is not supported: refuse deflate
+    if clientNoTakeover and serverNoTakeover:
+      return true
+  false
+
+const WsDeflateAccept = "permessage-deflate; server_no_context_takeover; " &
+  "client_no_context_takeover"
+  ## What we send back when accepting: the same stateless-only terms.
 
 # ── WS handshake helpers ─────────────────────────────────────────────────────
 
@@ -189,19 +304,23 @@ func computeAcceptKey*(clientKey: string): string =
   let shaArray = cast[array[0..19, uint8]](digest)
   result = base64.encode(shaArray)
 
-proc buildHandshakeResponse*(acceptKey: string): string =
+proc buildHandshakeResponse*(acceptKey: string,
+                               extensions: string = ""): string =
   ## Build the HTTP 101 Switching Protocols response for a WebSocket upgrade.
   result = "HTTP/1.1 101 Switching Protocols\r\n" &
            "Upgrade: websocket\r\n" &
            "Connection: Upgrade\r\n" &
-           "Sec-WebSocket-Accept: " & acceptKey & "\r\n" &
-           "\r\n"
+           "Sec-WebSocket-Accept: " & acceptKey & "\r\n"
+  if extensions.len > 0:
+    result.add("Sec-WebSocket-Extensions: " & extensions & "\r\n")
+  result.add("\r\n")
 
 proc sendHandshake*(conn: Connection, clientKey: string,
-                    protocol: string = "") {.inline.} =
+                    protocol: string = "", extensions: string = "") {.inline.} =
   ## Send the 101 Switching Protocols response. `protocol`, when non-empty,
-  ## is echoed back as Sec-WebSocket-Protocol.
-  var response = buildHandshakeResponse(computeAcceptKey(clientKey))
+  ## is echoed back as Sec-WebSocket-Protocol; `extensions`, when non-empty,
+  ## as Sec-WebSocket-Extensions (e.g. the accepted permessage-deflate terms).
+  var response = buildHandshakeResponse(computeAcceptKey(clientKey), extensions)
   if protocol.len > 0:
     response.insert("Sec-WebSocket-Protocol: " & protocol & "\r\n",
                     response.len - 2)
@@ -209,8 +328,10 @@ proc sendHandshake*(conn: Connection, clientKey: string,
 
 # ── Frame writer ─────────────────────────────────────────────────────────────
 
-proc writeFrame*(conn: Connection, opcode: int, payload: openArray[byte]) =
-  ## Write a single WebSocket frame to the connection.
+proc writeFrame*(conn: Connection, opcode: int, payload: openArray[byte],
+                  rsv1 = false) =
+  ## Write a single WebSocket frame to the connection. `rsv1` sets the RSV1
+  ## bit (RFC 7692: first frame of a compressed message).
   ## Server frames are never masked (RFC 6455 §5.1).
   if conn.state != Connected: return
 
@@ -218,6 +339,8 @@ proc writeFrame*(conn: Connection, opcode: int, payload: openArray[byte]) =
   var hlen = 2
 
   header[0] = uint8(0x80 or (opcode and 0x0F))  # FIN=1 + opcode
+  if rsv1:
+    header[0] = header[0] or 0x40
 
   let n = payload.len
   if n < 126:
@@ -243,12 +366,15 @@ proc writeFrame*(conn: Connection, opcode: int, payload: openArray[byte]) =
     discard conn.send(header.toOpenArray(0, hlen - 1))
 
 proc writeFrameMasked*(conn: Connection, opcode: int, payload: openArray[byte],
-                       mask: array[4, uint8]) =
-  ## Write a masked WebSocket frame (for client-to-server; servers don't mask).
+                       mask: array[4, uint8], rsv1 = false) =
+  ## Write a masked WebSocket frame (for client-to-server; servers don't
+  ## mask). `rsv1` sets the RSV1 bit (first frame of a compressed message).
   var header: array[14, uint8]  # max header: 2 + 8 + 4
   var hlen = 2
 
   header[0] = uint8(0x80 or (opcode and 0x0F))
+  if rsv1:
+    header[0] = header[0] or 0x40
   header[1] = 0x80  # mask bit
 
   let n = payload.len
@@ -280,15 +406,29 @@ proc writeFrameMasked*(conn: Connection, opcode: int, payload: openArray[byte],
       masked[i] = uint8(payload[i]) xor mask[i mod 4]
     discard conn.send(masked)
 
-proc writeFrameFor(ws: WsConnection, opcode: int, payload: openArray[byte]) =
+proc writeFrameFor(ws: WsConnection, opcode: int, payload: openArray[byte],
+                    rsv1 = false) =
   ## Write a frame honouring the connection's mode: client frames are masked,
   ## server frames are not (RFC 6455 §5.1).
   if ws.clientMode:
-    ws.conn.writeFrameMasked(opcode, payload, ws.sendMask)
+    ws.conn.writeFrameMasked(opcode, payload, ws.sendMask, rsv1)
   else:
-    ws.conn.writeFrame(opcode, payload)
+    ws.conn.writeFrame(opcode, payload, rsv1)
 
 # ── WsConnection send helpers ────────────────────────────────────────────────
+
+proc sendDeflated(ws: WsConnection, opcode: int, data: openArray[byte]) =
+  ## Compress one data message (RSV1=1 on its single frame). Falls back to
+  ## an uncompressed frame when compression fails — a failed compressor
+  ## must not kill the session.
+  try:
+    let c = wsDeflate(data)
+    if c.len > 0:
+      ws.writeFrameFor(opcode, c.toOpenArrayByte(0, c.high), rsv1 = true)
+    else:
+      ws.writeFrameFor(opcode, data)
+  except CatchableError:
+    ws.writeFrameFor(opcode, data)
 
 proc sendSafe(ws: WsConnection, opcode: int, data: openArray[byte]) =
   ## Thread-safe frame write. When called from a thread other than the loop's
@@ -311,13 +451,19 @@ proc sendSafe(ws: WsConnection, opcode: int, data: openArray[byte]) =
   ws.writeFrameFor(opcode, data)
 
 proc sendText*(ws: WsConnection, s: string) {.inline.} =
-  if s.len == 0:
+  ## Sends a text message, deflated with RSV1 when negotiated.
+  if ws.permessageDeflate and s.len > 0:
+    ws.sendDeflated(0x1, s.toOpenArrayByte(0, s.high))
+  elif s.len == 0:
     ws.sendSafe(0x1, [])
   else:
     ws.sendSafe(0x1, s.toOpenArrayByte(0, s.high))
 
 proc sendBinary*(ws: WsConnection, data: openArray[byte]) {.inline.} =
-  if data.len == 0:
+  ## Sends a binary message, deflated with RSV1 when negotiated.
+  if ws.permessageDeflate and data.len > 0:
+    ws.sendDeflated(0x2, data)
+  elif data.len == 0:
     ws.sendSafe(0x2, [])
   else:
     ws.sendSafe(0x2, data)
@@ -389,9 +535,31 @@ proc closeWs*(ws: WsConnection, code: int = 1000, reason: string = "") =
 
 # ── Frame parser (incremental, state-machine) ────────────────────────────────
 
+proc deliverDeflated(ws: WsConnection, opcode: int, data: openArray[byte]) =
+  ## Decompress one complete deflated message and deliver it. Failures
+  ## close the session: 1009 when the decompressed size breaks the cap,
+  ## 1002 when the payload is not a valid deflate stream.
+  let frameLimit = if ws.maxFrameSize > 0: int64(ws.maxFrameSize)
+                   else: int64(WsHardMaxFrameSize)
+  try:
+    let dec = wsInflate(data, int(frameLimit))
+    if not ws.onMessage.isNil:
+      if dec.len > 0:
+        ws.onMessage(ws, cast[WsFrameKind](opcode),
+                     dec.toOpenArrayByte(0, dec.high))
+      else:
+        ws.onMessage(ws, cast[WsFrameKind](opcode), [])
+  except WsDeflateTooLarge:
+    ws.closeWs(1009, "Message too large")
+  except WsDeflateError:
+    ws.closeWs(1002, "Decompression failed")
+  except CatchableError:
+    ws.closeWs(1002, "Decompression failed")
+
 template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
   let opcode = p.opcode
   let plen = int(p.payloadLen)
+  let compressed = p.rsv1
   p.phase = WsPhaseHeader
   case opcode
   of 0x0:
@@ -399,6 +567,10 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
       if not ws.onError.isNil:
         ws.onError(ws, "Unexpected continuation frame")
       ws.closeWs(1002, "Protocol error")
+      return
+    if compressed:
+      # Only the first frame of a compressed message carries RSV1.
+      ws.closeWs(1002, "RSV1 on continuation frame")
       return
     if ws.maxFrameSize > 0 and (ws.assembleBuf.len + plen) > ws.maxFrameSize:
       ws.closeWs(1009, "Message too large")
@@ -410,11 +582,21 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
       ws.assembleBuf.add p.payload.toOpenArray(0, plen - 1)
     if p.fin:
       let finalOp = ws.fragOpcode
+      let wasCompressed = ws.fragCompressed
       ws.assembling = false
-      if not ws.onMessage.isNil:
+      ws.fragCompressed = false
+      if wasCompressed:
+        ws.deliverDeflated(finalOp, ws.assembleBuf)
+        ws.assembleBuf.setLen(0)
+        if ws.conn == nil or ws.conn.state != Connected:
+          return
+      elif not ws.onMessage.isNil:
         ws.onMessage(ws, cast[WsFrameKind](finalOp), ws.assembleBuf)
       ws.assembleBuf.setLen(0)
   of 0x1, 0x2:
+    if compressed and not ws.permessageDeflate:
+      ws.closeWs(1002, "RSV1 without negotiated deflate")
+      return
     if ws.assembling:
       ws.closeWs(1002, "Unexpected data frame during fragmentation")
       return
@@ -425,7 +607,14 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
       ws.closeWs(1009, "Message too large")
       return
     if p.fin:
-      if not ws.onMessage.isNil:
+      if compressed:
+        if plen > 0:
+          ws.deliverDeflated(opcode, p.payload.toOpenArray(0, plen - 1))
+        else:
+          ws.closeWs(1002, "Empty compressed frame")
+        if ws.conn == nil or ws.conn.state != Connected:
+          return
+      elif not ws.onMessage.isNil:
         if plen > 0:
           ws.onMessage(ws, cast[WsFrameKind](opcode), p.payload.toOpenArray(0, plen - 1))
         else:
@@ -433,10 +622,14 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
     else:
       ws.assembling = true
       ws.fragOpcode = opcode
+      ws.fragCompressed = compressed
       ws.assembleBuf.setLen(0)
       if plen > 0:
         ws.assembleBuf.add p.payload.toOpenArray(0, plen - 1)
   of 0x8:
+    if compressed:
+      ws.closeWs(1002, "RSV1 on control frame")
+      return
     if plen == 1:
       ws.closeWs(1002, "Invalid close payload length")
       return
@@ -463,11 +656,17 @@ template dispatchFrame(ws: WsConnection; p: WsFrameParser) =
     ws.gracefulWsClose()
     return
   of 0x9:
+    if compressed:
+      ws.closeWs(1002, "RSV1 on control frame")
+      return
     if plen > 0:
       ws.writeFrameFor(0xA, p.payload.toOpenArray(0, plen - 1))
     else:
       ws.writeFrameFor(0xA, [])
   of 0xA:
+    if compressed:
+      ws.closeWs(1002, "RSV1 on control frame")
+      return
     discard
   else:
     if not ws.onError.isNil:
@@ -498,6 +697,10 @@ proc parseWsFrames*(ws: WsConnection, data: openArray[byte]) =
       let b1 = uint8(data[i]); inc i
 
       p.fin    = (b0 shr 7) == 1
+      p.rsv1   = ((b0 shr 6) and 1) == 1
+      if (b0 and 0x30) != 0:  # RSV2/RSV3: no extension defines them
+        ws.closeWs(1002, "RSV2/RSV3 set")
+        return
       p.opcode = int(b0 and 0x0F)
       p.masked = (b1 shr 7) == 1
       let len7 = b1 and 0x7F
@@ -646,6 +849,9 @@ proc newWsConnection*(conn: Connection; maxFrameSize: int = DefaultMaxFrameSize)
     assembling: false,
     fragOpcode: 0,
     assembleBuf: @[],
+    fragCompressed: false,
+    offerDeflate: false,
+    permessageDeflate: false,
     lastActive: monoMs(),
     idleTimer: TimerId(0),
     idleTimeoutMs: 0,
@@ -670,6 +876,9 @@ proc resetWs(ws: WsConnection; conn: Connection; maxFrameSize: int) =
   ws.assembling = false
   ws.fragOpcode = 0
   ws.assembleBuf.setLen(0)
+  ws.fragCompressed = false
+  ws.offerDeflate = false
+  ws.permessageDeflate = false
   ws.idleTimer = TimerId(0)
   ws.idleTimeoutMs = 0
   ws.lastActive = monoMs()
@@ -697,12 +906,15 @@ proc acquireWsConnection(wss: WsServer, conn: Connection): WsConnection =
 
 proc releaseWsConnection(wss: WsServer, ws: WsConnection) =
   ## Return `ws` to the server's pool. Must be called exactly once per
-  ## connection from the fd callback / server close paths. The idle timer is
-  ## cancelled first so a stale wheel entry can never close a recycled
-  ## connection or keep the object alive.
+  ## connection from the fd callback / server close paths. The idle and ping
+  ## timers are cancelled first so a stale wheel entry can never close a
+  ## recycled connection or keep the object alive.
   if ws.idleTimer != TimerId(0):
     ws.conn.loop.cancelTimer(ws.idleTimer)
     ws.idleTimer = TimerId(0)
+  if ws.pingTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.pingTimer)
+    ws.pingTimer = TimerId(0)
   if wss.wsPool.len < MaxWsPoolSize:
     ws.conn = nil
     ws.onOpen = nil
@@ -725,12 +937,16 @@ proc acquireWs(server: HttpServer, conn: Connection,
 
 proc releaseWs(server: HttpServer, ws: WsConnection) =
   ## Return `ws` to the HttpServer pool (upgrade path). `ws.conn == nil` marks
-  ## it as already released, guarding against double-release. The idle timer is
-  ## cancelled first so a stale wheel entry can never fire on a recycled object.
+  ## it as already released, guarding against double-release. The idle and
+  ## ping timers are cancelled first so a stale wheel entry can never fire on
+  ## a recycled object.
   if ws.conn == nil: return
   if ws.idleTimer != TimerId(0):
     ws.conn.loop.cancelTimer(ws.idleTimer)
     ws.idleTimer = TimerId(0)
+  if ws.pingTimer != TimerId(0):
+    ws.conn.loop.cancelTimer(ws.pingTimer)
+    ws.pingTimer = TimerId(0)
   ws.conn = nil
   ws.onOpen = nil
   ws.onMessage = nil
@@ -738,6 +954,27 @@ proc releaseWs(server: HttpServer, ws: WsConnection) =
   ws.onError = nil
   if server != nil:
     server.wsPoolAdd(cast[ref RootObj](ws))
+
+proc armServerPings(ws: WsConnection) =
+  ## Start the repeating server-side keepalive ping interval. Self-cancels
+  ## once the session is no longer connected; `closeWs` and both release
+  ## paths cancel it explicitly.
+  let interval = ws.pingIntervalMs
+  if interval <= 0: return
+  let loop = ws.conn.loop
+  ws.pingTimer = loop.addInterval(interval) do (id: int):
+    if ws.conn != nil and ws.conn.state == Connected:
+      ws.sendPing()
+    else:
+      if ws.pingTimer != TimerId(0):
+        loop.cancelTimer(TimerId(id))
+        ws.pingTimer = TimerId(0)
+
+proc pendingBytes*(ws: WsConnection): int {.inline.} =
+  ## Bytes queued in the connection's userspace write buffers but not yet
+  ## written to the socket — a backpressure signal (0 = fully drained).
+  if ws == nil or ws.conn == nil: return 0
+  ws.conn.pendingBytes()
 
 proc armIdleTimeout(ws: WsConnection) =
   ## Arm (or re-arm) the post-upgrade idle timer so it fires `idleTimeoutMs`
@@ -767,8 +1004,13 @@ func headerValue(headers: HttpHeaders, key: string): string {.inline.} =
     if vals.len > 0: return vals
   return ""
 
-proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer =
+proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize;
+                   pingIntervalMs: int = 0,
+                   permessageDeflate: bool = false): WsServer =
   ## Create a standalone WebSocket server. Register callbacks then call listen().
+  ## `pingIntervalMs` sends a keepalive ping to every upgraded connection on
+  ## that interval (0 = disabled). `permessageDeflate` accepts RFC 7692
+  ## permessage-deflate (no-context-takeover only) when the client offers it.
   WsServer(
     tcpServer: nil,
     loop:      loop,
@@ -776,19 +1018,23 @@ proc newWsServer*(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer
     conns:     initTable[int, WsConnection](64),
     wsPool:    @[],
     maxFrameSize: maxFrameSize,
+    pingIntervalMs: pingIntervalMs,
+    permessageDeflate: permessageDeflate,
     handshakeSessions: initTable[int, HttpParser](64),
     handshakeTimers:   initTable[int, TimerId](64),
     handshakeTimeoutMs: 0,   # set to DefaultHandshakeTimeoutMs at listen()
     maxHandshakeSessions: 0,
   )
 
-proc newWsServer*(maxFrameSize: int = DefaultMaxFrameSize): WsServer =
+proc newWsServer*(maxFrameSize: int = DefaultMaxFrameSize;
+                   pingIntervalMs: int = 0,
+                   permessageDeflate: bool = false): WsServer =
   ## Create a standalone WebSocket server with its own event loop.
   ## `run`/`start` drive it; `close` frees it. Use `getLoop`
   ## to share the loop with other subsystems.
   let loop = newLoop()
   try:
-    result = newWsServer(loop, maxFrameSize)
+    result = newWsServer(loop, maxFrameSize, pingIntervalMs, permessageDeflate)
     result.ownsLoop = true
   except CatchableError:
     loop.close()
@@ -907,17 +1153,25 @@ proc listen*(wss: WsServer, address: string, port: int) =
         # Clean up the HTTP parser session
         wss.endHandshake(fd)
 
-        # Send 101 Switching Protocols
-        conn.sendHandshake(clientKey)
-
         # Create the WebSocket connection
         let ws = wss.acquireWsConnection(conn)
         ws.onOpen    = wss.defaultOpen
         ws.onMessage = wss.defaultMessage
         ws.onClose   = wss.defaultClose
         ws.onError   = wss.defaultError
+        # permessage-deflate (RFC 7692): accept only our stateless-only
+        # terms; anything else leaves the session uncompressed.
+        ws.permessageDeflate = wss.permessageDeflate and
+          parseDeflateOffer(headerValue(headers, "Sec-WebSocket-Extensions"))
+        let deflateExt = if ws.permessageDeflate: WsDeflateAccept else: ""
+
+        # Send 101 Switching Protocols
+        conn.sendHandshake(clientKey, "", deflateExt)
+
         ws.idleTimeoutMs = wss.idleTimeoutMs
         ws.armIdleTimeout()
+        ws.pingIntervalMs = wss.pingIntervalMs
+        ws.armServerPings()
 
         wss.conns[fd] = ws
 
@@ -1090,7 +1344,9 @@ proc websocketUpgrade*(
     onClose: WsCloseCb = nil,
     onError: WsErrorCb = nil,
     maxFrameSize: int = DefaultMaxFrameSize,
-    protocols: openArray[string] = []
+    protocols: openArray[string] = [],
+    pingIntervalMs: int = 0,
+    permessageDeflate: bool = false
 ): WsConnection {.gcsafe, discardable.} =
   ## Upgrade an HTTP connection to WebSocket. Call this from an HTTP route handler.
   ##
@@ -1155,8 +1411,13 @@ proc websocketUpgrade*(
             break
         if chosenProto.len > 0: break
 
+    # permessage-deflate (RFC 7692): accept only our stateless-only terms.
+    let deflateOk = permessageDeflate and
+      parseDeflateOffer(headerValue(headers, "Sec-WebSocket-Extensions"))
+    let deflateExt = if deflateOk: WsDeflateAccept else: ""
+
     # Send the 101 Switching Protocols response
-    conn.sendHandshake(clientKey, chosenProto)
+    conn.sendHandshake(clientKey, chosenProto, deflateExt)
 
     # Create WebSocket connection
     let ws = owner.acquireWs(conn, maxFrameSize)
@@ -1164,6 +1425,9 @@ proc websocketUpgrade*(
     ws.onMessage = onMessage
     ws.onClose   = onClose
     ws.onError   = onError
+    ws.permessageDeflate = deflateOk
+    ws.pingIntervalMs = pingIntervalMs
+    ws.armServerPings()
     if owner != nil:
       ws.idleTimeoutMs = owner.wsIdleTimeoutMs
       ws.armIdleTimeout()
@@ -1380,7 +1644,8 @@ proc prepareClientWs(maxFrameSize: int): WsConnection =
 
 proc sendHandshakeRequest*(ws: WsConnection, path, host: string,
                            extraHeaders: openArray[(string, string)] = [],
-                           protocols: openArray[string] = []) =
+                           protocols: openArray[string] = [],
+                           deflate: bool = false) =
   ## Send the RFC 6455 client upgrade request over the connected TCP socket.
   ## `extraHeaders` are appended verbatim as `name: value` lines; `protocols`
   ## go out as one Sec-WebSocket-Protocol header and are remembered for
@@ -1388,12 +1653,15 @@ proc sendHandshakeRequest*(ws: WsConnection, path, host: string,
   let p = if path.len > 0: path else: "/"
   let h = if host.len > 0: host else: "localhost"
   ws.offeredProtocols = @protocols
+  ws.offerDeflate = deflate
   var req = "GET " & p & " HTTP/1.1\r\n" &
             "Host: " & h & "\r\n" &
             "Upgrade: websocket\r\n" &
             "Connection: Upgrade\r\n" &
             "Sec-WebSocket-Key: " & ws.clientKey & "\r\n" &
             "Sec-WebSocket-Version: 13\r\n"
+  if deflate:
+    req.add("Sec-WebSocket-Extensions: " & WsDeflateAccept & "\r\n")
   if protocols.len > 0:
     req.add("Sec-WebSocket-Protocol: " & join(protocols, ", ") & "\r\n")
   for (name, value) in extraHeaders:
@@ -1436,6 +1704,7 @@ proc finishHandshake(ws: WsConnection): bool =
   var acceptOk = false
   var statusLine = ""
   var serverProto = ""
+  var serverExts = ""
   for i, line in lines:
     if i == 0:
       statusLine = line
@@ -1450,6 +1719,9 @@ proc finishHandshake(ws: WsConnection): bool =
           acceptOk = value == ws.expectedAccept
         elif name == "sec-websocket-protocol":
           serverProto = value
+        elif name == "sec-websocket-extensions":
+          if serverExts.len > 0: serverExts.add(", ")
+          serverExts.add(value)
   if not statusOk:
     if not ws.onError.isNil:
       ws.onError(ws, "WebSocket handshake rejected (expected 101, got: " & statusLine & ")")
@@ -1473,6 +1745,11 @@ proc finishHandshake(ws: WsConnection): bool =
       ws.conn.close()
       return true
   ws.negotiatedProtocol = serverProto
+  # Deflate is negotiated only when we offered it and the server answers
+  # with the same stateless-only terms; anything else (context takeover,
+  # window bits, or an unoffered extension) leaves the session uncompressed.
+  ws.permessageDeflate = ws.offerDeflate and serverExts.len > 0 and
+    parseDeflateOffer(serverExts)
   ws.handshakeBuf.setLen(0)
   ws.handshakeDone = true
   # Client keepalive: periodic pings plus the post-upgrade idle timeout
@@ -1608,6 +1885,7 @@ proc upgradeToWs*(
     protocols: openArray[string] = [],
     pingIntervalMs: int = 0,
     idleTimeoutMs: int = 0,
+    permessageDeflate: bool = false,
 ): WsConnection =
   ## Upgrade an already-connected TCP `conn` to a WebSocket client. Sends the
   ## RFC 6455 handshake and takes over the fd for frame handling. `onOpen`
@@ -1619,7 +1897,8 @@ proc upgradeToWs*(
   ## offered as Sec-WebSocket-Protocol (the server's pick is validated and
   ## readable via `getProtocol`). `pingIntervalMs` enables client keepalive
   ## pings; `idleTimeoutMs` closes sessions that receive no frames for that
-  ## long. The connection must NOT already be TLS-wrapped by this proc — pass
+  ## long. `permessageDeflate` offers RFC 7692 compression (no-context-takeover
+  ## only). The connection must NOT already be TLS-wrapped by this proc — pass
   ## a wrapped conn only if your transport set it up beforehand.
   let ws = prepareClientWs(maxFrameSize)
   ws.conn = conn
@@ -1629,7 +1908,7 @@ proc upgradeToWs*(
   ws.onError = onError
   ws.pingIntervalMs = pingIntervalMs
   ws.idleTimeoutMs = idleTimeoutMs
-  ws.sendHandshakeRequest(path, host, extraHeaders, protocols)
+  ws.sendHandshakeRequest(path, host, extraHeaders, protocols, permessageDeflate)
   ws.armClientHandshakeTimeout(handshakeTimeoutMs)
   ws.registerClientFd()
   ws
@@ -1651,6 +1930,7 @@ proc connectWs*(
     protocols: openArray[string] = [],
     pingIntervalMs: int = 0,
     idleTimeoutMs: int = 0,
+    permessageDeflate: bool = false,
 ): WsConnection =
   ## Non-blocking WebSocket client connect. DNS is resolved on the loop (see
   ## `connect`), then the TCP connection is upgraded to WebSocket via
@@ -1694,7 +1974,7 @@ proc connectWs*(
           return
       ws.pingIntervalMs = pingIntervalMs
       ws.idleTimeoutMs = idleTimeoutMs
-      ws.sendHandshakeRequest(path, effHost, hdrs, protos)
+      ws.sendHandshakeRequest(path, effHost, hdrs, protos, permessageDeflate)
       ws.armClientHandshakeTimeout(handshakeTimeoutMs)
       if tlsCtx == nil:
         ws.registerClientFd()

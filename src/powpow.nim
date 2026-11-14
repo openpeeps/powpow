@@ -100,7 +100,7 @@
 ## - Standalone WebSocket server mode
 ## - HTTP upgrade from HttpServer routes
 ## - Text, binary, ping/pong, and close frames
-## - Per-message deflate extension
+## - Per-message deflate extension (RFC 7692, no-context-takeover only)
 ## - Masked frame handling
 ##
 ## ### Multi-threaded HTTP Server (`proto/multithread.nim`)

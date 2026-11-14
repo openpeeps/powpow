@@ -1290,6 +1290,14 @@ when iouEnabled:
     conn.armWrite()
     conn.writeBuf.len == 0 and conn.writeToken == 0
 
+  proc pendingBytes*(conn: Connection): int {.inline.} =
+    ## Bytes queued in userspace but not yet acknowledged by the kernel —
+    ## a backpressure signal (0 = fully drained). Counts the SEND-op
+    ## buffer, the write-coalesce buffer, and the TLS output buffers.
+    if conn == nil or conn.state != Connected: return 0
+    conn.writeBuf.len + conn.pendingBuf.len + conn.tlsOutBuf.len +
+      conn.tlsPending.len
+
   # ── Connection API ───────────────────────────────────────────────────────────
 
   proc send*(conn: Connection, data: openArray[byte]): int {.gcsafe.} =
@@ -2494,6 +2502,14 @@ else:
       setTcpCork(conn.fd, false)
       conn.corked = false
     return true
+
+  proc pendingBytes*(conn: Connection): int {.inline.} =
+    ## Bytes queued in userspace but not yet written to the socket — a
+    ## backpressure signal (0 = fully drained). TLS ciphertext still
+    ## inside the OpenSSL BIO is not visible here; plaintext queued in
+    ## `writeBuf` is.
+    if conn == nil or conn.state != Connected: return 0
+    conn.writeBuf.len - conn.writePos
 
   # ── TLS ───────────────────────────────────────────────────────────────────────
   # The connection carries an optional OpenSSL `SSL*` pointer (`ssl`). When set,
