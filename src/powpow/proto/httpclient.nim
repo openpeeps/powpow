@@ -43,7 +43,7 @@
 ## down the client's private loop.
 
 import std/httpcore except HttpMethod
-import std/[asyncdispatch, strutils, tables]
+import std/[asyncdispatch, strutils, tables, times]
 
 import ../net/tcp
 import ../net/common
@@ -93,6 +93,21 @@ type
     maxTotal*: int
     idleTimeoutMs*: int
 
+  Cookie* = object
+    ## One stored cookie (RFC 6265 subset).
+    name*, value*: string
+    domain*: string    ## lowercased, no leading dot
+    path*: string      ## default "/"
+    expiresMs*: int64  ## 0 = session cookie
+    secure*: bool
+    hostOnly*: bool    ## true when no Domain attribute was sent
+
+  CookieJar* = ref object
+    ## Simple cookie store. Attach with `client.cookieJar = newCookieJar()`
+    ## to persist cookies across requests; stored cookies are sent only to
+    ## domain/path-matching origins (Secure only over https).
+    cookies*: seq[Cookie]
+
   HttpClientBase* = ref object of RootObj
     tlsCtx*: SslContext
     keepAlive*: bool
@@ -100,6 +115,8 @@ type
     maxBodySize*: int
     defaultHeaders*: seq[(string, string)]
     pool*: HttpConnPool     ## Idle keep-alive connections by origin
+    maxRedirects*: int      ## Follow 301/302/303/307/308 (0 = return as-is)
+    cookieJar*: CookieJar   ## Cookie store (nil = disabled)
 
   AsyncHttpClient* = ref object of HttpClientBase
     loop*: Loop
@@ -234,6 +251,264 @@ func idleConnections*(pool: HttpConnPool): int {.inline.} =
 
 func idleConnectionsFor*(pool: HttpConnPool, key: PoolKey): int {.inline.} =
   if pool.conns.hasKey(key): pool.conns[key].len else: 0
+
+proc parseHttpUrl(url: string): tuple[scheme, host, path: string; port: int]
+  ## Forward declaration (defined below, URL parsing): the redirect
+  ## and cookie engines resolve URLs.
+
+# ── Cookies ─────────────────────────────────────
+
+proc getStatusCode*(res: HttpClientResponse): HttpCode {.inline.} =
+  res.parser.getStatusCode()
+
+proc getHeaderValue*(res: HttpClientResponse, name: string): string {.inline.} =
+  ## Single response header, case-insensitive ("" when absent). Last-wins on
+  ## repeats — use `getHeaderValues` for `Set-Cookie` and friends.
+  $res.parser.getHeaderValue(name)
+
+proc getHeaderValues*(res: HttpClientResponse, name: string): seq[string] {.inline.} =
+  ## All values of a repeated response header (e.g. `Set-Cookie`), in order.
+  res.parser.getHeaderValues(name)
+
+proc newCookieJar*(): CookieJar =
+  ## Create an empty cookie store. Attach it to a client:
+  ## `client.cookieJar = newCookieJar()`.
+  CookieJar(cookies: @[])
+
+proc parseHttpDateMs(s: string): int64 =
+  ## Parse an HTTP date (a cookie `Expires` attribute) to epoch
+  ## milliseconds. Returns 0 when unparseable (session cookie).
+  for layout in ["ddd, dd MMM yyyy HH:mm:ss 'GMT'",
+                 "dddd, dd-MMM-yy HH:mm:ss 'GMT'",
+                 "ddd MMM dd HH:mm:ss yyyy"]:
+    try:
+      return times.parse(s, layout, utc()).toTime.toUnix * 1000
+    except TimeParseError:
+      discard
+  0
+
+proc domainMatches(host, domain: string, hostOnly: bool): bool {.inline.} =
+  if host == domain:
+    return true
+  if hostOnly:
+    return false
+  host.endsWith("." & domain)
+
+proc pathMatches(reqPath, cookiePath: string): bool =
+  if reqPath == cookiePath:
+    return true
+  if reqPath.startsWith(cookiePath):
+    if cookiePath.endsWith("/"):
+      return true
+    if reqPath.len > cookiePath.len and reqPath[cookiePath.len] == '/':
+      return true
+  false
+
+proc defaultCookiePath(reqPath: string): string =
+  ## RFC 6265 section 5.1.4 default-path: the request path up to its last
+  ## `/` ("/" when there is none or it is the only character).
+  var p = reqPath
+  let q = p.find('?')
+  if q >= 0:
+    p = p[0 ..< q]
+  let slash = p.rfind('/')
+  if slash <= 0:
+    return "/"
+  p[0 ..< slash]
+
+proc storeResponseCookies*(jar: CookieJar, url: string,
+                           res: HttpClientResponse) =
+  ## Store every `Set-Cookie` header of `res` (RFC 6265 section 5.3).
+  ## Malformed cookies are skipped; `Max-Age <= 0` deletes. Raises HttpError
+  ## on an invalid `url` (never for URLs our own requests built).
+  let (_, host, path, _) = parseHttpUrl(url)
+  let reqHost = host.toLowerAscii()
+  let nowMs = monoMs()
+  for sc in res.getHeaderValues("set-cookie"):
+    let semi = sc.find(';')
+    let nv = (if semi < 0: sc else: sc[0 ..< semi]).strip()
+    let eq = nv.find('=')
+    if eq <= 0:
+      continue
+    let name = nv[0 ..< eq].strip()
+    if name.len == 0:
+      continue
+    var val = if eq + 1 > nv.high: "" else: nv[eq + 1 .. ^1].strip()
+    if val.len >= 2 and val[0] == '"' and val[^1] == '"':
+      val = val[1 .. ^2]
+    var c = Cookie(name: name, value: val, domain: reqHost,
+                   path: defaultCookiePath(path), hostOnly: true)
+    var valid = true
+    var delete = false
+    var hasMaxAge = false
+    let attrs = if semi < 0: "" else: sc[semi + 1 .. ^1]
+    for rawAttr in attrs.split(';'):
+      let attr = rawAttr.strip()
+      if attr.len == 0:
+        continue
+      let ae = attr.find('=')
+      var aname, aval: string
+      if ae < 0:
+        aname = attr.toLowerAscii()
+        aval = ""
+      else:
+        aname = attr[0 ..< ae].strip().toLowerAscii()
+        aval = if ae + 1 > attr.high: "" else: attr[ae + 1 .. ^1].strip()
+      case aname
+      of "domain":
+        var d = aval.toLowerAscii()
+        if d.startsWith("."):
+          d = d[1 .. ^1]
+        if d.len == 0 or not domainMatches(reqHost, d, false):
+          valid = false
+          break
+        c.domain = d
+        c.hostOnly = false
+      of "path":
+        if aval.startsWith("/"):
+          c.path = aval
+      of "max-age":
+        try:
+          let n = parseInt(aval)
+          hasMaxAge = true
+          if n <= 0:
+            delete = true
+          else:
+            c.expiresMs = nowMs + n.int64 * 1000
+        except ValueError:
+          discard
+      of "expires":
+        if not hasMaxAge:
+          let ms = parseHttpDateMs(aval)
+          if ms > 0:
+            c.expiresMs = ms
+      of "secure":
+        c.secure = true
+      else:
+        discard
+    if not valid:
+      continue
+    var idx = -1
+    for i in 0 ..< jar.cookies.len:
+      let e = jar.cookies[i]
+      if e.name == c.name and e.domain == c.domain and e.path == c.path:
+        idx = i
+        break
+    if idx >= 0:
+      jar.cookies.delete(idx)
+    if not delete:
+      jar.cookies.add(c)
+
+proc cookieHeaderForUrl*(jar: CookieJar, url: string): string =
+  ## The `Cookie` header value for `url` ("n=v; n2=v2"), or "" when nothing
+  ## matches. Expired cookies are purged lazily; Secure cookies only match
+  ## https URLs. Raises HttpError on an invalid `url`.
+  let (scheme, host, path, _) = parseHttpUrl(url)
+  let reqHost = host.toLowerAscii()
+  let secureCtx = scheme == "https"
+  let nowMs = monoMs()
+  var cleanPath = path
+  let q = cleanPath.find('?')
+  if q >= 0:
+    cleanPath = cleanPath[0 ..< q]
+  if cleanPath.len == 0:
+    cleanPath = "/"
+  var kept: seq[Cookie] = @[]
+  var first = true
+  for c in jar.cookies:
+    if c.expiresMs > 0 and c.expiresMs <= nowMs:
+      continue
+    kept.add(c)
+    if c.secure and not secureCtx:
+      continue
+    if not domainMatches(reqHost, c.domain, c.hostOnly):
+      continue
+    if not pathMatches(cleanPath, c.path):
+      continue
+    if not first:
+      result.add("; ")
+    result.add(c.name & "=" & c.value)
+    first = false
+  jar.cookies = move(kept)
+
+# ── Redirects ────────────────────────────────────
+
+const MaxRedirectHops* = 32
+  ## Hard cap on redirect hops per request — loop protection even when
+  ## `maxRedirects` is set higher.
+
+const redirectCodes = {Http301, Http302, Http303, Http307, Http308}
+
+proc authorityHost(host: string): string {.inline.} =
+  ## Wrap bare IPv6 literals for authority/Host use.
+  if ':' in host: '[' & host & ']' else: host
+
+proc resolveRedirectUrl*(baseUrl, loc: string): string =
+  ## Resolve a `Location` value against the requesting URL. Returns "" for
+  ## an empty or fragment-only location (don't follow). Absolute URIs pass
+  ## through (validated when followed); rooted, scheme-relative, relative
+  ## and query-only locations merge against the base. Raises HttpError on an
+  ## invalid base (never for URLs our own requests built).
+  var l = loc
+  let frag = l.find('#')
+  if frag >= 0:
+    l = l[0 ..< frag]
+  if l.len == 0:
+    return ""
+  if "://" in l:
+    return l
+  let (scheme, host, path, port) = parseHttpUrl(baseUrl)
+  let defaultPort = (scheme == "http" and port == 80) or
+                    (scheme == "https" and port == 443)
+  let auth = if defaultPort: authorityHost(host)
+             else: authorityHost(host) & ":" & $port
+  if l.startsWith("//"):
+    return scheme & ":" & l
+  var basePath = path
+  let q = basePath.find('?')
+  if q >= 0:
+    basePath = basePath[0 ..< q]
+  if basePath.len == 0:
+    basePath = "/"
+  var merged: string
+  if l.startsWith("/"):
+    merged = l
+  elif l.startsWith("?"):
+    merged = basePath & l
+  else:
+    let slash = basePath.rfind('/')
+    let dir = if slash < 0: "/" else: basePath[0 .. slash]
+    merged = dir & l
+  scheme & "://" & auth & merged
+
+proc rewriteForRedirect(meth: HttpMethod, code: HttpCode,
+    body: openArray[byte], headers: openArray[(string, string)],
+    fromUrl, toUrl: string): tuple[meth: HttpMethod, body: seq[byte],
+    headers: seq[(string, string)]] =
+  ## One redirect hop: method rewrite (303 always, 301/302 for POST),
+  ## body/entity-header drop on rewrite, and sensitive-header strip on
+  ## cross-origin hops (scheme/host/port). Raises HttpError on invalid URLs.
+  let (fs, fh, _, fp) = parseHttpUrl(fromUrl)
+  let (ts, th, _, tp) = parseHttpUrl(toUrl)
+  let crossOrigin = fs != ts or fh.toLowerAscii() != th.toLowerAscii() or
+                    fp != tp
+  var nmeth = meth
+  if code == Http303 and meth != HttpHead:
+    nmeth = HttpGet
+  elif code in {Http301, Http302} and meth == HttpPost:
+    nmeth = HttpGet
+  let dropBody = nmeth != meth
+  var nh: seq[(string, string)] = @[]
+  for (k, v) in headers:
+    let lk = k.toLowerAscii()
+    if dropBody and (lk == "content-length" or lk == "content-type" or
+                     lk == "transfer-encoding" or lk == "content-encoding"):
+      continue
+    if crossOrigin and (lk == "authorization" or lk == "cookie" or
+                        lk == "proxy-authorization"):
+      continue
+    nh.add((k, v))
+  (nmeth, if dropBody: @[] else: @body, nh)
 
 # ── URL parsing ──────────────────────────────────────────────────────────────
 
@@ -519,7 +794,15 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
         n = conn.loop.platform.getReadData(
           conn.fd.int, cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
       else:
-        n = sockRecv(conn.fd, addr buf[0], buf.len)
+        if conn.tlsState == TlsActive:
+          # TLS connection (https): read decrypted plaintext. During the
+          # handshake (TlsHandshaking) we never reach here — driveHandshake
+          # above returns early — so the socket BIO owns those bytes.
+          n = conn.tlsRead(addr buf[0], buf.len)
+          if n == -2:
+            break
+        else:
+          n = sockRecv(conn.fd, addr buf[0], buf.len)
       if n > 0:
         discard st.parser.feed(buf.toOpenArray(0, n - 1))
         if st.parser.isError():
@@ -612,11 +895,12 @@ proc requestImpl*(client: HttpClientBase, loop: Loop, meth: HttpMethod,
     tls: tlsNeeded,
     uds: unixSocket,
   )
+  let bareHost = authorityHost(parsed.host)
+  let defaultPort = (parsed.scheme == "http" and parsed.port == 80) or
+                    (parsed.scheme == "https" and parsed.port == 443)
   let hostForHeader =
-    if (parsed.port != 80 and parsed.port != 443):
-      parsed.host & ":" & $parsed.port
-    else:
-      parsed.host
+    if defaultPort: bareHost
+    else: bareHost & ":" & $parsed.port
 
   let st = HttpReq(
     client: client,
@@ -648,10 +932,97 @@ proc requestImpl*(client: HttpClientBase, loop: Loop, meth: HttpMethod,
 
   connectFresh(st, client, loop)
   st
-# ── Response accessors ───────────────────────────────────────────────────────
+# ── Policy wrapper: cookies + redirects ─────────────────
 
-proc getStatusCode*(res: HttpClientResponse): HttpCode {.inline.} =
-  res.parser.getStatusCode()
+proc injectCookieHeaders(client: HttpClientBase, url: string,
+    headers: openArray[(string, string)]): seq[(string, string)] =
+  ## Copy `headers`, appending the jar's `Cookie` header for `url`
+  ## (merged with a user-supplied one). Raises HttpError on invalid `url`.
+  result = @headers
+  if client.cookieJar == nil:
+    return
+  let ch = client.cookieJar.cookieHeaderForUrl(url)
+  if ch.len == 0:
+    return
+  for i in 0 ..< result.len:
+    if result[i][0].toLowerAscii() == "cookie":
+      result[i][1] = result[i][1] & "; " & ch
+      return
+  result.add(("Cookie", ch))
+
+proc extractResponseCookies(client: HttpClientBase, url: string,
+    res: HttpClientResponse) =
+  ## Store `res` cookies into the jar. Never raises (a malformed cookie
+  ## must not fail the request).
+  if client.cookieJar == nil:
+    return
+  try:
+    client.cookieJar.storeResponseCookies(url, res)
+  except CatchableError:
+    discard
+
+proc redirectHop(client: HttpClientBase, meth: HttpMethod, url: string,
+    body: openArray[byte], headers: openArray[(string, string)],
+    res: HttpClientResponse, hopsLeft: int):
+    tuple[follow: bool, meth: HttpMethod, url: string, body: seq[byte],
+      headers: seq[(string, string)]] =
+  ## One redirect step: returns follow=false when `res` is not a followed
+  ## 3xx (or hops are exhausted). Raises HttpError on invalid `Location`.
+  if hopsLeft <= 0 or res.getStatusCode() notin redirectCodes:
+    return (false, meth, "", @[], @[])
+  let loc = res.getHeaderValue("location")
+  if loc.len == 0:
+    return (false, meth, "", @[], @[])
+  let nextUrl = resolveRedirectUrl(url, loc)
+  if nextUrl.len == 0:
+    return (false, meth, "", @[], @[])
+  let (nmeth, nbody, nheaders) = rewriteForRedirect(meth,
+    res.getStatusCode(), body, headers, url, nextUrl)
+  (true, nmeth, nextUrl, nbody, nheaders)
+
+proc doRequest(client: HttpClientBase, loop: Loop, meth: HttpMethod,
+    url: string, body: openArray[byte], headers: openArray[(string, string)],
+    unixSocket: string, timeoutMs: int, redirectsLeft: int,
+    onResponse: proc(res: HttpClientResponse) {.closure.},
+    onBodyData: HttpBodyCallback,
+    onError: proc(err: string) {.closure.}): HttpReq =
+  ## Async-path single request with client policy: cookie inject/extract
+  ## around the call and 3xx redirect chasing after it. Recursion here is
+  ## safe — `requestImpl` never blocks, so no poll loop ever nests.
+  let bodySeq = @body  # owned copy: the response closure below may re-send it
+  var effHeaders: seq[(string, string)]
+  try:
+    effHeaders = injectCookieHeaders(client, url, headers)
+  except HttpError as e:
+    onError(e.msg)
+    return nil
+  try:
+    result = requestImpl(client, loop, meth, url, bodySeq, effHeaders,
+        unixSocket, timeoutMs,
+      onResponse = proc(res: HttpClientResponse) =
+        extractResponseCookies(client, url, res)
+        var hop: tuple[follow: bool, meth: HttpMethod, url: string,
+          body: seq[byte], headers: seq[(string, string)]]
+        try:
+          hop = redirectHop(client, meth, url, bodySeq, effHeaders, res,
+            redirectsLeft)
+        except HttpError as e:
+          onError(e.msg)
+          return
+        if hop.follow:
+          discard doRequest(client, loop, hop.meth, hop.url, hop.body,
+            hop.headers, unixSocket, timeoutMs, redirectsLeft - 1,
+            onResponse, onBodyData, onError)
+          return
+        onResponse(res)
+      ,
+      onBodyData = onBodyData,
+      onError = onError)
+  except HttpError as e:
+    onError(e.msg)
+    return nil
+
+# ── Response accessors ───────────────────────────────────────────────────────
 
 proc getStatusText*(res: HttpClientResponse): lent string {.inline.} =
   res.parser.getStatusText()
@@ -685,12 +1056,16 @@ proc newAsyncHttpClient*(tlsCtx: SslContext = nil,
                          maxBodySize: int = DefaultMaxResponseBody,
                          maxIdlePerHost: int = DefaultMaxIdlePerHost,
                          maxIdleTotal: int = DefaultMaxIdleTotal,
-                         idleTimeoutMs: int = DefaultIdleTimeoutMs): AsyncHttpClient =
+                         idleTimeoutMs: int = DefaultIdleTimeoutMs,
+                         maxRedirects: int = 0): AsyncHttpClient =
   ## Create an async HTTP client with its own event loop. Await the request
   ## methods from an `async` proc with asyncdispatch.
   ##
   ## Pooling knobs: `maxIdlePerHost`/`maxIdleTotal` cap idle keep-alive
   ## connections; `idleTimeoutMs` retires idle connections lazily (0 disables).
+  ##
+  ## `maxRedirects` follows 301/302/303/307/308 (0 = return them as-is).
+  ## Attach `client.cookieJar = newCookieJar()` to persist cookies.
   AsyncHttpClient(
     loop: newLoop(),
     tlsCtx: tlsCtx,
@@ -699,6 +1074,7 @@ proc newAsyncHttpClient*(tlsCtx: SslContext = nil,
     maxBodySize: maxBodySize,
     defaultHeaders: @[],
     pool: newHttpConnPool(maxIdlePerHost, maxIdleTotal, idleTimeoutMs),
+    maxRedirects: maxRedirects,
   )
 
 proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
@@ -706,7 +1082,11 @@ proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
                     maxBodySize: int = DefaultMaxResponseBody,
                     maxIdlePerHost: int = DefaultMaxIdlePerHost,
                     maxIdleTotal: int = DefaultMaxIdleTotal,
-                    idleTimeoutMs: int = DefaultIdleTimeoutMs): HttpClient =
+                    idleTimeoutMs: int = DefaultIdleTimeoutMs,
+                    maxRedirects: int = 0): HttpClient =
+  ## Blocking HTTP client. `maxRedirects` follows 301/302/303/307/308
+  ## (0 = return them as-is). Attach `client.cookieJar = newCookieJar()`
+  ## to persist cookies.
   HttpClient(
     syncLoop: newLoop(),
     tlsCtx: tlsCtx,
@@ -715,6 +1095,7 @@ proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
     maxBodySize: maxBodySize,
     defaultHeaders: @[],
     pool: newHttpConnPool(maxIdlePerHost, maxIdleTotal, idleTimeoutMs),
+    maxRedirects: maxRedirects,
   )
 
 proc getLoop*(client: HttpClient): Loop {.inline.} =
@@ -772,8 +1153,9 @@ proc request*(
     else:
       fut.fail(newException(HttpError, "request did not complete"))
   try:
-    discard requestImpl(client, client.loop, meth, url, body, headers,
+    discard doRequest(client, client.loop, meth, url, body, headers,
                         unixSocket, timeoutMs,
+                        min(client.maxRedirects, MaxRedirectHops),
       onResponse = proc(res: HttpClientResponse) =
         resp = res
         finish()
@@ -850,27 +1232,44 @@ proc request*(
 ): HttpClientResponse =
   ## Blocking HTTP request. Returns the response or raises `HttpError`.
   ## `timeoutMs`: -1 = client default, 0 = no timeout, >0 = override.
-  var done = false
-  var resp: HttpClientResponse
-  var errMsg = ""
-  discard requestImpl(client, client.syncLoop, meth, url, body, headers,
-                         unixSocket, timeoutMs,
-    onResponse = proc(res: HttpClientResponse) =
-      resp = res
-      done = true
-    ,
-    onBodyData = nil,
-    onError = proc(err: string) =
-      errMsg = err
-      done = true
-  )
-  while not done:
-    client.syncLoop.poll()
-  if errMsg.len > 0:
-    raise newException(HttpError, errMsg)
-  if resp == nil:
-    raise newException(HttpError, "request did not complete")
-  resp
+  ## Redirect hops run as an explicit loop of single-shot requests (never
+  ## nested poll loops).
+  var cmeth = meth
+  var curl = url
+  var cbody = @body
+  var cheaders = @headers
+  var hops = min(client.maxRedirects, MaxRedirectHops)
+  while true:
+    let effHeaders = injectCookieHeaders(client, curl, cheaders)
+    var done = false
+    var resp: HttpClientResponse
+    var errMsg = ""
+    discard requestImpl(client, client.syncLoop, cmeth, curl, cbody,
+        effHeaders, unixSocket, timeoutMs,
+      onResponse = proc(res: HttpClientResponse) =
+        resp = res
+        done = true
+      ,
+      onBodyData = nil,
+      onError = proc(err: string) =
+        errMsg = err
+        done = true
+    )
+    while not done:
+      client.syncLoop.poll()
+    if errMsg.len > 0:
+      raise newException(HttpError, errMsg)
+    if resp == nil:
+      raise newException(HttpError, "request did not complete")
+    extractResponseCookies(client, curl, resp)
+    let hop = redirectHop(client, cmeth, curl, cbody, cheaders, resp, hops)
+    if not hop.follow:
+      return resp
+    cmeth = hop.meth
+    curl = hop.url
+    cbody = hop.body
+    cheaders = hop.headers
+    dec hops
 
 proc request*(
     client: HttpClient,

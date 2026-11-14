@@ -1465,6 +1465,64 @@ proc peekContentType*(p: HttpParser): lent string {.inline.} =
     copyMem(addr p.contentTypeVal[0], addr buf[p.contentTypeStart], p.contentTypeLen)
   p.contentTypeVal
 
+proc getHeaderValues*(p: HttpParser, name: string): seq[string] =
+  ## All values of header `name` (case-insensitive ASCII), in wire order.
+  ## Unlike `getHeaderValue` (last-wins), this preserves repeats such as
+  ## multiple `Set-Cookie` lines (which `getHeaders` also collapses — it
+  ## materializes into a Table). Empty when absent. Each value is a fresh
+  ## string, safe to retain.
+  result = @[]
+  if name.len == 0 or p.headerEnd < 0 or p.buf.len == 0:
+    return
+  let buf = cast[ptr UncheckedArray[byte]](addr p.buf[0])
+  var i = 0
+  # Same first-line skip as getHeaderValue/materializeHeaders.
+  if not p.responseMode and p.reqLineEnd >= 2 and p.reqLineEnd <= p.headerEnd - 1 and
+     char(buf[p.reqLineEnd - 2]) == '\r' and char(buf[p.reqLineEnd - 1]) == '\n':
+    i = p.reqLineEnd
+  else:
+    while i < p.headerEnd - 1:
+      if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+        i += 2
+        break
+      inc i
+  while i < p.headerEnd - 1:
+    if char(buf[i]) == '\r' and char(buf[i+1]) == '\n':
+      inc i, 2
+      continue
+    let lineStart = i
+    while i < p.headerEnd - 1:
+      if char(buf[i]) == '\r':
+        break
+      inc i
+    var colonPos = lineStart
+    while colonPos < i and char(buf[colonPos]) != ':':
+      inc colonPos
+    if colonPos < i and colonPos > lineStart and
+       colonPos - lineStart == name.len:
+      var eq = true
+      for k in 0 ..< name.len:
+        var a = buf[lineStart + k]
+        var b = byte(name[k])
+        if a >= byte('A') and a <= byte('Z'): a += byte('a') - byte('A')
+        if b >= byte('A') and b <= byte('Z'): b += byte('a') - byte('A')
+        if a != b:
+          eq = false
+          break
+      if eq:
+        var valStart = colonPos + 1
+        while valStart < i and char(buf[valStart]) == ' ':
+          inc valStart
+        if i - valStart > 0:
+          var value = newString(i - valStart)
+          copyMem(addr value[0], addr buf[valStart], i - valStart)
+          result.add(value)
+        else:
+          result.add("")
+    if i < p.headerEnd - 1 and char(buf[i]) == '\r':
+      inc i
+    inc i
+
 proc getHeaderValue*(p: HttpParser, name: string): lent string =
   ## Value of header `name` (case-insensitive ASCII), or "" when absent.
   ## Zero-alloc lookup: scans the raw header bytes and copies only the matched
