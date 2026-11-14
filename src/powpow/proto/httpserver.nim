@@ -1051,7 +1051,13 @@ proc close*(s: SseStream, trailers: openArray[(string, string)] = []) =
       let c = s.conn
       {.cast(gcsafe).}:
         s.server.removeSession(c)
-      c.closeAfterDrain()
+      when defined(windows):
+        # RST (closeAfterDrain's SO_LINGER=0 fast path) discards the
+        # peer's unread receive buffer on Windows, truncating the just-sent
+        # terminator. Use the FIN fast path like the file-send sites do.
+        c.closeAfterSend()
+      else:
+        c.closeAfterDrain()
     elif s.closeAfter:
       s.conn.closeAfterSend()
 
@@ -1440,7 +1446,12 @@ proc markIdle(server: HttpServer, conn: Connection) =
     # Graceful shutdown: never park a connection idle — finish this request
     # and tear the session down. removeSession fires maybeDrained.
     server.removeSession(conn)
-    conn.closeAfterDrain()
+    when defined(windows):
+      # Same Windows RST hazard as the SseStream drain path above: the FIN
+      # fast path keeps the just-sent response deliverable.
+      conn.closeAfterSend()
+    else:
+      conn.closeAfterDrain()
     return
   let now = if pollNowMs != 0: pollNowMs else: monoMs()
   ctx.lastActive = now
