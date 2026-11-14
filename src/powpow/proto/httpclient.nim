@@ -43,7 +43,7 @@
 ## down the client's private loop.
 
 import std/httpcore except HttpMethod
-import std/[asyncdispatch, strutils, tables, times]
+import std/[asyncdispatch, base64, strutils, tables, times]
 
 import ../net/tcp
 import ../net/common
@@ -71,10 +71,13 @@ const DefaultIdleTimeoutMs* = 60_000
 type
   HttpError* = object of CatchableError
 
-  PoolKey* = tuple[host: string, port: int, tls: bool, uds: string]
+  PoolKey* = tuple[host: string, port: int, tls: bool, uds: string,
+                     proxy: string]
     ## Origin identity of a pooled connection. Two URLs share a connection only
-    ## when every field matches — reusing across origins would send requests to
-    ## the wrong host.
+    ## when every field matches — reusing across origins would send requests
+    ## to the wrong host. `proxy` is "" for direct connections, the proxy
+    ## authority for plain-http proxying, and proxy+target for CONNECT
+    ## tunnels (a tunnel is bound to its target).
 
   PooledConn* = object
     conn*: Connection
@@ -117,6 +120,9 @@ type
     pool*: HttpConnPool     ## Idle keep-alive connections by origin
     maxRedirects*: int      ## Follow 301/302/303/307/308 (0 = return as-is)
     cookieJar*: CookieJar   ## Cookie store (nil = disabled)
+    proxyUrl*: string        ## http://[user:pass@]host[:port] proxy ("" = direct)
+    connectTimeoutMs*: int  ## connect+handshake deadline (0 = total governs)
+    readTimeoutMs*: int     ## response-inactivity deadline (0 = off)
 
   AsyncHttpClient* = ref object of HttpClientBase
     loop*: Loop
@@ -144,6 +150,17 @@ type
     timer: TimerId
     noBodyExpected: bool      # request method implies no response body (HEAD)
     pendingCloseDelimited: bool  # body delimited by connection close
+    tlsHost: string           ## SNI/verify target (differs from key.host via proxy)
+    needsProxyTunnel: bool    ## https-over-proxy: CONNECT first, then TLS
+    proxyPending: bool        ## CONNECT handshake in flight (recomputed per conn)
+    proxyHead: string         ## prebuilt CONNECT request line + headers
+    proxyBuf: string          ## CONNECT response accumulator (16 KiB cap)
+    loop: Loop              ## owning loop (timer ops when conn is nil)
+    startMs: int64          ## request start (monoMs)
+    deadlineTotalMs: int64  ## absolute total deadline (0 = none)
+    connectTimeoutMs: int   ## per-request copy of the client knob
+    readTimeoutMs: int      ## per-request copy of the client knob
+    connectDone: bool       ## app bytes flowing (TCP + TLS + tunnel up)
     key: PoolKey              # origin this request targets (pool identity)
     cameFromPool: bool        # conn was reused from the pool — retry once on stale
     retried: bool             # already did the fresh-connection retry
@@ -561,6 +578,34 @@ proc parseHttpUrl(url: string): tuple[scheme, host, path: string; port: int] =
       raise newException(HttpError, "invalid port: " & portStr)
   (scheme, host, path, port)
 
+proc parseProxyUrl(purl: string): tuple[host: string, port: int, auth: string] =
+  ## Split an `http://[user:pass@]host[:port]` proxy URL. Only plain-http
+  ## proxies are supported (an https:// proxy would need a TLS-to-proxy
+  ## layer). `auth` is "" or a ready `Basic ...` value. Raises HttpError.
+  let sEnd = purl.find("://")
+  if sEnd <= 0:
+    raise newException(HttpError, "invalid proxy URL (expected http://host[:port]): " & purl)
+  if purl[0 ..< sEnd].toLowerAscii() != "http":
+    raise newException(HttpError, "only http:// proxies are supported: " & purl)
+  var authority = purl[sEnd + 3 .. ^1]
+  let slash = authority.find('/')
+  if slash >= 0:
+    authority = authority[0 ..< slash]
+  var auth = ""
+  let at = authority.rfind('@')
+  if at >= 0:
+    if at == 0 or at == authority.high:
+      raise newException(HttpError, "invalid proxy userinfo: " & purl)
+    auth = "Basic " & base64.encode(authority[0 ..< at])
+    authority = authority[at + 1 .. ^1]
+  if authority.len == 0 or hasControlChars(authority):
+    raise newException(HttpError, "invalid proxy authority: " & purl)
+  # Reuse the origin parser for host/port validation (IPv6, default port).
+  let (_, host, _, port) = parseHttpUrl("http://" & authority & "/")
+  if host.len == 0:
+    raise newException(HttpError, "invalid proxy authority: " & purl)
+  (host, port, auth)
+
 # ── Request building ─────────────────────────────────────────────────────────
 
 proc validHeaderField(s: string): bool {.inline.} =
@@ -595,8 +640,8 @@ proc failReq(st: HttpReq, client: HttpClientBase, msg: string) =
   if not st.active: return
   st.active = false
   if st.timer != TimerId(0):
-    if st.conn != nil:
-      st.conn.loop.cancelTimer(st.timer)
+    if st.loop != nil:
+      st.loop.cancelTimer(st.timer)
     st.timer = TimerId(0)
   if st.conn != nil:
     discard client.pool.removeFromPool(st.conn)
@@ -664,24 +709,20 @@ proc connectFresh(st: HttpReq, client: HttpClientBase, loop: Loop)
   ## Forward declaration: `beginConn` retries on a fresh connection when the
   ## (possibly pooled) connection dies while writing the request.
 
-proc beginConn(st: HttpReq, client: HttpClientBase, conn: Connection,
-               reuseParser: HttpParser = nil) =
-  ## Run the prepared request on `conn` (fresh or reused from the pool).
-  st.conn = conn
-  if not st.active:
-    conn.close()
-    return
-  try:
-    if st.tlsNeeded:
-      if client.tlsCtx == nil:
-        failReq(st, client, "https requested but no tlsCtx configured")
-        return
-      conn.wrapTls(client.tlsCtx, st.key.host)
-  except SslError:
-    failReq(st, client, getCurrentExceptionMsg())
-    return
-  if reuseParser != nil:
-    st.parser = reuseParser
+proc rearm(st: HttpReq, client: HttpClientBase)
+  ## Forward declaration: (re)arms the single request timer to the nearest
+  ## applicable deadline (defined below, next to requestImpl).
+
+proc proxyHandshakeBytes(st: HttpReq, client: HttpClientBase): bool
+  ## Forward declaration: consumes the proxy's CONNECT response (defined
+  ## below, next to onFdImpl).
+
+proc initClientParser(st: HttpReq, client: HttpClientBase,
+    reuse: HttpParser = nil) =
+  ## (Re)arm the response parser: fresh, or a pooled one reset for the next
+  ## response. Shared by beginConn and the CONNECT-tunnel path in onFdImpl.
+  if reuse != nil:
+    st.parser = reuse
     st.parser.resetForNext()
   else:
     st.parser = newHttpParser()
@@ -689,20 +730,56 @@ proc beginConn(st: HttpReq, client: HttpClientBase, conn: Connection,
   st.parser.maxBodySize = client.maxBodySize.int64
   if st.onBodyData != nil:
     st.parser.onBodyData = st.onBodyData
-  discard conn.send(st.reqHeaders)
-  if st.bodyBytes.len > 0:
-    discard conn.send(st.bodyBytes)
-  if conn.state != Connected:
-    # The connection died while writing the request (send closes it
-    # internally). Registering its (now invalid) fd would wait on events
-    # that never arrive, so retry or fail here instead. A pooled connection
-    # the server already killed is the classic case — the server never saw
-    # these bytes, so one transparent retry on a fresh connection is safe.
-    if retryFresh(st, client):
-      connectFresh(st, client, conn.loop)
-    else:
-      failReq(st, client, "connection closed while writing")
+
+proc beginConn(st: HttpReq, client: HttpClientBase, conn: Connection,
+               reuseParser: HttpParser = nil) =
+  ## Run the prepared request on `conn` (fresh or reused from the pool).
+  st.conn = conn
+  if not st.active:
+    conn.close()
     return
+  # A pooled CONNECT tunnel is already established (ssl != nil): reuse it
+  # directly. Fresh connections (and plain sockets) need the handshake.
+  st.proxyPending = st.needsProxyTunnel and conn.ssl == nil
+  if st.proxyPending:
+    # HTTPS-over-proxy: the CONNECT head goes out now; the real request
+    # (and TLS) wait for the proxy's 200, handled in onFdImpl.
+    discard conn.send(st.proxyHead)
+    if conn.state != Connected:
+      if retryFresh(st, client):
+        connectFresh(st, client, conn.loop)
+      else:
+        failReq(st, client, "proxy connection closed")
+      return
+  else:
+    try:
+      if st.tlsNeeded:
+        if client.tlsCtx == nil:
+          failReq(st, client, "https requested but no tlsCtx configured")
+          return
+        conn.wrapTls(client.tlsCtx, st.tlsHost)
+    except SslError:
+      failReq(st, client, getCurrentExceptionMsg())
+      return
+    initClientParser(st, client, reuseParser)
+    discard conn.send(st.reqHeaders)
+    if st.bodyBytes.len > 0:
+      discard conn.send(st.bodyBytes)
+    if conn.state != Connected:
+      # The connection died while writing the request (send closes it
+      # internally). Registering its (now invalid) fd would wait on events
+      # that never arrive, so retry or fail here instead. A pooled connection
+      # the server already killed is the classic case — the server never saw
+      # these bytes, so one transparent retry on a fresh connection is safe.
+      if retryFresh(st, client):
+        connectFresh(st, client, conn.loop)
+      else:
+        failReq(st, client, "connection closed while writing")
+      return
+    if conn.tlsState != TlsHandshaking:
+      # No handshake pending (plain TCP, pooled TLS, UDS): app bytes flow.
+      st.connectDone = true
+      rearm(st, client)
   # Re-register in place: register() already replaces the existing watcher.
   # Unregistering first would trash the fd state while its WSARecv is still
   # in flight on Windows/IOCP, so the response bytes would land in the trash
@@ -746,6 +823,74 @@ proc connectFresh(st: HttpReq, client: HttpClientBase, loop: Loop) =
         failReq(st, client, err)
   )
 
+proc proxyHandshakeBytes(st: HttpReq, client: HttpClientBase): bool =
+  ## Consume the proxy's CONNECT response with raw reads (no parser: the
+  ## bytes belong to the tunnel negotiation, not the origin response).
+  ## Returns true once the tunnel is established and `wrapTls` applied;
+  ## false to wait for more data. Fails the request on protocol errors.
+  ## The server cannot send tunnel bytes before our ClientHello, so
+  ## consuming reads are safe: nothing after the header block can be
+  ## misattributed (a non-empty trailer is rejected).
+  let conn = st.conn
+  var buf: array[4096, byte]
+  var n: int
+  when defined(windows):
+    n = conn.loop.platform.getReadData(conn.fd.int,
+      cast[ptr UncheckedArray[byte]](addr buf[0]), buf.len)
+    if n < 0:
+      return false  # completion in flight; the next one re-enters here
+  else:
+    while true:
+      n = sockRecv(conn.fd, addr buf[0], buf.len)
+      if n < 0:
+        if sockWouldBlock():
+          return false
+        if sockInterrupted():
+          continue
+        failReq(st, client, "proxy read error")
+        return false
+      break
+  if n == 0:
+    failReq(st, client, "proxy closed the connection")
+    return false
+  if st.proxyBuf.len + n > 16384:
+    failReq(st, client, "proxy response too large")
+    return false
+  let off = st.proxyBuf.len
+  st.proxyBuf.setLen(off + n)
+  copyMem(addr st.proxyBuf[off], addr buf[0], n)
+  let term = st.proxyBuf.find("\r\n\r\n")
+  if term < 0:
+    return false
+  if st.proxyBuf.len > term + 4:
+    failReq(st, client, "proxy sent data after CONNECT headers")
+    return false
+  let head = st.proxyBuf[0 ..< term]
+  let sp = head.find(' ')
+  if sp < 0 or not head.startsWith("HTTP/1."):
+    failReq(st, client, "invalid proxy response")
+    return false
+  var code = -1
+  if head.len >= sp + 4:
+    try:
+      code = parseInt(head[sp + 1 ..< sp + 4])
+    except ValueError:
+      discard
+  if code == 407:
+    failReq(st, client, "proxy authentication required (407)")
+    return false
+  if code != 200:
+    failReq(st, client, "proxy CONNECT failed with status " & $code)
+    return false
+  st.proxyBuf.setLen(0)
+  try:
+    conn.wrapTls(client.tlsCtx, st.tlsHost)
+  except SslError as e:
+    failReq(st, client, e.msg)
+    return false
+  st.proxyPending = false
+  true
+
 proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
               ev: set[EventType]) =
   let conn = st.conn
@@ -771,9 +916,30 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
     else:
       failReq(st, client, "connection error")
     return
+  if st.proxyPending and (Read in ev or Hup in ev):
+    # CONNECT handshake in flight: raw bytes belong to the proxy, not the
+    # origin parser. On 200 the tunnel is ready — send the real request
+    # through it (queued into TLS/sockets by send as usual).
+    if proxyHandshakeBytes(st, client):
+      initClientParser(st, client)
+      discard conn.send(st.reqHeaders)
+      if st.bodyBytes.len > 0:
+        discard conn.send(st.bodyBytes)
+      if conn.state != Connected:
+        if retryFresh(st, client):
+          connectFresh(st, client, conn.loop)
+        else:
+          failReq(st, client, "connection closed after CONNECT")
+    return
   if conn.tlsState == TlsHandshaking:
     if not conn.driveHandshake():
       return
+  if not st.connectDone and not st.proxyPending and
+     conn.tlsState != TlsHandshaking:
+    # TCP + TLS + tunnel all up: switch from the connect window to the
+    # total/read schedule.
+    st.connectDone = true
+    rearm(st, client)
   if Write in ev:
     if conn.flushWriteBuffer():
       if conn.state != Connected:
@@ -804,6 +970,8 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
         else:
           n = sockRecv(conn.fd, addr buf[0], buf.len)
       if n > 0:
+        if st.readTimeoutMs > 0:
+          rearm(st, client)  # response progress: restart the inactivity window
         discard st.parser.feed(buf.toOpenArray(0, n - 1))
         if st.parser.isError():
           failReq(st, client, "invalid HTTP response")
@@ -879,6 +1047,43 @@ proc onFdImpl(st: HttpReq, client: HttpClientBase, fd: int,
       else:
         failReq(st, client, "connection closed before response completed")
 
+proc rearm(st: HttpReq, client: HttpClientBase) =
+  ## (Re)arm the single request timer to the nearest applicable deadline:
+  ## total first, then the connect window (until app bytes flow) or the
+  ## read-inactivity window. No timer when nothing is configured.
+  if st.timer != TimerId(0):
+    st.loop.cancelTimer(st.timer)
+    st.timer = TimerId(0)
+  if not st.active:
+    return
+  let now = monoMs()
+  var best = int64.high
+  var any = false
+  if st.deadlineTotalMs > 0:
+    best = min(best, st.deadlineTotalMs - now)
+    any = true
+  if not st.connectDone:
+    if st.connectTimeoutMs > 0:
+      best = min(best, st.connectTimeoutMs.int64)
+      any = true
+  elif st.readTimeoutMs > 0:
+    best = min(best, st.readTimeoutMs.int64)
+    any = true
+  if not any:
+    return
+  if best < 0:
+    best = 0
+  st.timer = st.loop.addTimer(best.int) do (id: int):
+    if not st.active:
+      return
+    let now2 = monoMs()
+    if st.deadlineTotalMs > 0 and now2 >= st.deadlineTotalMs:
+      failReq(st, client, "request timed out")
+    elif not st.connectDone:
+      failReq(st, client, "connect timed out")
+    else:
+      failReq(st, client, "read timed out")
+
 proc requestImpl*(client: HttpClientBase, loop: Loop, meth: HttpMethod,
                  url: string, body: openArray[byte],
                  headers: openArray[(string, string)],
@@ -889,18 +1094,54 @@ proc requestImpl*(client: HttpClientBase, loop: Loop, meth: HttpMethod,
   let parsed = parseHttpUrl(url)
   let timeout = if timeoutOverride < 0: client.timeoutMs else: timeoutOverride
   let tlsNeeded = parsed.scheme == "https"
+  # Proxy resolution (client policy; "" = direct).
+  var proxyHost = ""
+  var proxyPort = 0
+  var proxyAuth = ""
+  if client.proxyUrl.len > 0:
+    if unixSocket.len > 0:
+      raise newException(HttpError, "proxy with unixSocket is not supported")
+    (proxyHost, proxyPort, proxyAuth) = parseProxyUrl(client.proxyUrl)
+    if tlsNeeded and client.tlsCtx == nil:
+      raise newException(HttpError,
+        "https proxy tunnel requested but no tlsCtx configured")
+  let useProxy = proxyHost.len > 0
+  let needsTunnel = useProxy and tlsNeeded
+  let targetAuth = authorityHost(parsed.host) &
+    (if (parsed.scheme == "http" and parsed.port == 80) or
+        (parsed.scheme == "https" and parsed.port == 443): ""
+     else: ":" & $parsed.port)
+  let proxyIdent =
+    if not useProxy: ""
+    elif not needsTunnel: proxyHost.toLowerAscii() & ":" & $proxyPort
+    else: proxyHost.toLowerAscii() & ":" & $proxyPort & ">" &
+          parsed.host.toLowerAscii() & ":" & $parsed.port
   let key: PoolKey = (
-    host: parsed.host.toLowerAscii(),
-    port: parsed.port,
-    tls: tlsNeeded,
+    host: (if useProxy: proxyHost.toLowerAscii() else: parsed.host.toLowerAscii()),
+    port: (if useProxy: proxyPort else: parsed.port),
+    tls: tlsNeeded and not useProxy,
     uds: unixSocket,
+    proxy: proxyIdent,
   )
-  let bareHost = authorityHost(parsed.host)
-  let defaultPort = (parsed.scheme == "http" and parsed.port == 80) or
-                    (parsed.scheme == "https" and parsed.port == 443)
-  let hostForHeader =
-    if defaultPort: bareHost
-    else: bareHost & ":" & $parsed.port
+  let requestTarget =
+    if useProxy and not needsTunnel:
+      parsed.scheme & "://" & targetAuth & parsed.path
+    else:
+      parsed.path
+  var allHeaders = @headers
+  if proxyAuth.len > 0 and not needsTunnel:
+    # Hop-by-hop credentials for the proxy itself; never send them
+    # end-to-end inside a CONNECT tunnel (the tunneled request keeps only
+    # the origin's headers — the CONNECT head carries Proxy-Authorization).
+    allHeaders.insert(("Proxy-Authorization", proxyAuth), 0)
+  let targetHostPort = authorityHost(parsed.host) & ":" & $parsed.port
+  var proxyHead = ""
+  if needsTunnel:
+    proxyHead = "CONNECT " & targetHostPort & " HTTP/1.1\r\nHost: " &
+      targetHostPort & "\r\n"
+    if proxyAuth.len > 0:
+      proxyHead.add("Proxy-Authorization: " & proxyAuth & "\r\n")
+    proxyHead.add("\r\n")
 
   let st = HttpReq(
     client: client,
@@ -911,16 +1152,23 @@ proc requestImpl*(client: HttpClientBase, loop: Loop, meth: HttpMethod,
     timer: TimerId(0),
     key: key,
     tlsNeeded: tlsNeeded,
-    reqHeaders: buildRequestHeaders(client, meth, parsed.path, hostForHeader,
-                                    body.len, headers),
+    tlsHost: parsed.host.toLowerAscii(),
+    needsProxyTunnel: needsTunnel,
+    proxyHead: proxyHead,
+    reqHeaders: buildRequestHeaders(client, meth, requestTarget, targetAuth,
+                                    body.len, allHeaders),
     bodyBytes: @body,
     noBodyExpected: meth == HttpHead,
+    loop: loop,
+    startMs: monoMs(),
+    connectTimeoutMs: client.connectTimeoutMs,
+    readTimeoutMs: client.readTimeoutMs,
   )
-
   if timeout > 0:
-    st.timer = loop.addTimer(timeout) do (id: int):
-      if st.active:
-        failReq(st, client, "request timed out")
+    st.deadlineTotalMs = st.startMs + timeout.int64
+  # Connect-phase deadline (total and/or connect window); rearm() switches
+  # to the total/read schedule once app bytes flow.
+  rearm(st, client)
 
   # Reuse a pooled keep-alive connection for this origin when available.
   if client.keepAlive:
@@ -1057,7 +1305,10 @@ proc newAsyncHttpClient*(tlsCtx: SslContext = nil,
                          maxIdlePerHost: int = DefaultMaxIdlePerHost,
                          maxIdleTotal: int = DefaultMaxIdleTotal,
                          idleTimeoutMs: int = DefaultIdleTimeoutMs,
-                         maxRedirects: int = 0): AsyncHttpClient =
+                         maxRedirects: int = 0,
+                         proxyUrl: string = "",
+                         connectTimeoutMs: int = 0,
+                         readTimeoutMs: int = 0): AsyncHttpClient =
   ## Create an async HTTP client with its own event loop. Await the request
   ## methods from an `async` proc with asyncdispatch.
   ##
@@ -1075,6 +1326,9 @@ proc newAsyncHttpClient*(tlsCtx: SslContext = nil,
     defaultHeaders: @[],
     pool: newHttpConnPool(maxIdlePerHost, maxIdleTotal, idleTimeoutMs),
     maxRedirects: maxRedirects,
+    proxyUrl: proxyUrl,
+    connectTimeoutMs: connectTimeoutMs,
+    readTimeoutMs: readTimeoutMs,
   )
 
 proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
@@ -1083,7 +1337,10 @@ proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
                     maxIdlePerHost: int = DefaultMaxIdlePerHost,
                     maxIdleTotal: int = DefaultMaxIdleTotal,
                     idleTimeoutMs: int = DefaultIdleTimeoutMs,
-                    maxRedirects: int = 0): HttpClient =
+                    maxRedirects: int = 0,
+                    proxyUrl: string = "",
+                    connectTimeoutMs: int = 0,
+                    readTimeoutMs: int = 0): HttpClient =
   ## Blocking HTTP client. `maxRedirects` follows 301/302/303/307/308
   ## (0 = return them as-is). Attach `client.cookieJar = newCookieJar()`
   ## to persist cookies.
@@ -1096,6 +1353,9 @@ proc newHttpClient*(tlsCtx: SslContext = nil, keepAlive: bool = true,
     defaultHeaders: @[],
     pool: newHttpConnPool(maxIdlePerHost, maxIdleTotal, idleTimeoutMs),
     maxRedirects: maxRedirects,
+    proxyUrl: proxyUrl,
+    connectTimeoutMs: connectTimeoutMs,
+    readTimeoutMs: readTimeoutMs,
   )
 
 proc getLoop*(client: HttpClient): Loop {.inline.} =
