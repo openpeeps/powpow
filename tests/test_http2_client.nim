@@ -16,7 +16,15 @@ proc clientHandler(req: H2Request, res: H2Response) {.gcsafe.} =
     if req.path == "/reset":
       res.reset()
       return
-    res.header("x-path", req.path).send(req.body)
+    if req.streamPath.len > 0:
+      let data = readFile(req.streamPath)
+      try:
+        removeFile(req.streamPath)
+      except OSError:
+        discard
+      res.header("x-path", req.path).send(data)
+    else:
+      res.header("x-path", req.path).send(req.body)
 
 proc runLoop(loop: Loop, srv: H2Server) =
   discard loop.addTimer(15000) do (id: int):

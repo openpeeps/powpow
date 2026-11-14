@@ -140,8 +140,10 @@ proc peerFeed*(p: H2Peer, data: openArray[byte]) =
         if off + int(n) >= data.len:
           p.queue.delete(0)
         else:
+          # Keep sending while window allows (like a real peer): parking
+          # after one frame per UPDATE deadlocks against autotuned
+          # (large-window, sparse-update) servers.
           p.queue[0] = (sid, data, off + int(n), fin)
-          break
     of 6:  # PING
       if (f.flags and H2FlagAck) != 0:
         p.pingAcked = true

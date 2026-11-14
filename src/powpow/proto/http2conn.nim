@@ -17,14 +17,16 @@
 ## Handler API is H2-native (`H2Request`/`H2Response`); sharing the H1
 ## `OnRequestCallback` is M5 work.
 ##
-## Deliberate M2 simplifications, all documented at the call site:
-## - Full request bodies are buffered (no streaming); oversize bodies are
-##   refused with RST_STREAM(CANCEL).
+## Deliberate simplifications, all documented at the call site:
 ## - PRIORITY is validated and ignored (no scheduling).
 ## - PUSH_PROMISE is a connection error (push deferred).
-## - No per-stream timers; lifetime is bound to the TCP connection.
+##
+## Request bodies spill to tempfiles past `streamThreshold` (bounded RAM);
+## responses stream via `sendHeaders`/`sendChunk`/`finish`; per-stream
+## inactivity timeouts are opt-in (`streamTimeoutMs`).
 
-import std/[tables, strutils, sequtils, base64]
+import std/[tables, strutils, sequtils, base64, os, oids]
+import pkg/multipart
 
 import ../net/tcp
 import ../net/tls
@@ -49,6 +51,13 @@ type
     clientCb*: H2ClientCallback
     recvWindow*: int32
     sendWindow*: int32
+    bodyFile*: File            ## tempfile while a big upload spills (server)
+    bodyPath*: string          ## its path ("" when buffered)
+    bodyStreamed*: bool        ## body bytes went/are going to `bodyFile`
+    bodyLen*: int64            ## total request bytes (buffered + spilled)
+    lastActiveMs*: int64       ## last inbound frame (streamTimeoutMs sweep)
+    windowBase*: int32         ## autotuned receive window (starts 65535)
+    zeroStalls*: int           ## consecutive exhausted-window top-ups
 
   H2ClientResponse* = object
     ## A complete response as delivered to `H2ClientCallback`.
@@ -70,13 +79,17 @@ type
     authority*: string
     headers*: seq[(string, string)]
     body*: seq[byte]
+    streamPath*: string  ## tempfile for spilled uploads ("" when buffered)
+    protocol*: string    ## :protocol pseudo-header (extended CONNECT, "" if none)
+    clientIp*: string
 
   H2Response* = ref object
     h2*: H2Conn
     streamId*: int32
     status*: uint16
     headers*: seq[(string, string)]
-    sent*: bool
+    sent*: bool         ## terminal: send()/finish()/reset() ran
+    headersSent*: bool  ## HEADERS emitted (sendHeaders or send)
 
   OnH2RequestCallback* = proc(req: H2Request,
                               res: H2Response) {.closure, gcsafe.}
@@ -114,6 +127,9 @@ type
     maxConcurrentLocal*: int
     maxHeaderList*: int
     maxBody*: int
+    streamThreshold*: int     ## spill uploads past this many bytes (0 = never)
+    connectProtocol*: bool    ## advertise + honor RFC 8441 extended CONNECT
+    peerEnableConnect*: bool  ## peer SETTINGS_ENABLE_CONNECT_PROTOCOL
     peerAckedSettings*: bool
     goawayReceived*: bool
     goawaySent*: bool
@@ -135,6 +151,9 @@ type
     sendStaged*: bool    ## True while queued in `h2StagedConns`.
     huffScratch*: seq[byte]  ## Reused Huffman scratch for response encodes.
 
+  H2DrainCallback* = proc() {.closure, gcsafe.}
+    ## Fired once on the loop thread when `drain` empties the server.
+
   H2Server* = ref object
     loop*: Loop
     ownsLoop*: bool
@@ -145,6 +164,15 @@ type
     maxConcurrent*: int
     maxHeaderList*: int
     maxBody*: int
+    streamTimeoutMs*: int      ## per-stream inactivity timeout (0 = off)
+    streamThreshold*: int      ## spill uploads past this (0 = never spill)
+    enableConnectProtocol*: bool  ## RFC 8441 extended CONNECT (default true)
+    draining*: bool            ## graceful shutdown in progress
+    drainTimer: TimerId        ## force-close deadline while draining
+    drainChecker: TimerId      ## completion poll while draining
+    drainCb: H2DrainCallback   ## fired once when the last stream closes
+    sweepTimer: TimerId        ## stream-timeout sweep (lazy, one per server)
+    sweepStale: seq[int32]     ## scratch for the timeout sweep (no per-pass alloc)
 
 const
   H2ConnMagic = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
@@ -154,6 +182,10 @@ const
   H2DefaultMaxConcurrent* = 128
   H2DefaultMaxHeaderList* = 16 * 1024
   H2DefaultMaxBody* = 8 * 1024 * 1024
+  H2DefaultStreamThreshold* = 64 * 1024
+    ## Spill request bodies past this size (mirrors H1 MinStreamBodySize).
+  H2AutotuneCap* = 4 * 1024 * 1024
+    ## Receive-window autotune ceiling (flow-control growth bound).
   H2WindowTopUpAt = 32768
   H2SniffCap = 8192
   H2SendBufCap* {.intdefine.} = 65536
@@ -174,7 +206,6 @@ proc flushSendBuf*(h2: H2Conn) =
   if h2.sendBuf.len == 0:
     return
   if h2.conn.state != Connected:
-    stderr.writeLine("DBG flushSendBuf drop not-connected len=", h2.sendBuf.len)
     h2.sendBuf.setLen(0)
     return
   let n = h2.conn.send(h2.sendBuf)
@@ -266,6 +297,10 @@ proc digitCount(v: int): int =
 const emptyH2Body*: seq[byte] = @[]
   ## Typed empty body for header-only responses (no allocation).
 
+proc discardStreamBody(stream: H2Stream)
+  ## Forward declaration: drop a stream's spilled upload (defined below,
+  ## next to handleData). Called by every stream teardown path.
+
 # ── Connection / stream teardown ────────────────────────────────────
 
 proc connError(h2: H2Conn, code: H2ErrorCode) =
@@ -303,6 +338,7 @@ proc maybeDrain(h2: H2Conn) =
 proc streamError(h2: H2Conn, sid: int32, code: H2ErrorCode) =
   ## Stream error: RST_STREAM + drop stream state.
   if h2.streams.hasKey(sid):
+    h2.streams[sid].discardStreamBody()
     h2.streams.del(sid)
     dec h2.openCount
   if h2.state != CsClosed:
@@ -311,6 +347,7 @@ proc streamError(h2: H2Conn, sid: int32, code: H2ErrorCode) =
 
 proc closeStream(h2: H2Conn, sid: int32) =
   if h2.streams.hasKey(sid):
+    h2.streams[sid].discardStreamBody()
     h2.streams.del(sid)
     dec h2.openCount
   h2.maybeDrain()
@@ -320,14 +357,25 @@ proc sendWindowUpdate(h2: H2Conn, sid: int32, increment: uint32) =
 
 proc topUpRecv(h2: H2Conn, sid: int32, stream: H2Stream) =
   ## Restore connection- and stream-level receive windows past the
-  ## threshold so well-behaved senders never stall.
+  ## threshold so well-behaved senders never stall. The stream window
+  ## autotunes: when a sender keeps the pipe full (two consecutive
+  ## top-ups from below two max-frames), the window doubles up to
+  ## H2AutotuneCap — bulk uploads converge on fewer WINDOW_UPDATEs without
+  ## unbounded per-stream receive buffering.
   if h2.recvWindow < H2WindowTopUpAt:
     let inc = uint32(H2DefaultWindowSize - int(h2.recvWindow))
     h2.recvWindow = H2DefaultWindowSize
     h2.sendWindowUpdate(0, inc)
   if stream.recvWindow < H2WindowTopUpAt:
-    let inc = uint32(H2DefaultWindowSize - int(stream.recvWindow))
-    stream.recvWindow = H2DefaultWindowSize
+    if stream.recvWindow < 2 * h2.peerMaxFrame:
+      inc stream.zeroStalls
+      if stream.zeroStalls >= 2:
+        stream.zeroStalls = 0
+        stream.windowBase = min(stream.windowBase * 2, H2AutotuneCap.int32)
+    else:
+      stream.zeroStalls = 0
+    let inc = uint32(int(stream.windowBase) - int(stream.recvWindow))
+    stream.recvWindow = stream.windowBase
     h2.sendWindowUpdate(sid, inc)
 
 # ── SETTINGS ──────────────────────────────────────────────────────────
@@ -364,6 +412,8 @@ proc applyPeerSettings(h2: H2Conn, settings: seq[H2Setting]) =
       h2.peerMaxFrame = int(s.value)
     of 6:  # MAX_HEADER_LIST_SIZE: advisory, stored.
       discard
+    of 8:  # ENABLE_CONNECT_PROTOCOL (RFC 8441): extended CONNECT gate.
+      h2.peerEnableConnect = s.value == 1
     else:
       discard  # Unknown settings are ignored (§6.5).
 
@@ -424,9 +474,11 @@ proc flushPending(h2: H2Conn) =
         else:
           h2.streams[head.sid].state = HsHalfClosedLocal
     else:
+      # Keep draining while window allows (like sendDataChunked): parking
+      # after one frame per WINDOW_UPDATE deadlocks against autotuned
+      # (large-window, sparse-update) peers. Progress is guaranteed —
+      # every pass sends at least one byte.
       h2.pending[0] = head
-      h2.checkSendCap()
-      return
   h2.checkSendCap()
 
 proc sendDataChunked(h2: H2Conn, sid: int32, body: openArray[byte],
@@ -530,11 +582,14 @@ proc stageResponseHeaders(h2: H2Conn, sid: int32, status: uint16,
     encodeIntInto(h2.sendBuf, n, 7, 0x00'u8)
     for i in countdown(n - 1, 0):
       h2.sendBuf.add(tmp[i])
-  # `content-length`, indexed name (static 28), literal value.
-  encodeIntInto(h2.sendBuf, 28, 4, 0x00'u8)
-  let dcnt = digitCount(contentLen)
-  encodeIntInto(h2.sendBuf, dcnt, 7, 0x00'u8)
-  appendUint(h2.sendBuf, contentLen)
+  # `content-length`, indexed name (static 28), literal value. Skipped for
+  # streamed responses (contentLen < 0): DATA framing delimits the body and
+  # a wrong length would fail strict peers.
+  if contentLen >= 0:
+    encodeIntInto(h2.sendBuf, 28, 4, 0x00'u8)
+    let dcnt = digitCount(contentLen)
+    encodeIntInto(h2.sendBuf, dcnt, 7, 0x00'u8)
+    appendUint(h2.sendBuf, contentLen)
   for (n, v) in headers:
     if n == ":status" or n == "content-length":
       continue
@@ -545,21 +600,91 @@ proc stageResponseHeaders(h2: H2Conn, sid: int32, status: uint16,
     flags = flags or H2FlagEndStream
   patchFrameHeader(h2.sendBuf, pos, 1, flags, sid)
 
+proc endStreamData(h2: H2Conn, sid: int32) =
+  ## Emit the terminal zero-length DATA frame and account stream closure —
+  ## the streaming counterpart to a HEADERS-carried END_STREAM. When
+  ## flow-control has queued DATA for this stream, the terminator is queued
+  ## behind it (flushPending closes the stream on drain); otherwise it is
+  ## staged immediately.
+  for p in h2.pending:
+    if p.sid == sid:
+      h2.pending.add(H2PendingWrite(sid: sid, data: @[], offset: 0,
+                                   endStream: true))
+      return
+  h2.stageFrame(encodeData(sid, emptyH2Body, endStream = true))
+  if h2.streams.hasKey(sid):
+    if h2.streams[sid].state == HsHalfClosedRemote:
+      h2.closeStream(sid)
+    else:
+      h2.streams[sid].state = HsHalfClosedLocal
+  h2.checkSendCap()
+
 proc send*(res: H2Response, body: openArray[byte]) =
   let h2 = res.h2
   if res.sent or not h2.streams.hasKey(res.streamId):
     return
   res.sent = true
-  h2.stageResponseHeaders(res.streamId, res.status, body.len, res.headers,
-                          body.len == 0)
+  if not res.headersSent:
+    res.headersSent = true
+    h2.stageResponseHeaders(res.streamId, res.status, body.len, res.headers,
+                            body.len == 0)
+    if body.len == 0:
+      # HEADERS already ended the stream; only the state bookkeeping below.
+      if h2.streams.hasKey(res.streamId):
+        if h2.streams[res.streamId].state == HsHalfClosedRemote:
+          h2.closeStream(res.streamId)
+        else:
+          h2.streams[res.streamId].state = HsHalfClosedLocal
+      h2.checkSendCap()
+      return
   if body.len > 0:
     h2.sendDataChunked(res.streamId, body, endStream = true)
-  elif h2.streams.hasKey(res.streamId):
-    if h2.streams[res.streamId].state == HsHalfClosedRemote:
-      h2.closeStream(res.streamId)
-    else:
-      h2.streams[res.streamId].state = HsHalfClosedLocal
+  else:
+    # Headers went out earlier (streaming): terminate with an empty DATA.
+    h2.endStreamData(res.streamId)
   h2.checkSendCap()
+
+proc sendHeaders*(res: H2Response) =
+  ## Start a streamed response: HEADERS without END_STREAM and without a
+  ## content-length (DATA framing delimits the body). Follow with
+  ## `sendChunk` and terminate with `finish` (or `send`).
+  let h2 = res.h2
+  if res.sent or res.headersSent or not h2.streams.hasKey(res.streamId):
+    return
+  res.headersSent = true
+  h2.stageResponseHeaders(res.streamId, res.status, -1, res.headers,
+                          endStream = false)
+
+proc sendChunk*(res: H2Response, data: openArray[byte]) =
+  ## Stream one DATA frame (no END_STREAM). Flow-control stalls queue the
+  ## remainder and resume on WINDOW_UPDATE — same as `send`.
+  let h2 = res.h2
+  if res.sent or not h2.streams.hasKey(res.streamId):
+    return
+  if not res.headersSent:
+    res.sendHeaders()
+  if data.len > 0:
+    h2.sendDataChunked(res.streamId, data, endStream = false)
+  h2.checkSendCap()
+
+proc sendChunk*(res: H2Response, data: string) {.inline.} =
+  ## String variant: the body is borrowed, never duplicated.
+  if data.len > 0:
+    res.sendChunk(data.toOpenArrayByte(0, data.high))
+
+proc finish*(res: H2Response) =
+  ## Terminate a streamed response: zero-length DATA with END_STREAM (or a
+  ## header-only completion when nothing was sent). Terminal, like `send`.
+  let h2 = res.h2
+  if res.sent or not h2.streams.hasKey(res.streamId):
+    return
+  res.sent = true
+  if not res.headersSent:
+    res.headersSent = true
+    h2.stageResponseHeaders(res.streamId, res.status, 0, res.headers,
+                            endStream = true)
+  else:
+    h2.endStreamData(res.streamId)
 
 proc send*(res: H2Response, body: string) =
   ## Zero-copy string variant: the body is borrowed, never duplicated.
@@ -575,6 +700,105 @@ proc reset*(res: H2Response, code = H2Cancelled) =
     return
   res.sent = true
   h2.streamError(res.streamId, code)
+
+proc sendError*(res: H2Response, code: uint16, msg = "") =
+  ## Send a status-only (or short-message) response. Terminal like `send`.
+  res.status(code)
+  res.send(msg)
+
+proc sendFile*(res: H2Response, path: string) =
+  ## Serve a file as DATA chunks (64 KiB). Emits HEADERS first unless the
+  ## handler already did, then streams the file and finishes with
+  ## END_STREAM. Missing/unreadable files become a 404 via `sendError`.
+  ## (No Range support yet; the whole file is sent.)
+  let h2 = res.h2
+  if res.sent or not h2.streams.hasKey(res.streamId):
+    return
+  var f: File
+  if not open(f, path):
+    res.sendError(404, "Not Found")
+    return
+  var size = -1'i64
+  try:
+    size = getFileSize(f)
+  except IOError:
+    try:
+      f.close()
+    except IOError:
+      discard
+    res.sendError(404, "Not Found")
+    return
+  if not res.headersSent:
+    res.headersSent = true
+    h2.stageResponseHeaders(res.streamId, res.status, size.int, res.headers,
+                            endStream = false)
+  const FileChunk = 65536
+  var buf = newSeq[byte](FileChunk)
+  try:
+    while true:
+      let n = readBuffer(f, addr buf[0], FileChunk)
+      if n <= 0:
+        break
+      h2.sendDataChunked(res.streamId, buf.toOpenArray(0, n - 1),
+                         endStream = false)
+      if not h2.streams.hasKey(res.streamId):
+        break  # peer reset mid-file
+  except IOError:
+    discard
+  try:
+    f.close()
+  except IOError:
+    discard
+  if not res.sent and h2.streams.hasKey(res.streamId):
+    res.finish()
+
+# ── H2Request accessors (H1-handler surface parity) ───────────────────────
+
+proc getMethod*(req: H2Request): string {.inline.} =
+  ## Lowercase HTTP method (`:method`), e.g. "get".
+  req.meth.toLowerAscii()
+
+proc getPath*(req: H2Request): string =
+  ## Request target without the query string.
+  let q = req.path.find('?')
+  if q < 0: req.path else: req.path[0 ..< q]
+
+proc getQuery*(req: H2Request): string =
+  ## Query string without the leading `?` ("" when absent).
+  let q = req.path.find('?')
+  if q < 0 or q + 1 > req.path.high: "" else: req.path[q + 1 .. ^1]
+
+proc getScheme*(req: H2Request): string {.inline.} =
+  req.scheme
+
+proc getAuthority*(req: H2Request): string {.inline.} =
+  req.authority
+
+proc getHeaders*(req: H2Request): seq[(string, string)] {.inline.} =
+  ## Regular headers (`:pseudo` headers excluded by the parser).
+  req.headers
+
+proc getHeaderValue*(req: H2Request, name: string): string =
+  ## First header value matching `name` (case-insensitive), or "".
+  let needle = name.toLowerAscii()
+  for (k, v) in req.headers:
+    if k == needle:
+      return v
+  ""
+
+proc getBody*(req: H2Request): seq[byte] {.inline.} =
+  ## Buffered body (empty when the upload spilled — see `streamPath`).
+  req.body
+
+proc getBodyString*(req: H2Request): string =
+  let b = req.body
+  if b.len == 0:
+    return ""
+  result = newString(b.len)
+  copyMem(addr result[0], unsafeAddr b[0], b.len)
+
+proc getClientIp*(req: H2Request): string {.inline.} =
+  req.clientIp
 
 # ── Request validation + dispatch ─────────────────────────────────────
 
@@ -605,6 +829,10 @@ proc splitRequestHeaders(hs: seq[HpackHeader]): tuple[ok: bool, req: H2Request] 
         req.path = h.value
       of ":authority":
         req.authority = h.value
+      of ":protocol":
+        if req.protocol.len > 0 or h.value.len == 0:
+          return (false, req)
+        req.protocol = h.value
       else:
         return (false, req)
     else:
@@ -634,9 +862,21 @@ proc dispatchStream(h2: H2Conn, stream: H2Stream, hs: seq[HpackHeader]) =
   if not ok:
     h2.streamError(stream.id, H2ProtocolError)
     return
+  if mutReq.protocol.len > 0 and
+     (mutReq.meth != "CONNECT" or not h2.peerEnableConnect or
+      not h2.connectProtocol):
+    # Extended CONNECT (RFC 8441) requires :method = CONNECT plus a
+    # mutually-advertised ENABLE_CONNECT_PROTOCOL.
+    h2.streamError(stream.id, H2ProtocolError)
+    return
   var req = mutReq
   req.streamId = stream.id
+  req.clientIp = h2.conn.getClientIp()
   req.body = stream.reqBody
+  # Spill ownership transfers to the handler (mirrors H1 req.streamPath):
+  # teardown after this point must not delete the handler's file.
+  req.streamPath = stream.bodyPath
+  stream.bodyPath = ""
   var contentLength = -1'i64
   for (n, v) in req.headers:
     if n == "content-length":
@@ -646,7 +886,7 @@ proc dispatchStream(h2: H2Conn, stream: H2Stream, hs: seq[HpackHeader]) =
         h2.streamError(stream.id, H2ProtocolError)
         return
       break
-  if contentLength >= 0 and int64(stream.reqBody.len) != contentLength:
+  if contentLength >= 0 and stream.bodyLen != contentLength:
     h2.streamError(stream.id, H2ProtocolError)
     return
   let res = H2Response(h2: h2, streamId: stream.id, status: 200,
@@ -659,7 +899,7 @@ proc dispatchStream(h2: H2Conn, stream: H2Stream, hs: seq[HpackHeader]) =
       res.send("Internal Server Error")
     elif h2.streams.hasKey(stream.id):
       h2.streamError(stream.id, H2InternalError)
-  if not res.sent and h2.streams.hasKey(stream.id):
+  if not res.sent and not res.headersSent and h2.streams.hasKey(stream.id):
     # Handler returned without responding: fail safe with 500.
     res.status = 500
     res.send("Internal Server Error")
@@ -728,8 +968,10 @@ proc handleHeaders(h2: H2Conn, f: H2Frame) =
         h2.respond431(sid)
         return
       stream.state = HsClosed
+      stream.lastActiveMs = monoMs()
       h2.dispatchStream(stream, stream.reqHeaders)
     else:
+      stream.lastActiveMs = monoMs()
       h2.fragStream = sid
       h2.fragBuf = fragment
       if h2.fragBlockTooBig(0):
@@ -745,6 +987,11 @@ proc handleHeaders(h2: H2Conn, f: H2Frame) =
   if sid == 0 or (sid and 1) == 0 or sid <= h2.lastPeerSid:
     h2.connError(H2ProtocolError)
     return
+  if h2.goawaySent:
+    # We asked to go away (drain): refuse, don't process. The client
+    # retries elsewhere; lastPeerSid stays at the last admitted stream.
+    h2.streamError(sid, H2RefusedStream)
+    return
   if h2.goawayReceived:
     h2.streamError(sid, H2RefusedStream)
     return
@@ -755,7 +1002,9 @@ proc handleHeaders(h2: H2Conn, f: H2Frame) =
   let stream = H2Stream(id: sid, state: HsOpen, reqHeaders: @[],
                         reqBody: @[],
                         recvWindow: H2DefaultWindowSize,
-                        sendWindow: h2.peerInitWindow)
+                        sendWindow: h2.peerInitWindow,
+                        lastActiveMs: monoMs(),
+                        windowBase: H2DefaultWindowSize)
   h2.streams[sid] = stream
   inc h2.openCount
   if (f.flags and H2FlagEndHeaders) != 0:
@@ -840,6 +1089,57 @@ proc handleContinuation(h2: H2Conn, f: H2Frame) =
       h2.respond431(sid)
       return
 
+proc discardStreamBody(stream: H2Stream) =
+  ## Drop a stream's spilled upload (close + unlink). No-op for buffered
+  ## streams. Ownership transfers to the handler at dispatch (streamPath),
+  ## so teardown after a transfer never deletes the handler's file.
+  if stream.bodyPath.len > 0:
+    try:
+      stream.bodyFile.close()
+    except IOError:
+      discard
+    try:
+      removeFile(stream.bodyPath)
+    except OSError:
+      discard
+    stream.bodyPath = ""
+    stream.bodyStreamed = false
+
+proc startBodySpill(h2: H2Conn, stream: H2Stream): bool =
+  ## Move a growing upload to a private tempfile and spill everything after.
+  ## Returns false when no temp file could be created (caller refuses).
+  let dir = getTempDir()
+  try:
+    discard existsOrCreateDir(dir)
+  except OSError:
+    return false
+  for _ in 0 ..< 8:
+    let path = dir / $genOid()
+    try:
+      stream.bodyFile = openPrivateFile(path)
+      stream.bodyPath = path
+    except IOError:
+      continue
+    try:
+      if stream.reqBody.len > 0:
+        discard stream.bodyFile.writeBuffer(unsafeAddr stream.reqBody[0],
+                                            stream.reqBody.len)
+      stream.reqBody.setLen(0)
+      stream.bodyStreamed = true
+      return true
+    except IOError:
+      try:
+        stream.bodyFile.close()
+      except IOError:
+        discard
+      try:
+        removeFile(path)
+      except OSError:
+        discard
+      stream.bodyPath = ""
+      return false
+  false
+
 proc handleData(h2: H2Conn, f: H2Frame) =
   if h2.fragStream >= 0:
     h2.connError(H2ProtocolError)  # DATA mid-CONTINUATION
@@ -863,13 +1163,44 @@ proc handleData(h2: H2Conn, f: H2Frame) =
     return
   stream.recvWindow -= int32(f.payload.len)
   h2.recvWindow -= int32(f.payload.len)
-  if stream.reqBody.len + f.payload.len > h2.maxBody:
+  let endStream = (f.flags and H2FlagEndStream) != 0
+  if stream.bodyLen + int64(f.payload.len) > int64(h2.maxBody):
     h2.streamError(sid, H2Cancelled)
     return
-  appendBytes(stream.reqBody, f.payload)
+  if not stream.bodyStreamed and
+     stream.bodyLen + int64(f.payload.len) > int64(h2.streamThreshold) and
+     h2.streamThreshold > 0 and not endStream:
+    # Big in-flight upload: spill what we have and everything after to
+    # disk. Bodies that end within maxBody stay buffered (no tempfile
+    # churn for complete-in-time uploads).
+    if not h2.startBodySpill(stream):
+      h2.streamError(sid, H2InternalError)
+      return
+  if stream.bodyStreamed:
+    try:
+      if f.payload.len > 0:
+        discard stream.bodyFile.writeBuffer(unsafeAddr f.payload[0],
+                                            f.payload.len)
+    except IOError:
+      h2.streamError(sid, H2InternalError)
+      return
+  else:
+    appendBytes(stream.reqBody, f.payload)
+  stream.bodyLen += int64(f.payload.len)
+  stream.lastActiveMs = monoMs()
   h2.topUpRecv(sid, stream)
-  if (f.flags and H2FlagEndStream) != 0:
+  if endStream:
     stream.state = HsHalfClosedRemote
+    if stream.bodyStreamed:
+      # C stdio buffers file output: flush before dispatch so a handler
+      # reading `streamPath` sees every byte (mirrors H1, which closes its
+      # spill file at body end). A flush failure means the upload never
+      # fully landed — refuse instead of dispatching a short file.
+      try:
+        flushFile(stream.bodyFile)
+      except IOError:
+        h2.streamError(sid, H2InternalError)
+        return
     if h2.fragStream < 0:
       h2.dispatchStream(stream, stream.reqHeaders)
 
@@ -943,7 +1274,9 @@ proc openClientStream*(h2: H2Conn, headers: seq[HpackHeader],
                         reqBody: @[], respHeaders: @[], respBody: @[],
                         clientCb: cb,
                         recvWindow: H2DefaultWindowSize,
-                        sendWindow: h2.peerInitWindow)
+                        sendWindow: h2.peerInitWindow,
+                        lastActiveMs: monoMs(),
+                        windowBase: H2DefaultWindowSize)
   h2.streams[sid] = stream
   inc h2.openCount
   h2.sendHeaderBlock(sid, blk, endStream and body.len == 0)
@@ -1208,7 +1541,10 @@ proc handleFrame(h2: H2Conn, f: H2Frame) =
 # ── Preface: prior knowledge + Upgrade ────────────────────────────────
 
 proc sendServerPreface(h2: H2Conn) =
-  h2.stageFrame(encodeSettings(newSeq[H2Setting]()))
+  if h2.connectProtocol:
+    h2.stageFrame(encodeSettings(@[H2Setting(id: 8, value: 1)]))
+  else:
+    h2.stageFrame(encodeSettings(newSeq[H2Setting]()))
 
 proc b64urlDecode(s: string): seq[byte] =
   ## HTTP2-Settings is base64url without padding (§3.2).
@@ -1308,7 +1644,9 @@ proc handleUpgrade(h2: H2Conn): bool =
   let stream = H2Stream(id: 1, state: HsHalfClosedRemote, reqHeaders: @[],
                         reqBody: @[],
                         recvWindow: H2DefaultWindowSize,
-                        sendWindow: h2.peerInitWindow)
+                        sendWindow: h2.peerInitWindow,
+                        lastActiveMs: monoMs(),
+                        windowBase: H2DefaultWindowSize)
   stream.reqHeaders.add(HpackHeader(name: ":method", value: meth))
   stream.reqHeaders.add(HpackHeader(name: ":path", value: target))
   stream.reqHeaders.add(HpackHeader(name: ":scheme", value: "http"))
@@ -1455,7 +1793,9 @@ proc newH2Conn*(conn: Connection, role: H2Role,
                 onRequest: OnH2RequestCallback,
                 maxConcurrent = H2DefaultMaxConcurrent,
                 maxHeaderList = H2DefaultMaxHeaderList,
-                maxBody = H2DefaultMaxBody): H2Conn =
+                maxBody = H2DefaultMaxBody,
+                streamThreshold = H2DefaultStreamThreshold,
+                connectProtocol = true): H2Conn =
   H2Conn(conn: conn, role: role, state: CsSniff,
          parser: newH2FrameParser(),
          encCtx: newHpackContext(), decCtx: newHpackContext(),
@@ -1468,7 +1808,9 @@ proc newH2Conn*(conn: Connection, role: H2Role,
          peerMaxFrame: H2DefaultMaxFrameSize,
          peerMaxConcurrent: high(int), nextStreamId: 1,
           maxConcurrentLocal: maxConcurrent, maxHeaderList: maxHeaderList,
-          maxBody: maxBody, peerAckedSettings: false,
+          maxBody: maxBody, streamThreshold: streamThreshold,
+          connectProtocol: connectProtocol, peerEnableConnect: false,
+          peerAckedSettings: false,
           goawayReceived: false, goawaySent: false, pending: @[],
           onRequest: onRequest, onSettingsApplied: nil, alpnChecked: false,
           sendBuf: @[], sendStaged: false, huffScratch: @[])
@@ -1479,7 +1821,11 @@ proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
                   maxConcurrent = H2DefaultMaxConcurrent,
                   maxHeaderList = H2DefaultMaxHeaderList,
                   maxBody = H2DefaultMaxBody,
-                  sslCtx: SslContext = nil): H2Server =
+                  sslCtx: SslContext = nil,
+                  streamTimeoutMs = 0,
+                  streamThreshold = H2DefaultStreamThreshold,
+                  enableConnectProtocol = true): H2Server =
+  ## Create an h2c server, or an
   ## Create an h2c server, or an `h2` (TLS) server when `sslCtx` is given.
   ## A TLS server advertises ALPN `["h2"]` only: peers negotiating anything
   ## else are closed after the handshake (H1 fallback on the same port is
@@ -1487,7 +1833,10 @@ proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
   let s = H2Server(loop: loop, ownsLoop: false, handler: handler, sslCtx: sslCtx,
                    conns: initTable[int, H2Conn](64),
                    maxConcurrent: maxConcurrent,
-                   maxHeaderList: maxHeaderList, maxBody: maxBody)
+                   maxHeaderList: maxHeaderList, maxBody: maxBody,
+                   streamTimeoutMs: streamTimeoutMs,
+                   streamThreshold: streamThreshold,
+                   enableConnectProtocol: enableConnectProtocol)
   loop.ensureH2FlushHook()
   when not defined(windows):
     if sslCtx != nil:
@@ -1498,7 +1847,8 @@ proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
         if s.sslCtx != nil:
           conn.wrapTls(s.sslCtx)
       let h2 = newH2Conn(conn, H2ServerRole, s.handler, s.maxConcurrent,
-                         s.maxHeaderList, s.maxBody)
+                         s.maxHeaderList, s.maxBody, s.streamThreshold,
+                         s.enableConnectProtocol)
       s.conns[conn.fd.int] = h2
     ,
     onData = proc(conn: Connection, data: openArray[byte]) =
@@ -1523,19 +1873,121 @@ proc newH2Server*(loop: Loop, handler: OnH2RequestCallback,
         s.conns.del(conn.fd.int)
     ,
     onClose = proc(conn: Connection) =
+      let dead = s.conns.getOrDefault(conn.fd.int)
+      if dead != nil:
+        for _, st in dead.streams:
+          st.discardStreamBody()
       s.conns.del(conn.fd.int)
   )
   s.tcp = tcp
   s
 
+proc startTimeoutSweep(s: H2Server) =
+  ## Arm the single server-wide stream-timeout sweep (one timer per server,
+  ## not per stream). Each pass closes streams idle past `streamTimeoutMs`.
+  if s.sweepTimer != TimerId(0) or s.streamTimeoutMs <= 0:
+    return
+  s.sweepTimer = s.loop.addInterval(200) do (id: int):
+    let now = monoMs()
+    for _, h2 in s.conns:
+      if h2.state == CsClosed:
+        continue
+      for sid, st in h2.streams:
+        if now - st.lastActiveMs > s.streamTimeoutMs:
+          # Collect-then-act: streamError mutates the table mid-iteration.
+          s.sweepStale.add(sid)
+      for sid in s.sweepStale:
+        if h2.streams.hasKey(sid):
+          h2.streamError(sid, H2Cancelled)
+      s.sweepStale.setLen(0)
+
+proc serverDrained(s: H2Server): bool =
+  ## True when no connection has in-flight streams or queued DATA.
+  for _, h2 in s.conns:
+    if h2.openCount > 0 or h2.pending.len > 0:
+      return false
+  true
+
+proc finishDrain(s: H2Server) =
+  ## Settle a drain: cancel timers, close everything, fire the callback once.
+  if s.drainChecker != TimerId(0):
+    if s.loop != nil and not s.loop.closed:
+      s.loop.cancelTimer(s.drainChecker)
+    s.drainChecker = TimerId(0)
+  if s.drainTimer != TimerId(0):
+    if s.loop != nil and not s.loop.closed:
+      s.loop.cancelTimer(s.drainTimer)
+    s.drainTimer = TimerId(0)
+  for _, h2 in s.conns:
+    h2.state = CsClosed
+    h2.conn.close()
+  s.conns.clear()
+  let cb = s.drainCb
+  s.drainCb = nil
+  s.draining = false
+  if cb != nil:
+    {.cast(gcsafe).}:
+      cb()
+
+proc drain*(s: H2Server, timeoutMs = 30_000,
+            onDrained: H2DrainCallback = nil) =
+  ## Graceful shutdown: GOAWAY every connection (no new streams — in-flight
+  ## ones run to completion), then close once empty and fire `onDrained`
+  ## once on the loop thread. `timeoutMs` (0 = no deadline) force-closes
+  ## whatever remains. Idempotent while draining (a missing callback can
+  ## still be attached). Do NOT stop the loop inside `onDrained`: teardown
+  ## writes flush on subsequent polls.
+  if s == nil:
+    return
+  if s.draining:
+    if s.drainCb == nil and onDrained != nil:
+      s.drainCb = onDrained
+    return
+  s.draining = true
+  s.drainCb = onDrained
+  # Stop accepting: in-flight streams run to completion on open conns.
+  s.tcp.close()
+  for _, h2 in s.conns:
+    if h2.state != CsClosed and not h2.goawaySent:
+      h2.goawaySent = true
+      h2.stageFrame(encodeGoaway(h2.lastPeerSid, H2NoError))
+      h2.flushSendBuf()  # keep serving: cannot wait for turn end
+  if s.serverDrained():
+    s.finishDrain()
+    return
+  s.drainChecker = s.loop.addInterval(100) do (id: int):
+    if s.serverDrained():
+      s.finishDrain()
+  if timeoutMs > 0:
+    s.drainTimer = s.loop.addTimer(timeoutMs) do (id: int):
+      if s.drainCb != nil or s.draining:
+        s.finishDrain()
+
 proc listen*(s: H2Server, address: string, port: int) =
   s.tcp.listen(address, port)
+  s.startTimeoutSweep()
 
 proc close*(s: H2Server) =
   ## Shut down the H2 server. When the server owns its loop (created via
   ## `newH2Server()` without a loop), the loop is stopped (if running)
   ## or freed; a borrowed loop is left alive.
   if s == nil: return
+  if s.loop != nil and not s.loop.closed:
+    if s.sweepTimer != TimerId(0):
+      s.loop.cancelTimer(s.sweepTimer)
+      s.sweepTimer = TimerId(0)
+    if s.drainChecker != TimerId(0):
+      s.loop.cancelTimer(s.drainChecker)
+      s.drainChecker = TimerId(0)
+    if s.drainTimer != TimerId(0):
+      s.loop.cancelTimer(s.drainTimer)
+      s.drainTimer = TimerId(0)
+  else:
+    s.sweepTimer = TimerId(0)
+    s.drainChecker = TimerId(0)
+    s.drainTimer = TimerId(0)
+  s.draining = false
+  s.drainCb = nil
   for _, h2 in s.conns:
     if not h2.goawaySent and h2.state != CsClosed:
       h2.goawaySent = true
@@ -1555,14 +2007,18 @@ proc newH2Server*(handler: OnH2RequestCallback,
                   maxConcurrent = H2DefaultMaxConcurrent,
                   maxHeaderList = H2DefaultMaxHeaderList,
                   maxBody = H2DefaultMaxBody,
-                  sslCtx: SslContext = nil): H2Server =
+                  sslCtx: SslContext = nil,
+                  streamTimeoutMs = 0,
+                  streamThreshold = H2DefaultStreamThreshold,
+                  enableConnectProtocol = true): H2Server =
   ## Create an h2c server with its own internal event loop.
   ## `run` drives it; `close` frees it. Use `getLoop`
   ## to share the loop with other subsystems.
   let loop = newLoop()
   try:
     result = newH2Server(loop, handler, maxConcurrent,
-                         maxHeaderList, maxBody, sslCtx)
+                         maxHeaderList, maxBody, sslCtx, streamTimeoutMs,
+                         streamThreshold, enableConnectProtocol)
     result.ownsLoop = true
   except CatchableError:
     loop.close()

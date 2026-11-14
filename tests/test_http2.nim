@@ -7,14 +7,24 @@
 
 import ../src/powpow
 import ../src/powpow/proto/[http2, hpack, http2conn]
-import std/[unittest, tables, base64, strutils]
+import std/[unittest, tables, base64, strutils, os]
 import ./h2peer
 
 proc echoHandler(req: H2Request, res: H2Response) {.gcsafe.} =
   {.gcsafe.}:
     if req.path == "/fail":
       raise newException(CatchableError, "boom")
-    res.header("x-path", req.path).send(req.body)
+    if req.streamPath.len > 0:
+      # Spilled upload (> streamThreshold): echo from the tempfile, then
+      # release it (handler owns streamPath after dispatch).
+      let data = readFile(req.streamPath)
+      try:
+        removeFile(req.streamPath)
+      except OSError:
+        discard
+      res.header("x-path", req.path).send(data)
+    else:
+      res.header("x-path", req.path).send(req.body)
 
 # ── Test scaffolding ──────────────────────────────────────────────────
 
