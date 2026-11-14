@@ -7,7 +7,7 @@
 
 import std/httpcore except HttpMethod
 import std/unittest
-import std/[base64, strutils, os]
+import std/strutils
 import ../src/powpow
 import ../src/powpow/proto/ws
 
@@ -259,56 +259,71 @@ test "deflate_plain_client_no_compression":
 
 # ── Raw-wire tests ───────────────────────────────────────────────────────────
 
-proc wsRawConnect(loop: Loop, port: int, extOffer = ""): Connection =
-  ## Blocking-style raw TCP connect on the loop: handshake bytes are written
-  ## synchronously (loopback), the response is pumped via a temp watcher.
-  var conn: Connection
-  var done = false
-  var key = ""
-  var rng = 7
-  var kb: array[16, byte]
-  for i in 0 ..< 16:
-    rng = (rng * 1103515245 + 12345) and 0x7FFFFFFF
-    kb[i] = byte(rng mod 256)
-  key = base64.encode(kb)
+const WsTestKey = "dGhlIHNhbXBsZSBub25jZQ=="
+  ## Fixed RFC 6455 example key for raw handshakes.
+
+proc wsHandshakeReq(extOffer = ""): string =
+  ## Build a raw upgrade request (pure string, no I/O).
+  result = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" &
+    "Upgrade: websocket\r\nConnection: Upgrade\r\n" &
+    "Sec-WebSocket-Key: " & WsTestKey & "\r\n" &
+    "Sec-WebSocket-Version: 13\r\n"
+  if extOffer.len > 0:
+    result.add("Sec-WebSocket-Extensions: " & extOffer & "\r\n")
+  result.add("\r\n")
+
+type RawSession* = ref object
+  conn*: Connection  ## raw TCP connection (set once connected)
+  buf*: string       ## every byte received so far
+
+proc rawDial*(loop: Loop, port: int, req: string,
+              onBytes: proc(s: RawSession) {.closure.}) =
+  ## Dial a raw TCP peer, send `req` on connect, and route all inbound bytes
+  ## through `onBytes` as they arrive. Portable across backends: reads flow
+  ## through the loop's `onData`, never a raw `sockRecv` (which cannot see
+  ## IOCP-buffered bytes on Windows). One outer `loop.run()` in the caller
+  ## pumps every phase; `onBytes` (or a watchdog) stops it when done.
+  var s = RawSession(buf: "")
   loop.connect("127.0.0.1", port,
     onConnect = proc(c: Connection) =
-      conn = c
-      var req = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" &
-        "Upgrade: websocket\r\nConnection: Upgrade\r\n" &
-        "Sec-WebSocket-Key: " & key & "\r\n" &
-        "Sec-WebSocket-Version: 13\r\n"
-      if extOffer.len > 0:
-        req.add("Sec-WebSocket-Extensions: " & extOffer & "\r\n")
-      req.add("\r\n")
-      discard conn.send(req)
-      done = true
-      loop.stop()
+      s.conn = c
+      discard s.conn.send(req)
     ,
-    onData = proc(c: Connection, data: openArray[byte]) = discard
+    onData = proc(c: Connection, data: openArray[byte]) =
+      for b in data:
+        s.buf.add(char(b))
+      onBytes(s)
   )
-  loop.run()
-  doAssert done and conn != nil
-  conn
 
-proc wsRawRead(conn: Connection, loop: Loop, ms = 5000): seq[byte] =
-  ## Read available bytes (single pump): registers a one-shot watcher.
-  var box = new(seq[byte])
-  box[] = @[]
-  let fd = conn.fd.int
-  loop.register(fd, {Read}, edgeTriggered = false,
-    callback = proc(efd: int, ev: set[EventType]) =
-      if Read in ev:
-        var buf: array[65536, byte]
-        let n = sockRecv(conn.fd, addr buf[0], buf.len)
-        if n > 0:
-          box[].add(buf.toOpenArray(0, n - 1))
-  )
-  discard loop.addTimer(ms) do (id: int):
-    loop.stop()
-  loop.run()
-  loop.unregister(fd)
-  box[]
+func findHeadersEnd*(buf: string): int =
+  ## End offset (past the blank line) of the HTTP header block, or -1 while
+  ## the headers are still arriving.
+  let i = buf.find("\r\n\r\n")
+  if i < 0: -1 else: i + 4
+
+func serverFrameTotal*(buf: string, off: int): int =
+  ## Total bytes of the unmasked server frame at `off`, or -1 while the
+  ## header or payload is still arriving (-2 if the frame is masked, which
+  ## servers must never do).
+  if buf.len - off < 2:
+    return -1
+  let b1 = buf[off + 1].ord
+  if (b1 and 0x80) != 0:
+    return -2
+  let ln = b1 and 0x7F
+  if ln < 126:
+    return if buf.len - off >= 2 + ln: 2 + ln else: -1
+  if ln == 126:
+    if buf.len - off < 4:
+      return -1
+    let n = (buf[off + 2].ord shl 8) or buf[off + 3].ord
+    return if buf.len - off >= 4 + n: 4 + n else: -1
+  if buf.len - off < 10:
+    return -1
+  var n = 0
+  for i in 0 ..< 8:
+    n = (n shl 8) or buf[off + 2 + i].ord
+  if buf.len - off >= 10 + n: 10 + n else: -1
 
 proc wsRawFrame(opcode: int, fin: bool, rsv1: bool,
                 payload: openArray[byte]): seq[byte] =
@@ -346,32 +361,43 @@ test "deflate_server_refuses_context_takeover":
     ws.sendText("echo:" & got)
     check not ws.permessageDeflate
   srv.listen("127.0.0.1", 19964)
-  var resp = ""
-  var conn: Connection
-  discard loop.addTimer(10) do (id: int):
-    conn = wsRawConnect(loop, 19964, "permessage-deflate")
-    var buf = wsRawRead(conn, loop, 3000)
-    resp = cast[string](buf)
+  var hs = ""
+  var hsLen = 0
+  var echoBytes = ""
+  var phase = 0
+  rawDial(loop, 19964, wsHandshakeReq("permessage-deflate"),
+    proc(s: RawSession) =
+      if phase == 0:
+        let e = findHeadersEnd(s.buf)
+        if e >= 0:
+          hs = s.buf[0 ..< e]
+          hsLen = e
+          phase = 1
+          # Session works uncompressed: masked text frame, expect plain echo.
+          discard s.conn.send(wsRawFrame(0x1, true, false,
+            "hi".toOpenArrayByte(0, 1)))
+      elif phase == 1:
+        let total = serverFrameTotal(s.buf, hsLen)
+        if total > 0:
+          echoBytes = s.buf[hsLen ..< hsLen + total]
+          phase = 2
+          s.conn.close()
+          srv.close()
+          loop.stop()
+  )
+  discard loop.addTimer(8000) do (id: int):
+    srv.close()
     loop.stop()
   loop.run()
-  check resp.contains("101")
-  check not resp.toLowerAscii().contains("sec-websocket-extensions")
-  # Session works uncompressed: masked text frame, expect plain echo.
-  let fr = wsRawFrame(0x1, true, false, "hi".toOpenArrayByte(0, 1))
-  discard conn.send(fr)
-  let echoBytes = wsRawRead(conn, loop, 3000)
-  # Server frame: FIN+text, no RSV1, 6-byte payload "echo:hi".
-  check echoBytes.len >= 2
-  check (echoBytes[0] and 0x40) == 0  # RSV1 clear
-  check (echoBytes[0] and 0x0F) == 0x01
-  check echoBytes[1] == 7
-  var body = ""
-  for i in 0 ..< 7:
-    body.add(char(echoBytes[2 + i]))
-  check body == "echo:hi"
-  conn.close()
-  srv.close()
   loop.close()
+  check hs.contains("101")
+  check not hs.toLowerAscii().contains("sec-websocket-extensions")
+  # Server frame: FIN+text, no RSV1, 7-byte payload "echo:hi".
+  check echoBytes.len == 9
+  check (echoBytes[0].ord and 0x40) == 0  # RSV1 clear
+  check (echoBytes[0].ord and 0x0F) == 0x01
+  check echoBytes[1].ord == 7
+  check echoBytes[2 .. ^1] == "echo:hi"
 
 test "deflate_wire_rsv1_and_fragmented":
   # Raw peer: handshake with deflate, send fragmented compressed message,
@@ -383,47 +409,64 @@ test "deflate_wire_rsv1_and_fragmented":
     check ws.permessageDeflate
     ws.sendBinary(data)
   srv.listen("127.0.0.1", 19965)
-  var resp = ""
-  var conn: Connection
-  discard loop.addTimer(10) do (id: int):
-    conn = wsRawConnect(loop, 19965, DeflateOfferHdr)
-    var buf = wsRawRead(conn, loop, 3000)
-    resp = cast[string](buf)
-    loop.stop()
-  loop.run()
-  check resp.contains("101")
-  check resp.toLowerAscii().contains("permessage-deflate")
   let msg = "fragmented deflate payload, repeated: ".repeat(200)
   let comp = wsDeflate(msg)
   check comp.len > 4
   let half = comp.len div 2
-  # First fragment: FIN=0, RSV1=1, binary.
-  discard conn.send(wsRawFrame(0x2, false, true,
-    comp.toOpenArrayByte(0, half - 1)))
-  # Continuation: FIN=1, RSV1=0.
-  discard conn.send(wsRawFrame(0x0, true, false,
-    comp.toOpenArrayByte(half, comp.high)))
-  let echoBytes = wsRawRead(conn, loop, 5000)
-  check echoBytes.len > 2
-  check (echoBytes[0] and 0x40) != 0  # echo is compressed: RSV1 set
-  check (echoBytes[0] and 0x0F) == 0x02
-  # Unframe (server frames are unmasked, small extended length possible).
-  var pos = 1
-  let b1 = echoBytes[pos]; inc pos
-  var payLen = int(b1 and 0x7F)
-  if payLen == 126:
-    payLen = (int(echoBytes[pos]) shl 8) or int(echoBytes[pos + 1])
-    pos += 2
-  elif payLen == 127:
-    payLen = 0
-    for i in 0 ..< 8:
-      payLen = (payLen shl 8) or int(echoBytes[pos + i])
-    pos += 8
-  let payload = echoBytes[pos ..< pos + payLen]
-  check wsInflate(payload, 1_000_000) == msg
-  conn.close()
-  srv.close()
+  var hs = ""
+  var hsLen = 0
+  var echoFirst = -1
+  var echoOpcode = -1
+  var echoPayload = ""
+  var phase = 0
+  rawDial(loop, 19965, wsHandshakeReq(DeflateOfferHdr),
+    proc(s: RawSession) =
+      if phase == 0:
+        let e = findHeadersEnd(s.buf)
+        if e >= 0:
+          hs = s.buf[0 ..< e]
+          hsLen = e
+          phase = 1
+          # First fragment: FIN=0, RSV1=1, binary.
+          discard s.conn.send(wsRawFrame(0x2, false, true,
+            comp.toOpenArrayByte(0, half - 1)))
+          # Continuation: FIN=1, RSV1=0.
+          discard s.conn.send(wsRawFrame(0x0, true, false,
+            comp.toOpenArrayByte(half, comp.high)))
+      elif phase == 1:
+        let total = serverFrameTotal(s.buf, hsLen)
+        if total > 0:
+          let fr = s.buf[hsLen ..< hsLen + total]
+          echoFirst = fr[0].ord
+          echoOpcode = echoFirst and 0x0F
+          # Unframe (server frames are unmasked, extended length possible).
+          var pos = 1
+          let b1 = fr[pos].ord; inc pos
+          var payLen = b1 and 0x7F
+          if payLen == 126:
+            payLen = (fr[pos].ord shl 8) or fr[pos + 1].ord
+            pos += 2
+          elif payLen == 127:
+            payLen = 0
+            for i in 0 ..< 8:
+              payLen = (payLen shl 8) or fr[pos + i].ord
+            pos += 8
+          echoPayload = fr[pos ..< pos + payLen]
+          phase = 2
+          s.conn.close()
+          srv.close()
+          loop.stop()
+  )
+  discard loop.addTimer(8000) do (id: int):
+    srv.close()
+    loop.stop()
+  loop.run()
   loop.close()
+  check hs.contains("101")
+  check hs.toLowerAscii().contains("permessage-deflate")
+  check (echoFirst and 0x40) != 0  # echo is compressed: RSV1 set
+  check echoOpcode == 0x02
+  check wsInflate(echoPayload, 1_000_000) == msg
 
 test "deflate_bomb_rejected_with_1009":
   # 1 MB of zeros compresses to ~1 KB: over a 64 KB cap it must die with
@@ -434,29 +477,41 @@ test "deflate_bomb_rejected_with_1009":
                     data: openArray[byte]):
     ws.sendBinary(data)  # must never run for the bomb
   srv.listen("127.0.0.1", 19966)
-  discard loop.addTimer(10) do (id: int):
-    let conn = wsRawConnect(loop, 19966, DeflateOfferHdr)
-    let hs = wsRawRead(conn, loop, 3000)
-    check cast[string](hs).contains("101")
-    let zeros = newString(1_000_000)
-    let comp = wsDeflate(zeros)
-    check comp.len < 65536  # passes the frame cap: the bomb is the ratio
-    discard conn.send(wsRawFrame(0x2, true, true,
-      comp.toOpenArrayByte(0, comp.high)))
-    let resp = wsRawRead(conn, loop, 5000)
-    # Close frame with code 1009.
-    check resp.len >= 4
-    check (resp[0] and 0x0F) == 0x08
-    let code = (int(resp[2]) shl 8) or int(resp[3])
-    check code == 1009
-    conn.close()
-    srv.close()
-    loop.stop()
+  let zeros = newString(1_000_000)
+  let comp = wsDeflate(zeros)
+  check comp.len < 65536  # passes the frame cap: the bomb is the ratio
+  var hs = ""
+  var hsLen = 0
+  var closeCode = -1
+  var phase = 0
+  rawDial(loop, 19966, wsHandshakeReq(DeflateOfferHdr),
+    proc(s: RawSession) =
+      if phase == 0:
+        let e = findHeadersEnd(s.buf)
+        if e >= 0:
+          hs = s.buf[0 ..< e]
+          hsLen = e
+          phase = 1
+          discard s.conn.send(wsRawFrame(0x2, true, true,
+            comp.toOpenArrayByte(0, comp.high)))
+      elif phase == 1:
+        let total = serverFrameTotal(s.buf, hsLen)
+        if total >= 4:
+          let fr = s.buf[hsLen ..< hsLen + total]
+          if (fr[0].ord and 0x0F) == 0x08:
+            closeCode = (fr[2].ord shl 8) or fr[3].ord
+            phase = 2
+            s.conn.close()
+            srv.close()
+            loop.stop()
+  )
   discard loop.addTimer(15_000) do (id: int):
     srv.close()
     loop.stop()
   loop.run()
   loop.close()
+  check hs.contains("101")
+  check closeCode == 1009
 
 test "deflate_server_ping_interval":
   # Raw peer (never speaks after the handshake) observes server pings.
