@@ -66,6 +66,9 @@ type
     pendingIdx: int             ## index in pendingConns while not promoted (-1 after)
     lastActive: int64            ## monoMs of the last data/activity
     idleAfter: int64             ## monoMs when the last request completed (idle)
+    streamingResponse: bool     ## true while a chunked/SSE stream owns the
+      ## connection: the sweep applies readTimeoutMs from the last chunk
+      ## (touched per write), and `markIdle` is deferred to stream close
 
   HttpServer* = ref object
     tcpServers*: seq[TcpServer]
@@ -858,6 +861,152 @@ proc markSent*(res: HttpResponse) {.inline.} =
   ## Used by upgrade handlers that send the response manually.
   res.sent = true
 
+# ── Chunked / SSE streaming ───────────────────────────────────────────────────
+
+type
+  SseStream* = ref object
+    ## An open chunked response stream (`Transfer-Encoding: chunked`).
+    ## Created by `startChunked` / `startSse`; survives the handler return so
+    ## events can be pushed later from timers or other callbacks. The owning
+    ## `HttpResponse` is pooled on dispatch return — keep only this handle.
+    ## While open, the connection is owned by the stream: the timeout sweep
+    ## applies `readTimeoutMs` from the last chunk, so send a heartbeat
+    ## (`sendComment`) more often than that when events are sparse.
+    conn: Connection
+    server: HttpServer
+    closeAfter: bool    ## from res.closeConn at start: FIN after terminator
+    closed: bool
+
+func chunkSizeHex(n: int): string =
+  ## Lowercase hex without leading zeros for chunk-size lines.
+  if n == 0:
+    return "0"
+  var v = n
+  var digits {.noinit.}: array[16, char]
+  var len = 0
+  while v > 0:
+    let d = v and 0xF
+    digits[len] = if d < 10: char(ord('0') + d) else: char(ord('a') + d - 10)
+    inc len
+    v = v shr 4
+  result = newString(len)
+  for i in 0 ..< len:
+    result[i] = digits[len - 1 - i]
+
+template touchStream(s: SseStream) =
+  ## Restart the read-timeout window from this chunk.
+  if s.conn.data != nil:
+    let c = cast[ConnHttp](s.conn.data)
+    if c != nil:
+      c.lastActive = if pollNowMs != 0: pollNowMs else: monoMs()
+
+proc startChunked*(res: HttpResponse, contentType: string): SseStream =
+  ## Send the response headers with `Transfer-Encoding: chunked` and return
+  ## a stream for incremental writes. Uses `res.statusCode` and any headers
+  ## set via `res.header()` before the call. Marks the response sent; further
+  ## `send`/`sendFile` calls on `res` are no-ops — write via the stream.
+  ## `Connection: keep-alive` is forced unless `res.close()` was called, in
+  ## which case the connection FINs after the stream terminator.
+  if res.sent:
+    return nil
+  res.sent = true
+  let s = SseStream(conn: res.conn, server: res.server,
+                    closeAfter: res.closeConn, closed: false)
+  var head = "HTTP/1.1 " & $res.statusCode.int & " " &
+             statusText(HttpCode(res.statusCode)) & "\r\n" &
+             "Date: " & cachedHttpDate() & "\r\n" &
+             "Content-Type: " & contentType & "\r\n" &
+             "Transfer-Encoding: chunked\r\n" &
+             "Connection: " & (if res.closeConn: "close" else: "keep-alive") & "\r\n"
+  for (k, v) in res.headers:
+    head.add(k & ": " & v & "\r\n")
+  head.add("\r\n")
+  discard res.conn.send(head)
+  if res.conn.data != nil:
+    let ctx = cast[ConnHttp](res.conn.data)
+    if ctx != nil:
+      ctx.streamingResponse = true
+  s.touchStream()
+  s
+
+proc startSse*(res: HttpResponse): SseStream =
+  ## Start a `text/event-stream` response (see `startChunked`). Adds
+  ## `Cache-Control: no-cache` and the `X-Accel-Buffering: no` proxy hint.
+  discard res.header("Cache-Control", "no-cache")
+  discard res.header("X-Accel-Buffering", "no")
+  res.startChunked("text/event-stream")
+
+proc isClosed*(s: SseStream): bool {.inline.} =
+  ## True once `close` ran or the connection died.
+  s == nil or s.closed
+
+proc writeChunk*(s: SseStream, data: openArray[byte]) =
+  ## Write one raw chunk. Empty payloads are skipped (use `sendComment`
+  ## for heartbeats). Dead connections mark the stream closed.
+  if s == nil or s.closed:
+    return
+  if s.conn.state != Connected:
+    s.closed = true
+    return
+  if data.len == 0:
+    return
+  let hx = chunkSizeHex(data.len)
+  var frame = newString(hx.len + 2 + data.len + 2)
+  copyMem(addr frame[0], unsafeAddr hx[0], hx.len)
+  frame[hx.len] = '\r'
+  frame[hx.len + 1] = '\n'
+  if data.len > 0:
+    copyMem(addr frame[hx.len + 2], unsafeAddr data[0], data.len)
+  frame[frame.len - 2] = '\r'
+  frame[frame.len - 1] = '\n'
+  discard s.conn.send(frame)
+  s.touchStream()
+
+proc writeChunk*(s: SseStream, data: string) {.inline.} =
+  ## String variant of `writeChunk`.
+  if data.len > 0:
+    s.writeChunk(data.toOpenArrayByte(0, data.high))
+
+proc sendEvent*(s: SseStream, data: string, event = "", id = "",
+                retry = 0) {.inline.} =
+  ## Send one SSE message (`formatSseEvent` framing) as a single chunk.
+  if s == nil or s.closed:
+    return
+  s.writeChunk(formatSseEvent(data, event, id, retry))
+
+proc sendComment*(s: SseStream, comment = "") {.inline.} =
+  ## Send an SSE heartbeat (`: comment`) — no event is dispatched.
+  ## Call more often than `readTimeoutMs` when events are sparse.
+  if s == nil or s.closed:
+    return
+  s.writeChunk(formatSseComment(comment))
+
+proc close*(s: SseStream, trailers: openArray[(string, string)] = []) =
+  ## Terminate the stream (`0`-chunk, optional trailers) and release the
+  ## connection back to keep-alive (or FIN when `res.close()` was set at
+  ## start). Idempotent; safe to call from any loop callback.
+  if s == nil or s.closed:
+    return
+  s.closed = true
+  if s.conn.state == Connected:
+    if trailers.len == 0:
+      discard s.conn.send("0\r\n\r\n")
+    else:
+      var tail = "0\r\n"
+      for (k, v) in trailers:
+        tail.add(k & ": " & v & "\r\n")
+      tail.add("\r\n")
+      discard s.conn.send(tail)
+    if s.conn.data != nil:
+      let ctx = cast[ConnHttp](s.conn.data)
+      if ctx != nil:
+        ctx.streamingResponse = false
+        let now = if pollNowMs != 0: pollNowMs else: monoMs()
+        ctx.lastActive = now
+        ctx.idleAfter = now
+    if s.closeAfter:
+      s.conn.closeAfterSend()
+
 # ── HttpResponse pooling ──────────────────────────────────────────────────────────
 
 proc acquireHttpResponse(server: HttpServer, conn: Connection): HttpResponse =
@@ -1115,6 +1264,7 @@ proc releaseConnHttp(server: HttpServer, ctx: ConnHttp) {.inline.} =
   ctx.pendingIdx = -1
   ctx.lastActive = 0
   ctx.idleAfter = 0
+  ctx.streamingResponse = false
   ctx.sessionStreamPath = ""
   ctx.streamer = nil
   # NOTE: parser released by the caller (removeSession) before this runs;
@@ -1389,15 +1539,20 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
       return
     ctx.parser.resetForNext()
     p.tryAdvance()
-    if conn.sendFileFd >= 0:
+    if conn.sendFileFd >= 0 or ctx.streamingResponse:
+      # Response body still owned elsewhere (zero-copy send or an open
+      # chunked/SSE stream): further pipelined bytes wait for the next read.
       break
 
   # All pipelined requests handled. If at least one request completed, the
   # connection is now idle waiting for the next one — the timeout sweep will
   # apply keepAliveMs. If the current request is still incomplete (slowloris),
-  # it stays in the read-timeout state until readTimeoutMs.
+  # it stays in the read-timeout state until readTimeoutMs. An open
+  # chunked/SSE stream owns the connection instead: markIdle is deferred to
+  # SseStream.close so the sweep keeps applying readTimeoutMs from the last
+  # chunk rather than keepAliveMs from dispatch return.
   if conn.state == Connected and conn.data != nil and conn.sendFileFd < 0 and
-     pipelineCount > 0:
+     pipelineCount > 0 and not ctx.streamingResponse:
     server.markIdle(conn)
 
   if p.isError():

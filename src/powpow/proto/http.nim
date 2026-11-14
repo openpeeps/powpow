@@ -1978,3 +1978,158 @@ proc getRemainingData*(p: HttpParser): seq[byte] =
     copyMem(addr result[0], unsafeAddr p.buf[consumed], leftover)
   else:
     result = @[]
+
+# ── Server-Sent Events (SSE) ─────────────────────────────────────────────────
+
+type
+  SseEvent* = object
+    ## One dispatched Server-Sent Events message (WHATWG HTML §9.2.6).
+    event*: string   ## event type ("message" when the `event:` field absent)
+    data*: string    ## payload lines joined with "\n" (no trailing newline)
+    id*: string      ## last event ID in scope ("" when never set)
+    retry*: int      ## reconnection time ms from `retry:` (0 when absent)
+
+  SseParser* = ref object
+    ## Incremental SSE stream parser for the client side. Feed decoded
+    ## chunk/body bytes as they arrive; complete events are returned.
+    ## The last event ID persists across `feed` calls per spec.
+    buf: string
+    lastId: string
+
+proc newSseParser*(): SseParser =
+  ## Create an empty incremental SSE parser.
+  SseParser(buf: "", lastId: "")
+
+func sanitizeSseField(s: string): string =
+  ## Drop CR/LF from one-line SSE fields (`event:`, `id:`, comments).
+  result = newStringOfCap(s.len)
+  for ch in s:
+    if ch != '\r' and ch != '\n':
+      result.add(ch)
+
+proc formatSseEvent*(data: string, event = "", id = "",
+                     retry = 0): string =
+  ## Format one SSE message for `SseStream.sendEvent` / `writeChunk`.
+  ## Multi-line `data` emits one `data:` line per line; the block ends with
+  ## a blank line. `retry` <= 0 omits the `retry:` field.
+  result = newStringOfCap(data.len + event.len + id.len + 32)
+  if id.len > 0:
+    result.add("id: " & sanitizeSseField(id) & "\n")
+  if event.len > 0:
+    result.add("event: " & sanitizeSseField(event) & "\n")
+  if data.len == 0:
+    result.add("data: \n")
+  else:
+    var lineStart = 0
+    for i in 0 ..< data.len:
+      if data[i] == '\n':
+        var line = data[lineStart ..< i]
+        if line.len > 0 and line[^1] == '\r':
+          line.setLen(line.len - 1)
+        result.add("data: " & line & "\n")
+        lineStart = i + 1
+    if lineStart < data.len:
+      var line = data[lineStart .. ^1]
+      if line.len > 0 and line[^1] == '\r':
+        line.setLen(line.len - 1)
+      result.add("data: " & line & "\n")
+    elif lineStart == data.len and data[^1] == '\n':
+      discard  # trailing newline already closed the last line, no empty tail
+  if retry > 0:
+    result.add("retry: " & $retry & "\n")
+  result.add("\n")
+
+proc formatSseComment*(comment = ""): string =
+  ## Format an SSE heartbeat (`: comment`) — keeps the stream alive without
+  ## dispatching an event. Multi-line comments emit one `:` line each.
+  result = newStringOfCap(comment.len + 8)
+  if comment.len == 0:
+    return ":\n\n"
+  var lineStart = 0
+  for i in 0 ..< comment.len:
+    if comment[i] == '\n':
+      var line = comment[lineStart ..< i]
+      if line.len > 0 and line[^1] == '\r':
+        line.setLen(line.len - 1)
+      result.add(": " & sanitizeSseField(line) & "\n")
+      lineStart = i + 1
+  if lineStart < comment.len:
+    result.add(": " & sanitizeSseField(comment[lineStart .. ^1]) & "\n")
+  result.add("\n")
+
+proc feed*(p: SseParser, data: string): seq[SseEvent] =
+  ## Feed decoded stream bytes; return newly completed events. A trailing
+  ## partial block stays buffered for the next `feed`.
+  result = @[]
+  if data.len == 0:
+    return
+  p.buf.add(data)
+  # Normalize line endings per spec (\r\n and lone \r become \n).
+  var norm = newStringOfCap(p.buf.len)
+  var i = 0
+  while i < p.buf.len:
+    if p.buf[i] == '\r':
+      if i + 1 < p.buf.len and p.buf[i + 1] == '\n':
+        inc i
+      norm.add('\n')
+    else:
+      norm.add(p.buf[i])
+    inc i
+  p.buf.setLen(0)
+  var blockStart = 0
+  while true:
+    let sep = norm.find("\n\n", blockStart)
+    if sep < 0:
+      break
+    let blk = norm[blockStart ..< sep]
+    blockStart = sep + 2
+    var evType = ""
+    var dataLines: seq[string] = @[]
+    var gotData = false
+    var blkId = ""
+    var gotId = false
+    var retry = 0
+    for rawLine in blk.split('\n'):
+      let line = rawLine
+      if line.len == 0:
+        continue
+      if line[0] == ':':
+        continue  # comment, ignored
+      let colon = line.find(':')
+      var field, value: string
+      if colon < 0:
+        field = line
+        value = ""
+      else:
+        field = line[0 ..< colon]
+        value = if colon + 1 < line.len: line[colon + 1 .. ^1] else: ""
+        if value.len > 0 and value[0] == ' ':
+          value = value[1 .. ^1]
+      case field
+      of "event":
+        evType = value
+      of "data":
+        dataLines.add(value)
+        gotData = true
+      of "id":
+        if '\0' notin value:  # NUL id is ignored per spec, keeps last ID
+          blkId = value
+          gotId = true
+      of "retry":
+        try:
+          let n = parseInt(value)
+          if n >= 0:
+            retry = n
+        except ValueError:
+          discard
+      else:
+        discard  # unknown fields are ignored
+    if gotId:
+      p.lastId = blkId
+    if gotData:
+      result.add(SseEvent(
+        event: if evType.len > 0: evType else: "message",
+        data: dataLines.join("\n"),
+        id: if gotId: blkId else: p.lastId,
+        retry: retry))
+  p.buf.add(norm[blockStart .. ^1])
