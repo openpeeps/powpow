@@ -55,6 +55,26 @@ type
     ## User-provided callback invoked for every parsed HTTP request.
     ## Higher-level frameworks implement routing on top of this.
 
+  AccessLogEntry* = object
+    ## One completed HTTP request for `onAccessLog`. Fired at dispatch
+    ## return (handler time); for chunked/SSE streams this is time-to-first-byte
+    ## (`streaming` is true and the stream still owns the connection).
+    clientIp*: string
+    httpMethod*: HttpMethod
+    path*: string
+    statusCode*: uint16
+    durationMs*: int64
+    streaming*: bool
+
+  OnAccessLog* = proc(entry: AccessLogEntry) {.closure, gcsafe.}
+    ## Optional per-request hook: `server.onAccessLog = proc(e) = ...`.
+    ## Runs on the loop thread. Nil (default) disables logging entirely —
+    ## no entry is built on the hot path when unset.
+
+  DrainCallback* = proc() {.closure, gcsafe.}
+    ## Fired once on the loop thread when `drain` empties the server.
+    ## Tear down there (`server.close()` and/or `loop.stop()`).
+
   ConnHttp* = ref object
     parser: HttpParser
     sessionStreamFile: File
@@ -124,6 +144,13 @@ type
       ## (idle) with one periodic pass over active connections — avoiding a
       ## per-request timer add/cancel on the hot path.
     sweepTimer: TimerId
+    onAccessLog*: OnAccessLog
+      ## Structured per-request hook (nil = disabled, zero hot-path cost).
+    draining*: bool
+      ## Graceful shutdown in progress: listeners closed, idle sessions shut,
+      ## in-flight requests/streams run to completion. See `drain`.
+    drainTimer: TimerId   ## force-close deadline while draining
+    drainCb: DrainCallback ## fired once when the last session closes
 
 const
   DefaultKeepAliveMs* = 5_000
@@ -861,6 +888,16 @@ proc markSent*(res: HttpResponse) {.inline.} =
   ## Used by upgrade handlers that send the response manually.
   res.sent = true
 
+# ── Session teardown (forward declarations) ───────────────────────────────────
+
+proc removeSession*(server: HttpServer, conn: Connection)
+  ## Detach `conn` from session tracking and recycle its state (defined
+  ## below, next to markIdle). Declared early for SseStream.close/drain.
+proc closeStale(server: HttpServer, ctx: ConnHttp)
+  ## Shut an idle/stalled session (defined below, next to the sweep).
+proc maybeDrained(server: HttpServer) {.gcsafe.}
+  ## Fire the drain callback once the last session is gone (defined below).
+
 # ── Chunked / SSE streaming ───────────────────────────────────────────────────
 
 type
@@ -1004,7 +1041,15 @@ proc close*(s: SseStream, trailers: openArray[(string, string)] = []) =
         let now = if pollNowMs != 0: pollNowMs else: monoMs()
         ctx.lastActive = now
         ctx.idleAfter = now
-    if s.closeAfter:
+    if s.server.draining:
+      # Graceful shutdown: don't park keep-alive — tear down after the
+      # terminator flushes. removeSession fires maybeDrained. Runs on the
+      # loop thread like every other session teardown, hence the cast.
+      let c = s.conn
+      {.cast(gcsafe).}:
+        s.server.removeSession(c)
+      c.closeAfterDrain()
+    elif s.closeAfter:
       s.conn.closeAfterSend()
 
 # ── HttpResponse pooling ──────────────────────────────────────────────────────────
@@ -1155,6 +1200,62 @@ proc stop*(server: HttpServer) =
       not server.loop.closed and server.loop.isRunning():
     server.loop.stop()
 
+proc drain*(server: HttpServer, timeoutMs = 30_000,
+            onDrained: DrainCallback = nil) =
+  ## Graceful shutdown: close listeners (no new connections), shut idle
+  ## keep-alive sessions now, and let in-flight requests and open
+  ## chunked/SSE streams run to completion. When the last session closes,
+  ## `onDrained` fires once on the loop thread — tear down there
+  ## (`server.close()`). `timeoutMs` (0 = no deadline)
+  ## force-closes whatever remains. Safe to call from any loop callback;
+  ## idempotent while draining (a missing callback can still be attached).
+  ##
+  ## Teardown writes (queued response bytes, the SSE terminator) flush on
+  ## subsequent polls — do NOT stop the loop inside `onDrained`, or the
+  ## flush is truncated. Stop once clients observe close (or after a short
+  ## grace timer).
+  if server == nil: return
+  if server.draining:
+    if server.drainCb == nil and onDrained != nil:
+      server.drainCb = onDrained
+      server.maybeDrained()
+    return
+  server.draining = true
+  server.drainCb = onDrained
+  for ts in server.tcpServers:
+    ts.close()
+  # Idle sessions die now; in-flight ones finish through markIdle (which
+  # closes instead of idling while draining), SseStream.close, or the
+  # timeout sweep — every teardown funnels through removeSession, which
+  # fires maybeDrained.
+  server.sweepStale.setLen(0)
+  for ctx in server.connRoots.values:
+    if ctx.conn != nil and ctx.idleAfter >= ctx.lastActive:
+      server.sweepStale.add(ctx)
+  for ctx in server.sweepStale:
+    server.closeStale(ctx)
+  server.sweepStale.setLen(0)
+  if server.connRoots.len == 0 and server.pendingConns.len == 0:
+    server.maybeDrained()
+    return
+  if timeoutMs > 0:
+    server.drainTimer = server.loop.addTimer(timeoutMs) do (id: int):
+      # Stale fire (drain already settled and cleared drainCb): no-op.
+      if server.drainCb == nil: return
+      # Deadline expired: drop everything that is still open.
+      server.sweepStale.setLen(0)
+      for ctx in server.connRoots.values:
+        server.sweepStale.add(ctx)
+      for ctx in server.pendingConns:
+        server.sweepStale.add(ctx)
+      for ctx in server.sweepStale:
+        if ctx.conn != nil:
+          let c = ctx.conn
+          server.removeSession(c)
+          c.close()
+      server.sweepStale.setLen(0)
+      server.maybeDrained()
+
 proc maybeArmBodyStream(server: HttpServer, ctx: ConnHttp, p: HttpParser)
   ## Forward declaration (defined near handleConnectionData): choose the body
   ## strategy at header time. Needed here because acquireConnHttp wires it as
@@ -1297,6 +1398,25 @@ proc removeSession*(server: HttpServer, conn: Connection) =
     ctx.parser = nil
   conn.data = nil
   server.releaseConnHttp(ctx)
+  server.maybeDrained()
+
+proc maybeDrained(server: HttpServer) {.gcsafe.} =
+  ## Fire the drain callback once when no sessions remain. Called at the end
+  ## of every session teardown, so any path that empties the server (request
+  ## completion, stream close, timeout sweep, force-close) settles a drain.
+  ## No timer cancel here (cancelTimer is not gcsafe-clean): a stale deadline
+  ## that fires later is a guarded no-op via the drainCb check below.
+  if not server.draining or server.drainCb == nil: return
+  if server.connRoots.len == 0 and server.pendingConns.len == 0:
+    server.drainTimer = TimerId(0)
+    let cb = server.drainCb
+    server.drainCb = nil
+    server.draining = false
+    # The callback is user code declared {.closure, gcsafe.} and always runs
+    # on this loop thread (same contract as timer callbacks); the cast keeps
+    # session teardown (removeSession) gcsafe-clean for upgrade/SSE paths.
+    {.cast(gcsafe).}:
+      cb()
 
 proc markIdle(server: HttpServer, conn: Connection) =
   ## Mark a connection idle: a request just completed, so the keep-alive
@@ -1313,6 +1433,12 @@ proc markIdle(server: HttpServer, conn: Connection) =
   ## restart the window.
   let ctx = cast[ConnHttp](conn.data)
   if ctx == nil: return
+  if server.draining:
+    # Graceful shutdown: never park a connection idle — finish this request
+    # and tear the session down. removeSession fires maybeDrained.
+    server.removeSession(conn)
+    conn.closeAfterDrain()
+    return
   let now = if pollNowMs != 0: pollNowMs else: monoMs()
   ctx.lastActive = now
   ctx.idleAfter = now
@@ -1378,6 +1504,10 @@ proc startTimeoutSweep(server: HttpServer) =
 proc dispatchRequest(server: HttpServer, conn: Connection,
                      req: HttpRequest) =
   req.conn = conn
+  # Capture the peer IP up front: error/close responses may shut the socket
+  # (fd = -1) before the entry below is built.
+  let cip = conn.getClientIp()
+  let started = if pollNowMs != 0: pollNowMs else: monoMs()
   let res = acquireHttpResponse(server, conn)
   if req.getConnectionClose():
     res.closeConn = true
@@ -1386,6 +1516,16 @@ proc dispatchRequest(server: HttpServer, conn: Connection,
     server.handler(req, res)
   else:
     res.sendError(Http500, "No handler configured")
+  if server.onAccessLog != nil:
+    let now = if pollNowMs != 0: pollNowMs else: monoMs()
+    let ctx = if conn.data != nil: cast[ConnHttp](conn.data) else: nil
+    server.onAccessLog(AccessLogEntry(
+      clientIp: cip,
+      httpMethod: req.httpMethod,
+      path: $req.getPath(),
+      statusCode: res.statusCode,
+      durationMs: now - started,
+      streaming: ctx != nil and ctx.streamingResponse))
   releaseHttpResponse(server, res)
 
 
@@ -1565,8 +1705,21 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
       ctx.sessionStreamPath = ""
     p.onBodyData = nil
     let errCode = p.error()
+    # Capture the peer IP before sendError: the 4xx close tears the socket
+    # down inline (fd = -1), after which getClientIp formats nothing.
+    let cip = conn.getClientIp()
     let res = acquireHttpResponse(server, conn)
     res.sendError(errCode)
+    if server.onAccessLog != nil:
+      # Reject path: no dispatch, so log here (method/path best-effort —
+      # empty when the request line never parsed).
+      server.onAccessLog(AccessLogEntry(
+        clientIp: cip,
+        httpMethod: p.peekMethod(),
+        path: $p.peekPath(),
+        statusCode: uint16(ord(errCode)),
+        durationMs: 0,
+        streaming: false))
     ctx.parser.reset()
 
 # ── Listen ───────────────────────────────────────────────────────────────────
@@ -1674,8 +1827,14 @@ proc close*(server: HttpServer) =
     if server.sweepTimer != TimerId(0):
       server.loop.cancelTimer(server.sweepTimer)
       server.sweepTimer = TimerId(0)
+    if server.drainTimer != TimerId(0):
+      server.loop.cancelTimer(server.drainTimer)
+      server.drainTimer = TimerId(0)
   else:
     server.sweepTimer = TimerId(0)
+    server.drainTimer = TimerId(0)
+  server.draining = false
+  server.drainCb = nil
   for ts in server.tcpServers:
     ts.close()
   server.tcpServers.setLen(0)
