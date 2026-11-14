@@ -179,7 +179,11 @@ test "sse_trailers":
       {.gcsafe.}:
         for b in data:
           received.add(char(b))
-        if received.endsWith("\r\n\r\n"):
+        # Stop on the trailer terminator itself: a bare "\r\n\r\n" also
+        # terminates the response headers, and TCP/IOCP may deliver headers
+        # and body in separate reads (observed on Windows) — stopping there
+        # truncates the stream before the events arrive.
+        if received.endsWith("0\r\nX-Checksum: abc\r\n\r\n"):
           conn.close()
           server.close()
           loop.stop()
