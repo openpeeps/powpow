@@ -16,6 +16,7 @@ requires "openparser >= 0.3.8"
 requires "multipart >= 0.1.4"
 requires "checksums >= 0.2.2"
 requires "archive >= 0.1.0"
+requires "buffalo >= 0.1.0"
 
 # Features
 

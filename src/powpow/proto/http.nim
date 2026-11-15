@@ -2058,70 +2058,94 @@ proc newSseParser*(): SseParser =
   ## Create an empty incremental SSE parser.
   SseParser(buf: "", lastId: "")
 
-func sanitizeSseField(s: string): string =
-  ## Drop CR/LF from one-line SSE fields (`event:`, `id:`, comments).
-  result = newStringOfCap(s.len)
-  for ch in s:
-    if ch != '\r' and ch != '\n':
-      result.add(ch)
-
-proc formatSseEvent*(data: string, event = "", id = "",
-                     retry = 0): string =
+proc formatSseEvent*(data: openArray[byte], event: openArray[char] = [],
+                      id: openArray[char] = [], retry = 0): string =
   ## Format one SSE message for `SseStream.sendEvent` / `writeChunk`.
   ## Multi-line `data` emits one `data:` line per line; the block ends with
   ## a blank line. `retry` <= 0 omits the `retry:` field.
+  ## openArray core: input is viewed, never sliced — no per-line temps.
   result = newStringOfCap(data.len + event.len + id.len + 32)
   if id.len > 0:
-    result.add("id: " & sanitizeSseField(id) & "\n")
+    result.add("id: ")
+    for ch in id:
+      if ch != '\r' and ch != '\n':
+        result.add(ch)
+    result.add("\n")
   if event.len > 0:
-    result.add("event: " & sanitizeSseField(event) & "\n")
+    result.add("event: ")
+    for ch in event:
+      if ch != '\r' and ch != '\n':
+        result.add(ch)
+    result.add("\n")
   if data.len == 0:
     result.add("data: \n")
   else:
-    var lineStart = 0
+    result.add("data: ")
     for i in 0 ..< data.len:
-      if data[i] == '\n':
-        var line = data[lineStart ..< i]
-        if line.len > 0 and line[^1] == '\r':
-          line.setLen(line.len - 1)
-        result.add("data: " & line & "\n")
-        lineStart = i + 1
-    if lineStart < data.len:
-      var line = data[lineStart .. ^1]
-      if line.len > 0 and line[^1] == '\r':
-        line.setLen(line.len - 1)
-      result.add("data: " & line & "\n")
-    elif lineStart == data.len and data[^1] == '\n':
-      discard  # trailing newline already closed the last line, no empty tail
+      let b = data[i]
+      if b == byte('\n'):
+        if result.len > 0 and result[^1] == '\r':
+          result.setLen(result.len - 1)
+        result.add("\n")
+        if i + 1 < data.len:
+          result.add("data: ")
+      elif b == byte('\r'):
+        result.add('\r')
+      else:
+        result.add(char(b))
+    if data[^1] != byte('\n'):
+      if result[^1] == '\r':
+        result.setLen(result.len - 1)
+      result.add("\n")
   if retry > 0:
     result.add("retry: " & $retry & "\n")
   result.add("\n")
 
-proc formatSseComment*(comment = ""): string =
+proc formatSseEvent*(data: string, event = "", id = "",
+                     retry = 0): string {.inline.} =
+  ## String wrapper: views the input, no copy before formatting.
+  if data.len == 0:
+    formatSseEvent([], event.toOpenArray(0, event.high),
+                   id.toOpenArray(0, id.high), retry)
+  else:
+    formatSseEvent(data.toOpenArrayByte(0, data.high),
+                   event.toOpenArray(0, event.high),
+                   id.toOpenArray(0, id.high), retry)
+
+proc formatSseComment*(comment: openArray[char] = []): string =
   ## Format an SSE heartbeat (`: comment`) — keeps the stream alive without
   ## dispatching an event. Multi-line comments emit one `:` line each.
+  ## openArray core: input is viewed, never sliced — no per-line temps.
   result = newStringOfCap(comment.len + 8)
   if comment.len == 0:
     return ":\n\n"
-  var lineStart = 0
+  result.add(": ")
   for i in 0 ..< comment.len:
-    if comment[i] == '\n':
-      var line = comment[lineStart ..< i]
-      if line.len > 0 and line[^1] == '\r':
-        line.setLen(line.len - 1)
-      result.add(": " & sanitizeSseField(line) & "\n")
-      lineStart = i + 1
-  if lineStart < comment.len:
-    result.add(": " & sanitizeSseField(comment[lineStart .. ^1]) & "\n")
+    let ch = comment[i]
+    if ch == '\n':
+      if result.len > 0 and result[^1] == '\r':
+        result.setLen(result.len - 1)
+      result.add("\n")
+      if i + 1 < comment.len:
+        result.add(": ")
+    elif ch != '\r':
+      result.add(ch)
+  if comment[^1] != '\n':
+    if result[^1] == '\r':
+      result.setLen(result.len - 1)
+    result.add("\n")
   result.add("\n")
 
-proc feed*(p: SseParser, data: string): seq[SseEvent] =
+proc feed*(p: SseParser, data: openArray[byte]): seq[SseEvent] =
   ## Feed decoded stream bytes; return newly completed events. A trailing
   ## partial block stays buffered for the next `feed`.
+  ## openArray core: callers pass views, no `cast[string]` copy.
   result = @[]
   if data.len == 0:
     return
-  p.buf.add(data)
+  let oldLen = p.buf.len
+  p.buf.setLen(oldLen + data.len)
+  copyMem(addr p.buf[oldLen], unsafeAddr data[0], data.len)
   # Normalize line endings per spec (\r\n and lone \r become \n).
   var norm = newStringOfCap(p.buf.len)
   var i = 0
@@ -2191,3 +2215,9 @@ proc feed*(p: SseParser, data: string): seq[SseEvent] =
         id: if gotId: blkId else: p.lastId,
         retry: retry))
   p.buf.add(norm[blockStart .. ^1])
+
+proc feed*(p: SseParser, data: string): seq[SseEvent] {.inline.} =
+  ## String wrapper: views the input, no copy before buffering.
+  if data.len == 0:
+    return @[]
+  p.feed(data.toOpenArrayByte(0, data.high))

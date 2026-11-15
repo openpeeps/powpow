@@ -33,7 +33,7 @@ import ./http
 when defined(windows):
   import ./winpath
 
-import pkg/[mimedb, multipart]
+import pkg/[mimedb, multipart, buffalo]
 export Port
 
 # ── Types ────────────────────────────────────────────────────────────────────
@@ -917,6 +917,29 @@ type
     closeAfter: bool    ## from res.closeConn at start: FIN after terminator
     closed: bool
 
+var ssePool {.threadvar.}: PooledBuffer[byte]
+  ## Reused framing buffer for multi-line SSE events (slow path).
+  ## Allocated once per thread via `initPool`, then flat: steady-state
+  ## multi-line sends copy into it with no heap traffic.
+
+func chunkHexInto(buf: var openArray[byte], n: int): int =
+  ## Write lowercase hex of `n` into `buf`, return the digit count.
+  ## Stack-only, no allocation. `n == 0` writes `"0"`.
+  if n == 0:
+    buf[0] = byte('0')
+    return 1
+  var tmp: array[16, byte]
+  var len = 0
+  var v = n
+  while v > 0:
+    let d = v and 0xF
+    tmp[len] = if d < 10: byte(ord('0') + d) else: byte(ord('a') + d - 10)
+    inc len
+    v = v shr 4
+  for i in 0 ..< len:
+    buf[i] = tmp[len - 1 - i]
+  len
+
 func chunkSizeHex(n: int): string =
   ## Lowercase hex without leading zeros for chunk-size lines.
   if n == 0:
@@ -952,16 +975,44 @@ proc startChunked*(res: HttpResponse, contentType: string): SseStream =
   res.sent = true
   let s = SseStream(conn: res.conn, server: res.server,
                     closeAfter: res.closeConn, closed: false)
-  var head = "HTTP/1.1 " & $res.statusCode.int & " " &
-             statusText(HttpCode(res.statusCode)) & "\r\n" &
-             "Date: " & cachedHttpDate() & "\r\n" &
-             "Content-Type: " & contentType & "\r\n" &
-             "Transfer-Encoding: chunked\r\n" &
-             "Connection: " & (if res.closeConn: "close" else: "keep-alive") & "\r\n"
-  for (k, v) in res.headers:
-    head.add(k & ": " & v & "\r\n")
-  head.add("\r\n")
-  discard res.conn.send(head)
+  buffaloScope:
+    var hb {.buffalo.}: StaticBuffer[byte, 2048]
+    try:
+      # Zero-alloc head: status line + headers built into stack scratch,
+      # sent as one view. Falls back to the heap path below past 2 KiB.
+      hb.appendMany("HTTP/1.1 ")
+      let sc = res.statusCode.int
+      hb.add(byte(ord('0') + sc div 100))
+      hb.add(byte(ord('0') + (sc div 10) mod 10))
+      hb.add(byte(ord('0') + sc mod 10))
+      hb.add(byte(' '))
+      hb.appendMany(statusText(HttpCode(res.statusCode)))
+      hb.appendMany("\r\nDate: ")
+      hb.appendMany(cachedHttpDate())
+      hb.appendMany("\r\nContent-Type: ")
+      hb.appendMany(contentType)
+      hb.appendMany("\r\nTransfer-Encoding: chunked\r\nConnection: ")
+      hb.appendMany(if res.closeConn: "close" else: "keep-alive")
+      hb.appendMany("\r\n")
+      for (k, v) in res.headers:
+        hb.appendMany(k)
+        hb.appendMany(": ")
+        hb.appendMany(v)
+        hb.appendMany("\r\n")
+      hb.appendMany("\r\n")
+      discard res.conn.send(hb.toOpenArray())
+    except RangeDefect:
+      # Absurdly large header block (cold): heap fallback.
+      var head = "HTTP/1.1 " & $res.statusCode.int & " " &
+                 statusText(HttpCode(res.statusCode)) & "\r\n" &
+                 "Date: " & cachedHttpDate() & "\r\n" &
+                 "Content-Type: " & contentType & "\r\n" &
+                 "Transfer-Encoding: chunked\r\n" &
+                 "Connection: " & (if res.closeConn: "close" else: "keep-alive") & "\r\n"
+      for (k, v) in res.headers:
+        head.add(k & ": " & v & "\r\n")
+      head.add("\r\n")
+      discard res.conn.send(head)
   if res.conn.data != nil:
     let ctx = cast[ConnHttp](res.conn.data)
     if ctx != nil:
@@ -983,6 +1034,8 @@ proc isClosed*(s: SseStream): bool {.inline.} =
 proc writeChunk*(s: SseStream, data: openArray[byte]) =
   ## Write one raw chunk. Empty payloads are skipped (use `sendComment`
   ## for heartbeats). Dead connections mark the stream closed.
+  ## Zero-alloc: the frame scatters (`chunk-size CRLF payload CRLF`) via
+  ## `sendv` — the payload is never copied.
   if s == nil or s.closed:
     return
   if s.conn.state != Connected:
@@ -990,16 +1043,17 @@ proc writeChunk*(s: SseStream, data: openArray[byte]) =
     return
   if data.len == 0:
     return
-  let hx = chunkSizeHex(data.len)
-  var frame = newString(hx.len + 2 + data.len + 2)
-  copyMem(addr frame[0], unsafeAddr hx[0], hx.len)
-  frame[hx.len] = '\r'
-  frame[hx.len + 1] = '\n'
-  if data.len > 0:
-    copyMem(addr frame[hx.len + 2], unsafeAddr data[0], data.len)
-  frame[frame.len - 2] = '\r'
-  frame[frame.len - 1] = '\n'
-  discard s.conn.send(frame)
+  var hexBuf: array[18, byte]
+  let hxLen = chunkHexInto(hexBuf, data.len)
+  hexBuf[hxLen] = byte('\r')
+  hexBuf[hxLen + 1] = byte('\n')
+  var tail: array[2, byte] = [byte('\r'), byte('\n')]
+  var parts: array[4, tuple[data: ptr UncheckedArray[byte], len: int]]
+  parts[0] = (cast[ptr UncheckedArray[byte]](addr hexBuf[0]), hxLen + 2)
+  parts[1] = (cast[ptr UncheckedArray[byte]](unsafeAddr data[0]), data.len)
+  parts[2] = (cast[ptr UncheckedArray[byte]](addr tail[0]), 2)
+  # parts[3] unused: 3-element scatter (header+payload+trailer).
+  discard s.conn.sendv(parts.toOpenArray(0, 2))
   s.touchStream()
 
 proc writeChunk*(s: SseStream, data: string) {.inline.} =
@@ -1007,19 +1061,214 @@ proc writeChunk*(s: SseStream, data: string) {.inline.} =
   if data.len > 0:
     s.writeChunk(data.toOpenArrayByte(0, data.high))
 
+proc sendEvent*(s: SseStream, data: openArray[byte],
+                event: openArray[char] = [], id: openArray[char] = [],
+                retry = 0) =
+  ## Send one SSE message as a single chunk. Single-line payloads (the
+  ## common case) scatter straight from the caller's memory via `sendv`:
+  ## no framing copy, no heap allocation. Multi-line payloads take the
+  ## pooled-buffer slow path (one copy into reused thread-local storage,
+  ## still no allocation after warmup).
+  if s == nil or s.closed:
+    return
+  if s.conn.state != Connected:
+    s.closed = true
+    return
+  var multiline = false
+  for b in data:
+    if b == byte('\n'):
+      multiline = true
+      break
+  if multiline:
+    if ssePool.cap == 0:
+      ssePool = initPool(byte, 8192)
+    withBorrow(ssePool, buf):
+      if id.len > 0:
+        buf.appendMany("id: ")
+        for ch in id:
+          if ch != '\r' and ch != '\n':
+            buf.add(byte(ch))
+        buf.add(byte('\n'))
+      if event.len > 0:
+        buf.appendMany("event: ")
+        for ch in event:
+          if ch != '\r' and ch != '\n':
+            buf.add(byte(ch))
+        buf.add(byte('\n'))
+      if data.len == 0:
+        buf.appendMany("data: \n")
+      else:
+        buf.appendMany("data: ")
+        for i in 0 ..< data.len:
+          let b = data[i]
+          if b == byte('\n'):
+            if buf.len > 0 and buf[buf.len - 1] == byte('\r'):
+              discard buf.pop()
+            buf.add(byte('\n'))
+            if i + 1 < data.len:
+              buf.appendMany("data: ")
+          elif b == byte('\r'):
+            buf.add(b)
+          else:
+            buf.add(b)
+        if data[^1] != byte('\n'):
+          if buf[buf.len - 1] == byte('\r'):
+            discard buf.pop()
+          buf.add(byte('\n'))
+      if retry > 0:
+        buf.appendMany("retry: ")
+        var digits: array[20, byte]
+        var nd = 0
+        var v = retry
+        while v > 0:
+          digits[nd] = byte(ord('0') + v mod 10)
+          inc nd
+          v = v div 10
+        for i in countdown(nd - 1, 0):
+          buf.add(digits[i])
+        buf.add(byte('\n'))
+      buf.add(byte('\n'))
+      s.writeChunk(buf.toOpenArray())
+    return
+  # Fast path: frame length is known without building the frame.
+  var framed = 0
+  if id.len > 0:
+    framed += 4 + id.len + 1
+  if event.len > 0:
+    framed += 7 + event.len + 1
+  framed += 6 + data.len + 1
+  var retryBuf: array[32, byte]
+  var retryLen = 0
+  if retry > 0:
+    var digits: array[20, byte]
+    var nd = 0
+    var v = retry
+    while v > 0:
+      digits[nd] = byte(ord('0') + v mod 10)
+      inc nd
+      v = v div 10
+    retryBuf[0] = byte('r'); retryBuf[1] = byte('e')
+    retryBuf[2] = byte('t'); retryBuf[3] = byte('r')
+    retryBuf[4] = byte('y'); retryBuf[5] = byte(':')
+    retryBuf[6] = byte(' ')
+    for i in countdown(nd - 1, 0):
+      retryBuf[7 + (nd - 1 - i)] = digits[i]
+    retryBuf[7 + nd] = byte('\n')
+    retryLen = 8 + nd
+    framed += retryLen
+  framed += 1 # trailing blank line
+  var headBuf: array[18, byte]
+  let headLen = chunkHexInto(headBuf, framed)
+  headBuf[headLen] = byte('\r')
+  headBuf[headLen + 1] = byte('\n')
+  let headTotal = headLen + 2
+  # Fixed wire words live in one stack table (no heap, stable address).
+  var words: array[27, byte] = [
+    byte('i'), byte('d'), byte(':'), byte(' '),
+    byte('e'), byte('v'), byte('e'), byte('n'), byte('t'), byte(':'), byte(' '),
+    byte('d'), byte('a'), byte('t'), byte('a'), byte(':'), byte(' '),
+    byte('\n'), byte('\r'), byte('\n'),
+    byte('r'), byte('e'), byte('t'), byte('r'), byte('y'), byte(':'), byte(' ')]
+  let w = cast[ptr UncheckedArray[byte]](addr words[0])
+  var parts: array[13, tuple[data: ptr UncheckedArray[byte], len: int]]
+  var n = 0
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr headBuf[0]), headTotal); inc n
+  if id.len > 0:
+    parts[n] = (w, 4); inc n
+    parts[n] = (cast[ptr UncheckedArray[byte]](unsafeAddr id[0]), id.len); inc n
+    parts[n] = (cast[ptr UncheckedArray[byte]](addr words[17]), 1); inc n
+  if event.len > 0:
+    parts[n] = (cast[ptr UncheckedArray[byte]](addr words[4]), 7); inc n
+    parts[n] = (cast[ptr UncheckedArray[byte]](unsafeAddr event[0]), event.len); inc n
+    parts[n] = (cast[ptr UncheckedArray[byte]](addr words[17]), 1); inc n
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr words[11]), 6); inc n
+  if data.len > 0:
+    parts[n] = (cast[ptr UncheckedArray[byte]](unsafeAddr data[0]), data.len); inc n
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr words[17]), 1); inc n
+  if retryLen > 0:
+    parts[n] = (cast[ptr UncheckedArray[byte]](addr retryBuf[0]), retryLen); inc n
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr words[17]), 1); inc n
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr words[18]), 2); inc n
+  discard s.conn.sendv(parts.toOpenArray(0, n - 1))
+  s.touchStream()
+
 proc sendEvent*(s: SseStream, data: string, event = "", id = "",
                 retry = 0) {.inline.} =
-  ## Send one SSE message (`formatSseEvent` framing) as a single chunk.
+  ## String wrapper: views the input, no copy before framing.
   if s == nil or s.closed:
     return
-  s.writeChunk(formatSseEvent(data, event, id, retry))
+  if data.len == 0:
+    s.sendEvent([], event.toOpenArray(0, event.high),
+                id.toOpenArray(0, id.high), retry)
+  else:
+    s.sendEvent(data.toOpenArrayByte(0, data.high),
+                event.toOpenArray(0, event.high),
+                id.toOpenArray(0, id.high), retry)
 
-proc sendComment*(s: SseStream, comment = "") {.inline.} =
+proc sendComment*(s: SseStream, comment: openArray[char] = []) =
   ## Send an SSE heartbeat (`: comment`) — no event is dispatched.
   ## Call more often than `readTimeoutMs` when events are sparse.
+  ## Zero-alloc like `sendEvent`: single-line comments scatter, multi-line
+  ## comments use the pooled slow path.
   if s == nil or s.closed:
     return
-  s.writeChunk(formatSseComment(comment))
+  if s.conn.state != Connected:
+    s.closed = true
+    return
+  var multiline = false
+  for ch in comment:
+    if ch == '\n':
+      multiline = true
+      break
+  if multiline:
+    if ssePool.cap == 0:
+      ssePool = initPool(byte, 8192)
+    withBorrow(ssePool, buf):
+      buf.appendMany(": ")
+      for i in 0 ..< comment.len:
+        let ch = comment[i]
+        if ch == '\n':
+          if buf.len > 0 and buf[buf.len - 1] == byte('\r'):
+            discard buf.pop()
+          buf.add(byte('\n'))
+          if i + 1 < comment.len:
+            buf.appendMany(": ")
+        elif ch != '\r':
+          buf.add(byte(ch))
+      if comment[^1] != '\n':
+        if buf[buf.len - 1] == byte('\r'):
+          discard buf.pop()
+        buf.add(byte('\n'))
+      buf.add(byte('\n'))
+      s.writeChunk(buf.toOpenArray())
+    return
+  var headBuf: array[18, byte]
+  var framed: int
+  var payOff = 0
+  if comment.len == 0:
+    framed = 3 # ":\n\n"
+  else:
+    framed = 2 + comment.len + 1 + 1 # ": " + comment + "\n" + "\n"
+  let headLen = chunkHexInto(headBuf, framed)
+  headBuf[headLen] = byte('\r')
+  headBuf[headLen + 1] = byte('\n')
+  var parts: array[6, tuple[data: ptr UncheckedArray[byte], len: int]]
+  var n = 0
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr headBuf[0]), headLen + 2); inc n
+  if comment.len == 0:
+    var colon: array[1, byte] = [byte(':')]
+    parts[n] = (cast[ptr UncheckedArray[byte]](addr colon[0]), 1); inc n
+  else:
+    var pfx: array[2, byte] = [byte(':'), byte(' ')]
+    parts[n] = (cast[ptr UncheckedArray[byte]](addr pfx[0]), 2); inc n
+    parts[n] = (cast[ptr UncheckedArray[byte]](unsafeAddr comment[0]), comment.len); inc n
+  var nl: array[1, byte] = [byte('\n')]
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr nl[0]), 1); inc n
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr nl[0]), 1); inc n
+  var tail: array[2, byte] = [byte('\r'), byte('\n')]
+  parts[n] = (cast[ptr UncheckedArray[byte]](addr tail[0]), 2); inc n
+  discard s.conn.sendv(parts.toOpenArray(0, n - 1))
+  s.touchStream()
 
 proc close*(s: SseStream, trailers: openArray[(string, string)] = []) =
   ## Terminate the stream (`0`-chunk, optional trailers) and release the
