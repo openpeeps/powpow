@@ -208,30 +208,31 @@ const WsDeflateTail = [0x00'u8, 0x00, 0xFF, 0xFF, 0x01, 0x00, 0x00, 0xFF, 0xFF]
   ## stored block, BFINAL=0) plus a final empty stored block (BFINAL=1) so the
   ## stock one-shot `inflateInto` — which loops until BFINAL — terminates.
 
+var wsDeflStrm {.threadvar.}: DeflateStream
+  ## Deflate tables allocated once per thread, reused across messages.
+var wsDeflOut {.threadvar.}: Output
+  ## Reusable compressed-output buffer (reset per message).
+
 proc wsDeflate*(data: openArray[byte]): string =
-  ## Compress one message with a stateless one-shot (fixed-Huffman block).
-  ## The single block leaves `deflateFixed` with BFINAL=1; flipping it makes
-  ## the payload the non-final prefix the peer expects, and the sync-flush
-  ## tail `00 00 FF FF` is stripped per RFC 7692 §4.
-  ##
-  ## The stripped tail's empty stored block starts at the EOB end bit P, but
-  ## `deflateFixed` flushes at round_up(P/8) while the receiver's handoff
-  ## lands at round_up((P+3)/8) — one byte further exactly when P mod 8 is 0,
-  ## 6 or 7 (measured with a decode walk of our own single-block output).
-  ## In that case one extra zero byte carries the header bits; otherwise the
-  ## flush padding already covers them. Raises FlateError on (unexpected)
-  ## compressor failure.
-  var s = newString(data.len)
+  ## Compress one message with the stateful fixed-Huffman stream: a single
+  ## non-final content block (no 32 KB split — one block can reference the
+  ## whole window) closed by `finishDeflate`'s empty final block. Byte 0
+  ## therefore always carries BFINAL=0, which is exactly the non-final
+  ## prefix the receiver's `WsDeflateTail` suffix completes — no bit
+  ## flipping, no tail math, any message size. Thread-local reuse: no
+  ## steady-state allocations.
+  if wsDeflOut == nil:
+    wsDeflOut = newOutput(data.len + 16)
+  else:
+    reset(wsDeflOut)
+  if not deflateTablesReady(wsDeflStrm):
+    openDeflateStream(wsDeflStrm, wsDeflOut)
+  else:
+    resetDeflateStream(wsDeflStrm, wsDeflOut)
   if data.len > 0:
-    copyMem(addr s[0], unsafeAddr data[0], data.len)
-  var c = deflateFixed(s)
-  let inp = openInputString(c)
-  let endBit = inflateStreamPtr(basePointer(inp), inputLen(inp), 0,
-                                newOutput())
-  c[0] = char(byte(c[0]) xor 0x01)  # BFINAL 1 -> 0 (LSB of first byte)
-  if endBit mod 8 == 0 or endBit mod 8 > 5:
-    c.add('\x00')
-  c
+    writeDeflate(wsDeflStrm, data)
+  finishDeflate(wsDeflStrm)
+  take(wsDeflOut)
 
 proc wsDeflate*(data: string): string =
   ## String convenience overload.
