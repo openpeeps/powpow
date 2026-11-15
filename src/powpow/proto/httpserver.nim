@@ -34,6 +34,8 @@ when defined(windows):
   import ./winpath
 
 import pkg/[mimedb, multipart, buffalo]
+import pkg/archive/gzipf
+from pkg/archive/io import Output, newOutput, reset, outputBytes
 export Port
 
 # ── Types ────────────────────────────────────────────────────────────────────
@@ -50,6 +52,8 @@ type
     closeConn:  bool           ## If true, send "Connection: close" and shut down
     headers:    seq[(string, string)]
     bodyBytes:  seq[byte]
+    compressArmed: bool         ## res.compress() requested: attempt gzip for
+      ## this response even when server.compressEnabled is off
 
   OnRequestCallback* = proc(req: HttpRequest, res: HttpResponse) {.gcsafe.}
     ## User-provided callback invoked for every parsed HTTP request.
@@ -89,6 +93,8 @@ type
     streamingResponse: bool     ## true while a chunked/SSE stream owns the
       ## connection: the sweep applies readTimeoutMs from the last chunk
       ## (touched per write), and `markIdle` is deferred to stream close
+    acceptsGzip: bool           ## client allows gzip (parsed once at dispatch
+      ## when compression is enabled; HEAD never sets it)
 
   HttpServer* = ref object
     tcpServers*: seq[TcpServer]
@@ -134,6 +140,15 @@ type
     maxConnections*: int
     maxPipelineDepth*: int
     readTimeoutMs*: int
+    compressEnabled*: bool
+      ## Master switch for response compression (default off). When on,
+      ## `send()` negotiates gzip via Accept-Encoding; `res.compress()`
+      ## forces the attempt for one response regardless of this flag.
+    compressMinLen*: int
+      ## Bodies below this size are never compressed (default 1024).
+    compressLevel*: int
+      ## Gzip level 0..9 (default 6); only affects the header hint byte,
+      ## the fixed-Huffman encoder ignores it.
     wsIdleTimeoutMs*: int
       ## Post-upgrade WebSocket idle timeout (ms, 0 = disabled). Applied when a
       ## route upgrades a connection via `websocketUpgrade`; closes upgraded
@@ -404,6 +419,120 @@ const
     ## response (~540B with its Content-Type header) fits, so the hot path
     ## issues one `send()` instead of `writev()` over a 7-part iovec.
 
+func chunkHexInto(buf: var openArray[byte], n: int): int =
+  ## Write lowercase hex of `n` into `buf`, return the digit count.
+  ## Stack-only, no allocation. `n == 0` writes `"0"`.
+  if n == 0:
+    buf[0] = byte('0')
+    return 1
+  var tmp: array[16, byte]
+  var len = 0
+  var v = n
+  while v > 0:
+    let d = v and 0xF
+    tmp[len] = if d < 10: byte(ord('0') + d) else: byte(ord('a') + d - 10)
+    inc len
+    v = v shr 4
+  for i in 0 ..< len:
+    buf[i] = tmp[len - 1 - i]
+  len
+
+proc sendRawChunk(conn: Connection, p: pointer, n: int) {.inline.} =
+  ## Emit one `Transfer-Encoding: chunked` chunk (`hex CRLF data CRLF`) via
+  ## `sendv` — the payload is never copied. `n <= 0` is a no-op (an empty
+  ## chunk would terminate the stream).
+  if n <= 0 or p == nil:
+    return
+  var hexBuf: array[18, byte]
+  let hxLen = chunkHexInto(hexBuf, n)
+  hexBuf[hxLen] = byte('\r')
+  hexBuf[hxLen + 1] = byte('\n')
+  var tail: array[2, byte] = [byte('\r'), byte('\n')]
+  var parts: array[3, tuple[data: ptr UncheckedArray[byte], len: int]]
+  parts[0] = (cast[ptr UncheckedArray[byte]](addr hexBuf[0]), hxLen + 2)
+  parts[1] = (cast[ptr UncheckedArray[byte]](p), n)
+  parts[2] = (cast[ptr UncheckedArray[byte]](addr tail[0]), 2)
+  discard conn.sendv(parts.toOpenArray(0, 2))
+
+# ── Response compression (opt-in gzip) ──────────────────────────────────────
+
+var gzipStrm {.threadvar.}: GzipStream
+  ## Deflate tables allocated once per thread, reused across responses.
+var gzipOut {.threadvar.}: Output
+  ## Reusable compressed-output buffer (reset per response/turn).
+
+func findRespHeader(res: HttpResponse, name: string): int =
+  ## Index of a response header (case-insensitive key), or -1.
+  for i in 0 ..< res.headers.len:
+    if cmpIgnoreCase(res.headers[i][0], name) == 0:
+      return i
+  -1
+
+proc gzipEncodeBody(res: HttpResponse, bodyPtr: pointer, bodyLen: int;
+                    connCtx: ConnHttp): tuple[p: pointer, len: int] =
+  ## Gzip `bodyLen` bytes at `bodyPtr` into the thread-local output when all
+  ## gates pass; otherwise (nil, 0) — serve identity. Gates: enabled-or-armed,
+  ## client accepts, size, present-and-compressible Content-Type, no existing
+  ## Content-Encoding, output actually smaller. The returned pointer borrows
+  ## the thread-local buffer: consume it before the next compression call.
+  result = (nil, 0)
+  if bodyLen <= 0 or bodyPtr == nil:
+    return
+  if not (res.server.compressEnabled or res.compressArmed):
+    return
+  if bodyLen < res.server.compressMinLen:
+    return
+  if connCtx == nil:
+    return
+  if not connCtx.acceptsGzip:
+    # Server flag was off at dispatch, so nothing was precomputed — but this
+    # response is explicitly armed: parse now. The parser lives for the whole
+    # dispatch, and HEAD is excluded here just like at dispatch.
+    if not res.compressArmed or connCtx.parser == nil:
+      return
+    if connCtx.parser.methodCache == HttpHead:
+      return
+    if not parseAcceptsGzip(connCtx.parser.getHeaderValue("accept-encoding")):
+      return
+  if findRespHeader(res, "content-encoding") >= 0:
+    return
+  let ci = findRespHeader(res, "content-type")
+  if ci < 0:
+    return # unknown type: skip (never spend deflate on a guess)
+  var compressible = false
+  {.cast(gcsafe).}:
+    # Double-checked locking inside; read-only after init.
+    compressible = isCompressibleType(res.headers[ci][1])
+  if not compressible:
+    return
+  if gzipOut == nil:
+    gzipOut = newOutput(bodyLen + 64)
+  else:
+    reset(gzipOut)
+  openGzipStream(gzipStrm, gzipOut, res.server.compressLevel)
+  writeGzip(gzipStrm, bodyPtr, bodyLen)
+  finishGzip(gzipStrm)
+  let sp = outputBytes(gzipOut)
+  if sp.len <= 0 or sp.len >= bodyLen:
+    return # incompressible: serve identity
+  result = (sp.p, sp.len)
+
+proc gzipVaryValue(res: HttpResponse): string =
+  ## Vary value for a compressed response: "Accept-Encoding" merged with an
+  ## app-set Vary, or "" when the app value already covers it (emit nothing).
+  let vi = findRespHeader(res, "vary")
+  if vi < 0:
+    return "Accept-Encoding"
+  let cur = res.headers[vi][1]
+  if "accept-encoding" in cur.toLowerAscii():
+    return ""
+  cur & ", Accept-Encoding"
+
+
+var fileReadPool {.threadvar.}: PooledBuffer[byte]
+  ## Reusable file-read chunks for the compressed sendFile path (and any
+  ## future buffered file pump). Backing allocated once per thread.
+
 template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
   ## Shared response serializer for `send(string)` / `send(seq[byte])`.
   ## Emits byte-identical output on both paths; only the transport differs
@@ -416,6 +545,26 @@ template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
   ## no pre-count pass over `res.headers`.
   res.sent = true
   let connHeader = if res.closeConn: "close" else: "keep-alive"
+  let connCtx = if res.conn.data != nil: cast[ConnHttp](res.conn.data) else: nil
+  # Compression attempt: on success the wire body/length swap to the
+  # thread-local gzip output and Content-Encoding (+ merged Vary) are
+  # emitted below. Identity path is byte-identical to before.
+  let (compPtr, compLen) = gzipEncodeBody(res, bodyPtr, bodyLen, connCtx)
+  let comp = compPtr != nil
+  var eBodyLen = if comp: compLen else: bodyLen
+  var eBodyPtr = if comp: compPtr else: bodyPtr
+  # Merged Vary for the compressed mode ("" = app value already covers it).
+  # skipVaryIdx re-emits it merged; an app Content-Length is dropped when
+  # compressing (it describes the identity body, not the wire bytes).
+  var varyVal = ""
+  var skipVaryIdx = -1
+  if comp:
+    varyVal = gzipVaryValue(res)
+    if varyVal.len > 0:
+      skipVaryIdx = findRespHeader(res, "vary")
+  # Extra header bytes in compressed mode: "Content-Encoding: gzip\r\n" (24)
+  # plus optional "Vary: <v>\r\n".
+  let compExtra = if comp: 24 + (if varyVal.len > 0: 6 + varyVal.len + 2 else: 0) else: 0
 
   var buf {.noinit.}: array[FastSingleWriteCap, byte]
   var p = 0
@@ -433,7 +582,7 @@ template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
   copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
 
   copyMem(addr buf[p], "Content-Length: ".cstring, 16); p += 16
-  p += writeUint(cast[ptr UncheckedArray[byte]](addr buf[p]), bodyLen)
+  p += writeUint(cast[ptr UncheckedArray[byte]](addr buf[p]), eBodyLen)
   copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
 
   copyMem(addr buf[p], "Connection: ".cstring, 12); p += 12
@@ -443,12 +592,19 @@ template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
   # always fits the 1024-byte buffer; only custom headers + body can overflow.
   let fixedEnd = p
 
-  let tailReserve = 2 + bodyLen  # final CRLF + body
+  let tailReserve = 2 + eBodyLen + compExtra  # final CRLF + body + extras
   # Account for the tail up front: with zero custom headers the loop below
   # never runs, so starting from `true` would wrongly take the fast path and
   # overflow the 1024-byte stack buffer with a large body.
   var fit = p + tailReserve <= FastSingleWriteCap
-  for (k, v) in res.headers:
+  for i in 0 ..< res.headers.len:
+    let k = res.headers[i][0]
+    let v = res.headers[i][1]
+    if comp:
+      if i == skipVaryIdx:
+        continue # re-emitted merged below
+      if cmpIgnoreCase(k, "content-length") == 0:
+        continue # identity length is wrong for the compressed body
     # Reserve space for this header plus everything that still follows it,
     # so a successful loop guarantees the tail fits without re-checking.
     if p + k.len + v.len + 4 + tailReserve > FastSingleWriteCap:
@@ -459,29 +615,54 @@ template sendResponse(res: HttpResponse, bodyLen: int, bodyPtr: pointer) =
     copyMem(addr buf[p], v.cstring, v.len); p += v.len
     copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
 
+  if comp:
+    copyMem(addr buf[p], "Content-Encoding: gzip\r\n".cstring, 24); p += 24
+    if varyVal.len > 0:
+      copyMem(addr buf[p], "Vary: ".cstring, 6); p += 6
+      copyMem(addr buf[p], varyVal.cstring, varyVal.len); p += varyVal.len
+      copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
+
   if fit:
     # Fast path: everything coalesced in one stack buffer, one send().
     copyMem(addr buf[p], "\r\n".cstring, 2); p += 2
-    if bodyLen > 0:
-      copyMem(addr buf[p], bodyPtr, bodyLen); p += bodyLen
+    if eBodyLen > 0:
+      copyMem(addr buf[p], eBodyPtr, eBodyLen); p += eBodyLen
     discard res.conn.send(buf.toOpenArray(0, p - 1))
   else:
     type Part = tuple[data: ptr UncheckedArray[byte], len: int]
     const MaxParts = 150
-    let numParts = 1 + res.headers.len * 4 + 1 + (if bodyLen > 0: 1 else: 0)
+    let numParts = 1 + res.headers.len * 4 + 1 + (if eBodyLen > 0: 1 else: 0) +
+      (if comp: 8 else: 0)
 
     template scatterWrite(parts: var openArray[Part], count: var int) =
       # First part is the fixed headers only (custom headers that fit were
       # appended past fixedEnd but are re-emitted below, so stop before them).
       parts[count] = (cast[ptr UncheckedArray[byte]](addr buf[0]), fixedEnd); inc count
-      for (k, v) in res.headers:
+      for i in 0 ..< res.headers.len:
+        let k = res.headers[i][0]
+        let v = res.headers[i][1]
+        if comp:
+          if i == skipVaryIdx:
+            continue # re-emitted merged below
+          if cmpIgnoreCase(k, "content-length") == 0:
+            continue
         parts[count] = (cast[ptr UncheckedArray[byte]](k.cstring), k.len); inc count
         parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
         parts[count] = (cast[ptr UncheckedArray[byte]](v.cstring), v.len); inc count
         parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+      if comp:
+        parts[count] = (cast[ptr UncheckedArray[byte]]("Content-Encoding".cstring), 16); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]]("gzip".cstring), 4); inc count
+        parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
+        if varyVal.len > 0:
+          parts[count] = (cast[ptr UncheckedArray[byte]]("Vary".cstring), 4); inc count
+          parts[count] = (cast[ptr UncheckedArray[byte]](": ".cstring), 2); inc count
+          parts[count] = (cast[ptr UncheckedArray[byte]](varyVal.cstring), varyVal.len); inc count
+          parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
       parts[count] = (cast[ptr UncheckedArray[byte]]("\r\n".cstring), 2); inc count
-      if bodyLen > 0:
-        parts[count] = (cast[ptr UncheckedArray[byte]](bodyPtr), bodyLen); inc count
+      if eBodyLen > 0:
+        parts[count] = (cast[ptr UncheckedArray[byte]](eBodyPtr), eBodyLen); inc count
 
     if numParts <= MaxParts:
       var parts {.noinit.}: array[MaxParts, Part]
@@ -510,6 +691,21 @@ proc send*(res: HttpResponse, body: seq[byte]) =
     sendResponse(res, body.len, unsafeAddr body[0])
   else:
     sendResponse(res, 0, nil)
+
+proc compress*(res: HttpResponse, body: string = "") =
+  ## Compressing send: arms gzip for this response, then sends. Identical to
+  ## `send()` when `server.compressEnabled` is on; forces the attempt for one
+  ## response when off. Falls back to identity whenever any gate fails
+  ## (no Accept-Encoding, small/unknown/incompressible type, HEAD, ...).
+  if res.sent: return
+  res.compressArmed = true
+  res.send(body)
+
+proc compress*(res: HttpResponse, body: seq[byte]) =
+  ## `seq[byte]` variant of `compress`.
+  if res.sent: return
+  res.compressArmed = true
+  res.send(body)
 
 {.pop.}
 proc writeDisposition*(buf: ptr UncheckedArray[byte]; name: string; p: var int) {.inline.} =
@@ -600,6 +796,113 @@ proc sendFile*(res: HttpResponse, path: string;
     let connHeader = if res.closeConn: "close" else: "keep-alive"
 
     res.sent = true
+
+    # Compressed file path: stream read → gzip → chunked, entirely through
+    # thread-local reused buffers (bounded memory at any file size). Range +
+    # compression never mix: a satisfiable Range takes the identity 206 path
+    # below. Falls out of the block to identity whenever any gate fails.
+    block compressFile:
+      let srv = res.server
+      if not srv.compressEnabled:
+        break compressFile
+      if status != Http200 or rangeLen < srv.compressMinLen:
+        break compressFile
+      if req != default(HttpRequest) and req.httpMethod == HttpHead:
+        break compressFile
+      let connCtx = if res.conn.data != nil: cast[ConnHttp](res.conn.data) else: nil
+      if connCtx == nil or not connCtx.acceptsGzip:
+        break compressFile
+      if findRespHeader(res, "content-encoding") >= 0:
+        break compressFile
+      var fileCompressible = false
+      {.cast(gcsafe).}:
+        # Double-checked locking inside; read-only after init.
+        fileCompressible = isCompressibleExt(getFileExt(path))
+      if not fileCompressible:
+        break compressFile
+      let mimeType = if isExtension(getFileExt(path)): getMimeType(getFileExt(path)).get()
+                     else: "application/octet-stream"
+      # Head: chunked + gzip. No Content-Length (identity length would be
+      # wrong), no Accept-Ranges (ranges address the identity body).
+      var hdrBuf = res.bodyBytes
+      var hp = 0
+      hdrAdd(hdrBuf, hp, "HTTP/1.1 200 OK\r\n", 17)
+      hdrDate(hdrBuf, hp)
+      hdrAdd(hdrBuf, hp, "Transfer-Encoding: chunked\r\n", 28)
+      hdrAdd(hdrBuf, hp, "Content-Type: ", 14)
+      hdrAdd(hdrBuf, hp, mimeType)
+      hdrAdd(hdrBuf, hp, "\r\n", 2)
+      hdrAdd(hdrBuf, hp, "Content-Encoding: gzip\r\n", 24)
+      let vv = gzipVaryValue(res)
+      var skipVary = -1
+      if vv.len > 0:
+        hdrAdd(hdrBuf, hp, "Vary: ", 6)
+        hdrAdd(hdrBuf, hp, vv)
+        hdrAdd(hdrBuf, hp, "\r\n", 2)
+        skipVary = findRespHeader(res, "vary")
+      if contentDisposition:
+        let (_, fileName, _) = path.splitFile()
+        hdrEnsure(hdrBuf, hp, 43 + fileName.len + 3)
+        writeDisposition(cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), fileName, hp)
+      hdrAdd(hdrBuf, hp, "Connection: ", 12)
+      hdrAdd(hdrBuf, hp, connHeader)
+      hdrAdd(hdrBuf, hp, "\r\n", 2)
+      for i in 0 ..< res.headers.len:
+        if i == skipVary:
+          continue # re-emitted merged above
+        if cmpIgnoreCase(res.headers[i][0], "content-length") == 0:
+          continue # identity length is wrong for the compressed body
+        hdrAdd(hdrBuf, hp, res.headers[i][0])
+        hdrAdd(hdrBuf, hp, ": ", 2)
+        hdrAdd(hdrBuf, hp, res.headers[i][1])
+        hdrAdd(hdrBuf, hp, "\r\n", 2)
+      hdrAdd(hdrBuf, hp, "\r\n", 2)
+      type CPart = tuple[data: ptr UncheckedArray[byte]; len: int]
+      var cparts {.noinit.}: array[1, CPart]
+      var ccount = 0
+      cparts[ccount] = (cast[ptr UncheckedArray[byte]](addr hdrBuf[0]), hp); inc ccount
+      discard res.conn.sendv(cparts.toOpenArray(0, ccount - 1))
+      # Stream turns: 64 KiB in, compressed bytes out as one chunk each.
+      const FileChunk = 65536
+      ensureCap(fileReadPool, FileChunk)
+      if gzipOut == nil:
+        gzipOut = newOutput(FileChunk + 128)
+      else:
+        reset(gzipOut)
+      openGzipStream(gzipStrm, gzipOut, srv.compressLevel)
+      discard seekFile(fileFd, rangeStart)
+      var remain = rangeLen
+      var ok = true
+      while remain > 0:
+        if res.conn.state != Connected:
+          ok = false
+          break
+        let toRead = if remain > FileChunk: FileChunk else: int(remain)
+        let n = readFile(fileFd,
+          cast[ptr UncheckedArray[byte]](addr fileReadPool.data[0]), toRead)
+        if n <= 0:
+          ok = false
+          break
+        writeGzip(gzipStrm, fileReadPool.data.toOpenArray(0, n - 1))
+        let sp = outputBytes(gzipOut)
+        if sp.len > 0:
+          sendRawChunk(res.conn, sp.p, sp.len)
+          reset(gzipOut)
+        remain -= n
+      if ok:
+        finishGzip(gzipStrm)
+        let fsp = outputBytes(gzipOut)
+        if fsp.len > 0:
+          sendRawChunk(res.conn, fsp.p, fsp.len)
+        discard res.conn.send("0\r\n\r\n")
+      closeFile(fileFd)
+      if res.closeConn:
+        when defined(windows):
+          res.conn.closeAfterSend()
+        else:
+          res.conn.closeAfterDrain()
+      return
+
     var hdrBuf = res.bodyBytes
     var p = 0
 
@@ -922,23 +1225,7 @@ var ssePool {.threadvar.}: PooledBuffer[byte]
   ## Allocated once per thread via `initPool`, then flat: steady-state
   ## multi-line sends copy into it with no heap traffic.
 
-func chunkHexInto(buf: var openArray[byte], n: int): int =
-  ## Write lowercase hex of `n` into `buf`, return the digit count.
-  ## Stack-only, no allocation. `n == 0` writes `"0"`.
-  if n == 0:
-    buf[0] = byte('0')
-    return 1
-  var tmp: array[16, byte]
-  var len = 0
-  var v = n
-  while v > 0:
-    let d = v and 0xF
-    tmp[len] = if d < 10: byte(ord('0') + d) else: byte(ord('a') + d - 10)
-    inc len
-    v = v shr 4
-  for i in 0 ..< len:
-    buf[i] = tmp[len - 1 - i]
-  len
+
 
 func chunkSizeHex(n: int): string =
   ## Lowercase hex without leading zeros for chunk-size lines.
@@ -1319,6 +1606,7 @@ proc acquireHttpResponse(server: HttpServer, conn: Connection): HttpResponse =
     result.server = server
     result.headers.setLen(0)
     result.bodyBytes.setLen(0)
+    result.compressArmed = false
     result.sent = false
     result.statusCode = uint16(Http200)
     result.closeConn = false
@@ -1403,6 +1691,9 @@ proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
     maxConnections: 0,
     maxPipelineDepth: 0,
     readTimeoutMs: 30_000,
+    compressEnabled: false,
+    compressMinLen: 1024,
+    compressLevel: 6,
     wsIdleTimeoutMs: 0,
     timeoutSweepMs: 200,
     sweepTimer: TimerId(0)
@@ -1624,6 +1915,7 @@ proc releaseConnHttp(server: HttpServer, ctx: ConnHttp) {.inline.} =
   ctx.lastActive = 0
   ctx.idleAfter = 0
   ctx.streamingResponse = false
+  ctx.acceptsGzip = false
   ctx.sessionStreamPath = ""
   ctx.streamer = nil
   # NOTE: parser released by the caller (removeSession) before this runs;
@@ -1774,6 +2066,11 @@ proc dispatchRequest(server: HttpServer, conn: Connection,
   let res = acquireHttpResponse(server, conn)
   if req.getConnectionClose():
     res.closeConn = true
+  let ctx = if conn.data != nil: cast[ConnHttp](conn.data) else: nil
+  if ctx != nil:
+    ctx.acceptsGzip = server.compressEnabled and
+      req.httpMethod != HttpHead and
+      parseAcceptsGzip(req.getHeaderValue("accept-encoding"))
   if server.handler != nil:
 
     server.handler(req, res)
