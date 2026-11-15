@@ -2216,6 +2216,70 @@ proc feed*(p: SseParser, data: openArray[byte]): seq[SseEvent] =
         retry: retry))
   p.buf.add(norm[blockStart .. ^1])
 
+func parseAcceptsGzip*(v: openArray[char]): bool =
+  ## True when an `Accept-Encoding` header value allows gzip. Token scan
+  ## with q-values: `gzip` (or `*`) with q > 0 accepts; an explicit
+  ## `gzip;q=0` refuses even when `*` is present. Case-insensitive,
+  ## whitespace-tolerant. Unparsable qvalues are treated as q=1 (lenient).
+  var gzipQ = -1.0
+  var starQ = -1.0
+  var i = 0
+  while i < v.len:
+    while i < v.len and (v[i] == ' ' or v[i] == '\t'):
+      inc i
+    let nameStart = i
+    while i < v.len and v[i] != ',' and v[i] != ';':
+      inc i
+    var nameEnd = i
+    while nameEnd > nameStart and (v[nameEnd - 1] == ' ' or v[nameEnd - 1] == '\t'):
+      dec nameEnd
+    let nameLen = nameEnd - nameStart
+    var q = 1.0
+    if i < v.len and v[i] == ';':
+      inc i
+      while i < v.len and v[i] != ',':
+        while i < v.len and (v[i] == ' ' or v[i] == '\t' or v[i] == ';'):
+          inc i
+        if i + 1 < v.len and (v[i] == 'q' or v[i] == 'Q') and v[i + 1] == '=':
+          i += 2
+          while i < v.len and (v[i] == ' ' or v[i] == '\t'):
+            inc i
+          # Manual qvalue parse (no allocation): digits[.digits], lenient.
+          var intPart = 0
+          var digits = 0
+          while i < v.len and v[i] >= '0' and v[i] <= '9':
+            intPart = intPart * 10 + (v[i].ord - ord('0'))
+            inc i
+            inc digits
+          var frac = 0.0
+          var divi = 1.0
+          if i < v.len and v[i] == '.':
+            inc i
+            while i < v.len and v[i] >= '0' and v[i] <= '9' and divi < 10000.0:
+              frac = frac * 10.0 + float(v[i].ord - ord('0'))
+              divi *= 10.0
+              inc i
+            while i < v.len and v[i] >= '0' and v[i] <= '9':
+              inc i # beyond supported precision: skip
+          if digits > 0:
+            q = float(intPart) + frac / divi
+        else:
+          while i < v.len and v[i] != ',' and v[i] != ';':
+            inc i
+    if i < v.len and v[i] == ',':
+      inc i
+    if nameLen == 4:
+      if (v[nameStart] == 'g' or v[nameStart] == 'G') and
+         (v[nameStart + 1] == 'z' or v[nameStart + 1] == 'Z') and
+         (v[nameStart + 2] == 'i' or v[nameStart + 2] == 'I') and
+         (v[nameStart + 3] == 'p' or v[nameStart + 3] == 'P'):
+        gzipQ = q
+    elif nameLen == 1 and v[nameStart] == '*':
+      starQ = q
+  if gzipQ >= 0.0:
+    return gzipQ > 0.0
+  starQ > 0.0
+
 proc feed*(p: SseParser, data: string): seq[SseEvent] {.inline.} =
   ## String wrapper: views the input, no copy before buffering.
   if data.len == 0:
