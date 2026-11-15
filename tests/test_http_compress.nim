@@ -59,7 +59,7 @@ proc getRaw(port: int, req: string): string =
       discard res.header("Vary", "Cookie")
       res.send(BigText)
     elif p == "/file":
-      res.sendFile("/tmp/pp_compress_test.txt", req)
+      res.sendFile(getTempDir() / "pp_compress_test.txt", req)
   server.listen("127.0.0.1", port)
   var received = ""
   loop.connect("127.0.0.1", port,
@@ -325,10 +325,10 @@ test "scatter_path_gzip_round_trip":
   check gunzip(r.body) == BigText
 
 test "sendfile_gzip_round_trip":
-  writeFile("/tmp/pp_compress_test.txt", BigText)
+  writeFile(getTempDir() / "pp_compress_test.txt", BigText)
   let raw = getRaw(19901, "GET /file HTTP/1.1\r\nHost: x\r\n" &
     "Accept-Encoding: gzip\r\nConnection: close\r\n\r\n")
-  removeFile("/tmp/pp_compress_test.txt")
+  removeFile(getTempDir() / "pp_compress_test.txt")
   let hEnd = raw.find("\r\n\r\n")
   check hEnd > 0
   var headers = initTable[string, string]()
@@ -342,10 +342,10 @@ test "sendfile_gzip_round_trip":
   check gunzip(decodeChunked(raw[hEnd + 4 .. ^1])) == BigText
 
 test "sendfile_range_wins_identity":
-  writeFile("/tmp/pp_compress_test.txt", BigText)
+  writeFile(getTempDir() / "pp_compress_test.txt", BigText)
   let raw = getRaw(19902, "GET /file HTTP/1.1\r\nHost: x\r\n" &
     "Accept-Encoding: gzip\r\nRange: bytes=0-99\r\nConnection: close\r\n\r\n")
-  removeFile("/tmp/pp_compress_test.txt")
+  removeFile(getTempDir() / "pp_compress_test.txt")
   let r = parseResp(raw)
   check r.status == 206
   check "content-encoding" notin r.headers
