@@ -297,6 +297,20 @@ proc setTcpCork*(fd: SocketHandle, enable: bool) =
     discard setsockopt(fd, IPPROTO_TCP, TCP_NOPUSH,
                        addr val, sizeof(val).SockLen)
 
+proc setSendBufferSize*(fd: SocketHandle, bytes: int) =
+  ## Hint the kernel send-buffer size (SO_SNDBUF). The kernel may round it
+  ## (macOS doubles the requested value for bookkeeping) and an explicit
+  ## size can cap autotuning, so prefer modest values (e.g. 256KB–1MB) and
+  ## only for throughput-heavy connections. Silently ignores errors.
+  var val = cint(bytes)
+  discard setsockopt(fd, SOL_SOCKET, SO_SNDBUF, addr val, sizeof(val).SockLen)
+
+proc setRecvBufferSize*(fd: SocketHandle, bytes: int) =
+  ## Hint the kernel receive-buffer size (SO_RCVBUF). Same caveats as
+  ## setSendBufferSize.
+  var val = cint(bytes)
+  discard setsockopt(fd, SOL_SOCKET, SO_RCVBUF, addr val, sizeof(val).SockLen)
+
 proc setIpv6Only*(fd: SocketHandle) =
   ## Set IPV6_V6ONLY so an IPv6 wildcard socket does not also claim IPv4
   ## (required to bind 0.0.0.0 and :: on the same port). No-op on Windows.

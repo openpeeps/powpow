@@ -334,6 +334,18 @@ proc getClientSockAddr*(conn: Connection): Sockaddr_storage {.inline.} =
   ## Return the client's raw socket address (set at accept/connect time).
   conn.clientAddr
 
+proc setSendBufferSize*(conn: Connection, bytes: int) =
+  ## Hint the kernel send-buffer size for this connection (see
+  ## `setSendBufferSize` in net/common). Prefer modest values; an explicit
+  ## size can cap autotuning. No-op when not connected.
+  if conn != nil and conn.state == Connected:
+    setSendBufferSize(conn.fd, bytes)
+
+proc setRecvBufferSize*(conn: Connection, bytes: int) =
+  ## Hint the kernel receive-buffer size for this connection.
+  if conn != nil and conn.state == Connected:
+    setRecvBufferSize(conn.fd, bytes)
+
 # ── Happy Eyeballs (RFC 6555 / RFC 8305) ─────────────────────────────────────
 #
 # Client connects race the resolved address list instead of walking it
