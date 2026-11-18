@@ -168,12 +168,20 @@
   <li><a class="reference" href="#setNonBlocking%2CSocketHandle" title="setNonBlocking(fd: SocketHandle)">setNonBlocking(fd: SocketHandle)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">setRecvBufferSize
+  <li><a class="reference" href="#setRecvBufferSize%2CSocketHandle%2Cint" title="setRecvBufferSize(fd: SocketHandle; bytes: int)">setRecvBufferSize(fd: SocketHandle; bytes: int)</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">setReuseAddr
   <li><a class="reference" href="#setReuseAddr%2CSocketHandle" title="setReuseAddr(fd: SocketHandle)">setReuseAddr(fd: SocketHandle)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">setReusePort
   <li><a class="reference" href="#setReusePort%2CSocketHandle" title="setReusePort(fd: SocketHandle)">setReusePort(fd: SocketHandle)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">setSendBufferSize
+  <li><a class="reference" href="#setSendBufferSize%2CSocketHandle%2Cint" title="setSendBufferSize(fd: SocketHandle; bytes: int)">setSendBufferSize(fd: SocketHandle; bytes: int)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">setTcpCork
@@ -267,7 +275,7 @@
   <dt><pre><a href="#DefaultBufSize"><span class="Identifier">DefaultBufSize</span></a> <span class="Other">=</span> <span class="DecNumber">4096</span></pre></dt>
   <dd>
     
-    Default read buffer size per connection.
+    Default read buffer size per connection (see powpowReadBufSize).
     
   </dd>
 </div>
@@ -541,6 +549,18 @@
 </div>
 
 </div>
+<div id="setRecvBufferSize-procs-all">
+  <div id="setRecvBufferSize,SocketHandle,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#setRecvBufferSize%2CSocketHandle%2Cint"><span class="Identifier">setRecvBufferSize</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Hint the kernel receive-buffer size (SO_RCVBUF). Same caveats as setSendBufferSize.
+    
+  </dd>
+</div>
+
+</div>
 <div id="setReuseAddr-procs-all">
   <div id="setReuseAddr,SocketHandle">
   <dt><pre><span class="Keyword">proc</span> <a href="#setReuseAddr%2CSocketHandle"><span class="Identifier">setReuseAddr</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -560,6 +580,18 @@
     <p>Enable SO_REUSEPORT on a socket (macOS/Linux). No-op on Windows.</p>
 <p>Note: this only permits the shared bind. On Linux and FreeBSD the kernel also load-balances the group, so one listen socket per worker works. On Darwin it does NOT: every connection is delivered to a single member of the group, and there is no SO_REUSEPORT_LB to change that (the option does not exist, so setting it fails with ENOPROTOOPT). Multi-worker servers on Darwin must therefore share one listen socket across workers instead — see <tt class="docutils literal"><span class="pre"><span class="Identifier">proto</span><span class="Operator">/</span><span class="Identifier">multithread</span><span class="Operator">.</span><span class="Identifier">nim</span></span></tt>.</p>
 
+    
+  </dd>
+</div>
+
+</div>
+<div id="setSendBufferSize-procs-all">
+  <div id="setSendBufferSize,SocketHandle,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#setSendBufferSize%2CSocketHandle%2Cint"><span class="Identifier">setSendBufferSize</span></a><span class="Other">(</span><span class="Identifier">fd</span><span class="Other">:</span> <span class="Identifier">SocketHandle</span><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Hint the kernel send-buffer size (SO_SNDBUF). The kernel may round it (macOS doubles the requested value for bookkeeping) and an explicit size can cap autotuning, so prefer modest values (e.g. 256KB–1MB) and only for throughput-heavy connections. Silently ignores errors.
     
   </dd>
 </div>
@@ -702,7 +734,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-06 22:17:51 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:29:49 UTC</small>
       </div>
     </div>
   </div>

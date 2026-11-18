@@ -74,7 +74,10 @@
   onClose*: WsCloseCb
   onError*: WsErrorCb
   onOpen*: WsOpenCb
-  maxFrameSize*: int">WsConnection</a></li>
+  maxFrameSize*: int
+  permessageDeflate*: bool   ## negotiated: compress/decompress data messages">WsConnection</a></li>
+<li><a class="reference" href="#WsDeflateError" title="WsDeflateError = object of CatchableError">WsDeflateError</a></li>
+<li><a class="reference" href="#WsDeflateTooLarge" title="WsDeflateTooLarge = object of WsDeflateError">WsDeflateTooLarge</a></li>
 <li><a class="reference" href="#WsError" title="WsError = object of CatchableError">WsError</a></li>
 <li><a class="reference" href="#WsErrorCb" title="WsErrorCb = proc (ws: WsConnection; err: string) {.closure.}">WsErrorCb</a></li>
 <li><a class="reference" href="#WsFrameKind" title="WsFrameKind = enum
@@ -91,6 +94,10 @@
   idleTimeoutMs*: int ## Close upgraded connections that send no frames within this many ms
                       ## (0 = disabled). Prevents post-upgrade idle connections from holding a
                       ## connection + fd forever.
+  pingIntervalMs*: int ## Send a ping to every upgraded connection on this interval (0 =
+                       ## disabled). Keeps NAT mappings alive and surfaces dead peers.
+  permessageDeflate*: bool ## Accept RFC 7692 permessage-deflate (no-context-takeover only) when
+                           ## the client offers it. Negotiated sessions compress data messages.
   maxHandshakeSessions*: int ## Hard cap on in-flight handshake sessions (0 = unlimited).">WsServer</a></li>
 
     </ul>
@@ -110,7 +117,7 @@
     <summary><a class="reference reference-toplevel" href="#12" id="62">Procs</a></summary>
     <ul class="simple simple-toc-section">
       <ul class="simple nested-toc-section">buildHandshakeResponse
-  <li><a class="reference" href="#buildHandshakeResponse%2Cstring" title="buildHandshakeResponse(acceptKey: string): string">buildHandshakeResponse(acceptKey: string): string</a></li>
+  <li><a class="reference" href="#buildHandshakeResponse%2Cstring%2Cstring" title="buildHandshakeResponse(acceptKey: string; extensions: string = &quot;&quot;): string">buildHandshakeResponse(acceptKey: string; extensions: string = &quot;&quot;): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">close
@@ -126,7 +133,7 @@
 
 </ul>
 <ul class="simple nested-toc-section">connectWs
-  <li><a class="reference" href="#connectWs%2CLoop%2Cstring%2Cint%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CSslContext%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint" title="connectWs(loop: Loop; address: string; port: int; path: string = &quot;/&quot;;
+  <li><a class="reference" href="#connectWs%2CLoop%2Cstring%2Cint%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CSslContext%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint%2Cbool" title="connectWs(loop: Loop; address: string; port: int; path: string = &quot;/&quot;;
           host: string = &quot;&quot;; onOpen: WsOpenCb = nil;
           onMessage: WsMessageCb = nil; onClose: WsCloseCb = nil;
           onError: WsErrorCb = nil; maxFrameSize: int = DefaultMaxFrameSize;
@@ -134,7 +141,7 @@
           tlsCtx: SslContext = nil;
           extraHeaders: openArray[(string, string)] = [];
           protocols: openArray[string] = []; pingIntervalMs: int = 0;
-          idleTimeoutMs: int = 0): WsConnection">connectWs(loop: Loop; address: string; port: int; path: string = &quot;/&quot;;
+          idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection">connectWs(loop: Loop; address: string; port: int; path: string = &quot;/&quot;;
           host: string = &quot;&quot;; onOpen: WsOpenCb = nil;
           onMessage: WsMessageCb = nil; onClose: WsCloseCb = nil;
           onError: WsErrorCb = nil; maxFrameSize: int = DefaultMaxFrameSize;
@@ -142,7 +149,7 @@
           tlsCtx: SslContext = nil;
           extraHeaders: openArray[(string, string)] = [];
           protocols: openArray[string] = []; pingIntervalMs: int = 0;
-          idleTimeoutMs: int = 0): WsConnection</a></li>
+          idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getLoop
@@ -170,8 +177,12 @@
 
 </ul>
 <ul class="simple nested-toc-section">newWsServer
-  <li><a class="reference" href="#newWsServer%2CLoop%2Cint" title="newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer">newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
-<li><a class="reference" href="#newWsServer%2Cint" title="newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer">newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
+  <li><a class="reference" href="#newWsServer%2CLoop%2Cint%2Cint%2Cbool" title="newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize;
+            pingIntervalMs: int = 0; permessageDeflate: bool = false): WsServer">newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize;
+            pingIntervalMs: int = 0; permessageDeflate: bool = false): WsServer</a></li>
+<li><a class="reference" href="#newWsServer%2Cint%2Cint%2Cbool" title="newWsServer(maxFrameSize: int = DefaultMaxFrameSize; pingIntervalMs: int = 0;
+            permessageDeflate: bool = false): WsServer">newWsServer(maxFrameSize: int = DefaultMaxFrameSize; pingIntervalMs: int = 0;
+            permessageDeflate: bool = false): WsServer</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">onClose
@@ -190,12 +201,20 @@
   <li><a class="reference" href="#onOpen%2CWsServer%2CWsOpenCb" title="onOpen(wss: WsServer; cb: WsOpenCb)">onOpen(wss: WsServer; cb: WsOpenCb)</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">parseDeflateOffer
+  <li><a class="reference" href="#parseDeflateOffer%2Cstring" title="parseDeflateOffer(extHeader: string): bool">parseDeflateOffer(extHeader: string): bool</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">parseWsFrames
   <li><a class="reference" href="#parseWsFrames%2CWsConnection%2CopenArray%5Bbyte%5D" title="parseWsFrames(ws: WsConnection; data: openArray[byte])">parseWsFrames(ws: WsConnection; data: openArray[byte])</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">parseWsUrl
   <li><a class="reference" href="#parseWsUrl%2Cstring" title="parseWsUrl(url: string): tuple[host: string, port: int, path: string, tls: bool]">parseWsUrl(url: string): tuple[host: string, port: int, path: string, tls: bool]</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">pendingBytes
+  <li><a class="reference" href="#pendingBytes%2CWsConnection" title="pendingBytes(ws: WsConnection): int">pendingBytes(ws: WsConnection): int</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">reset
@@ -207,15 +226,17 @@
 
 </ul>
 <ul class="simple nested-toc-section">sendHandshake
-  <li><a class="reference" href="#sendHandshake%2CConnection%2Cstring%2Cstring" title="sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;)">sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;)</a></li>
+  <li><a class="reference" href="#sendHandshake%2CConnection%2Cstring%2Cstring%2Cstring" title="sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;;
+              extensions: string = &quot;&quot;)">sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;;
+              extensions: string = &quot;&quot;)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">sendHandshakeRequest
-  <li><a class="reference" href="#sendHandshakeRequest%2CWsConnection%2Cstring%2Cstring%2CopenArray%5B%5D%2CopenArray%5Bstring%5D" title="sendHandshakeRequest(ws: WsConnection; path, host: string;
+  <li><a class="reference" href="#sendHandshakeRequest%2CWsConnection%2Cstring%2Cstring%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cbool" title="sendHandshakeRequest(ws: WsConnection; path, host: string;
                      extraHeaders: openArray[(string, string)] = [];
-                     protocols: openArray[string] = [])">sendHandshakeRequest(ws: WsConnection; path, host: string;
+                     protocols: openArray[string] = []; deflate: bool = false)">sendHandshakeRequest(ws: WsConnection; path, host: string;
                      extraHeaders: openArray[(string, string)] = [];
-                     protocols: openArray[string] = [])</a></li>
+                     protocols: openArray[string] = []; deflate: bool = false)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">sendMessage
@@ -244,43 +265,55 @@
 
 </ul>
 <ul class="simple nested-toc-section">upgradeToWs
-  <li><a class="reference" href="#upgradeToWs%2CConnection%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint" title="upgradeToWs(conn: Connection; path: string = &quot;/&quot;; host: string = &quot;&quot;;
+  <li><a class="reference" href="#upgradeToWs%2CConnection%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint%2Cbool" title="upgradeToWs(conn: Connection; path: string = &quot;/&quot;; host: string = &quot;&quot;;
             onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
             onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
             maxFrameSize: int = DefaultMaxFrameSize;
             handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs;
             extraHeaders: openArray[(string, string)] = [];
             protocols: openArray[string] = []; pingIntervalMs: int = 0;
-            idleTimeoutMs: int = 0): WsConnection">upgradeToWs(conn: Connection; path: string = &quot;/&quot;; host: string = &quot;&quot;;
+            idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection">upgradeToWs(conn: Connection; path: string = &quot;/&quot;; host: string = &quot;&quot;;
             onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
             onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
             maxFrameSize: int = DefaultMaxFrameSize;
             handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs;
             extraHeaders: openArray[(string, string)] = [];
             protocols: openArray[string] = []; pingIntervalMs: int = 0;
-            idleTimeoutMs: int = 0): WsConnection</a></li>
+            idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">websocketUpgrade
-  <li><a class="reference" href="#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2CopenArray%5Bstring%5D" title="websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
+  <li><a class="reference" href="#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2CopenArray%5Bstring%5D%2Cint%2Cbool" title="websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
                  onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
                  maxFrameSize: int = DefaultMaxFrameSize;
-                 protocols: openArray[string] = []): WsConnection">websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
+                 protocols: openArray[string] = []; pingIntervalMs: int = 0;
+                 permessageDeflate: bool = false): WsConnection">websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
                  onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
                  maxFrameSize: int = DefaultMaxFrameSize;
-                 protocols: openArray[string] = []): WsConnection</a></li>
+                 protocols: openArray[string] = []; pingIntervalMs: int = 0;
+                 permessageDeflate: bool = false): WsConnection</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">writeFrame
-  <li><a class="reference" href="#writeFrame%2CConnection%2Cint%2CopenArray%5Bbyte%5D" title="writeFrame(conn: Connection; opcode: int; payload: openArray[byte])">writeFrame(conn: Connection; opcode: int; payload: openArray[byte])</a></li>
+  <li><a class="reference" href="#writeFrame%2CConnection%2Cint%2CopenArray%5Bbyte%5D" title="writeFrame(conn: Connection; opcode: int; payload: openArray[byte]; rsv1 = false)">writeFrame(conn: Connection; opcode: int; payload: openArray[byte]; rsv1 = false)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">writeFrameMasked
   <li><a class="reference" href="#writeFrameMasked%2CConnection%2Cint%2CopenArray%5Bbyte%5D%2Carray%5B%2Cuint8%5D" title="writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];
-                 mask: array[4, uint8])">writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];
-                 mask: array[4, uint8])</a></li>
+                 mask: array[4, uint8]; rsv1 = false)">writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];
+                 mask: array[4, uint8]; rsv1 = false)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">wsDeflate
+  <li><a class="reference" href="#wsDeflate%2CopenArray%5Bbyte%5D" title="wsDeflate(data: openArray[byte]): string">wsDeflate(data: openArray[byte]): string</a></li>
+<li><a class="reference" href="#wsDeflate%2Cstring" title="wsDeflate(data: string): string">wsDeflate(data: string): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">wsInflate
+  <li><a class="reference" href="#wsInflate%2CopenArray%5Bbyte%5D%2Cint" title="wsInflate(data: openArray[byte]; maxSize: int): string">wsInflate(data: openArray[byte]; maxSize: int): string</a></li>
+<li><a class="reference" href="#wsInflate%2Cstring%2Cint" title="wsInflate(data: string; maxSize: int): string">wsInflate(data: string; maxSize: int): string</a></li>
 
 </ul>
 
@@ -336,10 +369,27 @@
   <span class="Identifier">onClose</span><span class="Operator">*</span><span class="Other">:</span> <a href="#WsCloseCb"><span class="Identifier">WsCloseCb</span></a>
   <span class="Identifier">onError</span><span class="Operator">*</span><span class="Other">:</span> <a href="#WsErrorCb"><span class="Identifier">WsErrorCb</span></a>
   <span class="Identifier">onOpen</span><span class="Operator">*</span><span class="Other">:</span> <a href="#WsOpenCb"><span class="Identifier">WsOpenCb</span></a>
-  <span class="Identifier">maxFrameSize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span></pre></dt>
+  <span class="Identifier">maxFrameSize</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
+  <span class="Identifier">permessageDeflate</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>   <span class="Comment">## negotiated: compress/decompress data messages</span></pre></dt>
   <dd>
     
     A WebSocket connection. Wraps a TCP connection with frame parsing, fragmentation reassembly, and control frame handling.
+    
+  </dd>
+</div>
+<div id="WsDeflateError">
+  <dt><pre><a href="#WsDeflateError"><span class="Identifier">WsDeflateError</span></a> <span class="Other">=</span> <span class="Keyword">object</span> <span class="Keyword">of</span> <span class="Identifier">CatchableError</span></pre></dt>
+  <dd>
+    
+    Compressed payload corrupt (connection fails with 1002).
+    
+  </dd>
+</div>
+<div id="WsDeflateTooLarge">
+  <dt><pre><a href="#WsDeflateTooLarge"><span class="Identifier">WsDeflateTooLarge</span></a> <span class="Other">=</span> <span class="Keyword">object</span> <span class="Keyword">of</span> <a href="#WsDeflateError"><span class="Identifier">WsDeflateError</span></a></pre></dt>
+  <dd>
+    
+    Decompressed payload over the size cap (connection fails with 1009).
     
   </dd>
 </div>
@@ -395,6 +445,10 @@
   <span class="Identifier">idleTimeoutMs</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Comment">## Close upgraded connections that send no frames within this many ms</span>
                       <span class="Comment">## (0 = disabled). Prevents post-upgrade idle connections from holding a</span>
                       <span class="Comment">## connection + fd forever.</span>
+  <span class="Identifier">pingIntervalMs</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Comment">## Send a ping to every upgraded connection on this interval (0 =</span>
+                       <span class="Comment">## disabled). Keeps NAT mappings alive and surfaces dead peers.</span>
+  <span class="Identifier">permessageDeflate</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Comment">## Accept RFC 7692 permessage-deflate (no-context-takeover only) when</span>
+                           <span class="Comment">## the client offers it. Negotiated sessions compress data messages.</span>
   <span class="Identifier">maxHandshakeSessions</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Comment">## Hard cap on in-flight handshake sessions (0 = unlimited).</span></pre></dt>
   <dd>
     
@@ -423,9 +477,9 @@
   <h1><a class="toc-backref" href="#12">Procs</a></h1>
   <dl class="item">
     <div id="buildHandshakeResponse-procs-all">
-  <div id="buildHandshakeResponse,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#buildHandshakeResponse%2Cstring"><span class="Identifier">buildHandshakeResponse</span></a><span class="Other">(</span><span class="Identifier">acceptKey</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="buildHandshakeResponse,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#buildHandshakeResponse%2Cstring%2Cstring"><span class="Identifier">buildHandshakeResponse</span></a><span class="Other">(</span><span class="Identifier">acceptKey</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">extensions</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Build the HTTP 101 Switching Protocols response for a WebSocket upgrade.
@@ -471,8 +525,8 @@
 
 </div>
 <div id="connectWs-procs-all">
-  <div id="connectWs,Loop,string,int,string,string,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,int,SslContext,openArray[],openArray[string],int,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#connectWs%2CLoop%2Cstring%2Cint%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CSslContext%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint"><span class="Identifier">connectWs</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;/&quot;</span><span class="Other">;</span>
+  <div id="connectWs,Loop,string,int,string,string,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,int,SslContext,openArray[],openArray[string],int,int,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#connectWs%2CLoop%2Cstring%2Cint%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CSslContext%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint%2Cbool"><span class="Identifier">connectWs</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">address</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">port</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;/&quot;</span><span class="Other">;</span>
                <span class="Identifier">host</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">;</span> <span class="Identifier">onOpen</span><span class="Other">:</span> <a href="#WsOpenCb"><span class="Identifier">WsOpenCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                <span class="Identifier">onMessage</span><span class="Other">:</span> <a href="#WsMessageCb"><span class="Identifier">WsMessageCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onClose</span><span class="Other">:</span> <a href="#WsCloseCb"><span class="Identifier">WsCloseCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                <span class="Identifier">onError</span><span class="Other">:</span> <a href="#WsErrorCb"><span class="Identifier">WsErrorCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
@@ -481,7 +535,7 @@
                <span class="Identifier">tlsCtx</span><span class="Other">:</span> <a href="../net/tls.html#SslContext"><span class="Identifier">SslContext</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                <span class="Identifier">extraHeaders</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Other">(</span><span class="Identifier">string</span><span class="Other">,</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span>
                <span class="Identifier">protocols</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">pingIntervalMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">;</span>
-               <span class="Identifier">idleTimeoutMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.
+               <span class="Identifier">idleTimeoutMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">;</span> <span class="Identifier">permessageDeflate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">NetError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -566,17 +620,19 @@
 
 </div>
 <div id="newWsServer-procs-all">
-  <div id="newWsServer,Loop,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#newWsServer%2CLoop%2Cint"><span class="Identifier">newWsServer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">maxFrameSize</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultMaxFrameSize</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a> {.
+  <div id="newWsServer,Loop,int,int,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newWsServer%2CLoop%2Cint%2Cint%2Cbool"><span class="Identifier">newWsServer</span></a><span class="Other">(</span><span class="Identifier">loop</span><span class="Other">:</span> <a href="../loop.html#Loop"><span class="Identifier">Loop</span></a><span class="Other">;</span> <span class="Identifier">maxFrameSize</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultMaxFrameSize</span><span class="Other">;</span>
+                 <span class="Identifier">pingIntervalMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">;</span> <span class="Identifier">permessageDeflate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Create a standalone WebSocket server. Register callbacks then call listen().
+    Create a standalone WebSocket server. Register callbacks then call listen(). <tt class="docutils literal"><span class="pre"><span class="Identifier">pingIntervalMs</span></span></tt> sends a keepalive ping to every upgraded connection on that interval (0 = disabled). <tt class="docutils literal"><span class="pre"><span class="Identifier">permessageDeflate</span></span></tt> accepts RFC 7692 permessage-deflate (no-context-takeover only) when the client offers it.
     
   </dd>
 </div>
-<div id="newWsServer,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#newWsServer%2Cint"><span class="Identifier">newWsServer</span></a><span class="Other">(</span><span class="Identifier">maxFrameSize</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultMaxFrameSize</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a> {.
+<div id="newWsServer,int,int,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newWsServer%2Cint%2Cint%2Cbool"><span class="Identifier">newWsServer</span></a><span class="Other">(</span><span class="Identifier">maxFrameSize</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultMaxFrameSize</span><span class="Other">;</span>
+                 <span class="Identifier">pingIntervalMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">;</span> <span class="Identifier">permessageDeflate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsServer"><span class="Identifier">WsServer</span></a> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">CatchableError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
@@ -632,6 +688,18 @@
 </div>
 
 </div>
+<div id="parseDeflateOffer-procs-all">
+  <div id="parseDeflateOffer,string">
+  <dt><pre><span class="Keyword">func</span> <a href="#parseDeflateOffer%2Cstring"><span class="Identifier">parseDeflateOffer</span></a><span class="Other">(</span><span class="Identifier">extHeader</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when <tt class="docutils literal"><span class="pre"><span class="Identifier">extHeader</span></span></tt> (Sec-WebSocket-Extensions value) offers permessage-deflate with <em>both</em> client_no_context_takeover and server_no_context_takeover. Anything else using the extension name — window-bits params, context takeover — is refused (returns false): this endpoint only does stateless one-shots.
+    
+  </dd>
+</div>
+
+</div>
 <div id="parseWsFrames-procs-all">
   <div id="parseWsFrames,WsConnection,openArray[byte]">
   <dt><pre><span class="Keyword">proc</span> <a href="#parseWsFrames%2CWsConnection%2CopenArray%5Bbyte%5D"><span class="Identifier">parseWsFrames</span></a><span class="Other">(</span><span class="Identifier">ws</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.
@@ -658,6 +726,18 @@
 </div>
 
 </div>
+<div id="pendingBytes-procs-all">
+  <div id="pendingBytes,WsConnection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#pendingBytes%2CWsConnection"><span class="Identifier">pendingBytes</span></a><span class="Other">(</span><span class="Identifier">ws</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Bytes queued in the connection's userspace write buffers but not yet written to the socket — a backpressure signal (0 = fully drained).
+    
+  </dd>
+</div>
+
+</div>
 <div id="reset-procs-all">
   <div id="reset,WsFrameParser">
   <dt><pre><span class="Keyword">proc</span> <a href="#reset%2CWsFrameParser"><span class="Identifier">reset</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <span class="Identifier">WsFrameParser</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -675,30 +755,31 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    
+    Sends a binary message, deflated with RSV1 when negotiated.
     
   </dd>
 </div>
 
 </div>
 <div id="sendHandshake-procs-all">
-  <div id="sendHandshake,Connection,string,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#sendHandshake%2CConnection%2Cstring%2Cstring"><span class="Identifier">sendHandshake</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">clientKey</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">protocol</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.
-    <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <div id="sendHandshake,Connection,string,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sendHandshake%2CConnection%2Cstring%2Cstring%2Cstring"><span class="Identifier">sendHandshake</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">clientKey</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">protocol</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">;</span>
+                   <span class="Identifier">extensions</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Send the 101 Switching Protocols response. <tt class="docutils literal"><span class="pre"><span class="Identifier">protocol</span></span></tt>, when non-empty, is echoed back as Sec-WebSocket-Protocol.
+    Send the 101 Switching Protocols response. <tt class="docutils literal"><span class="pre"><span class="Identifier">protocol</span></span></tt>, when non-empty, is echoed back as Sec-WebSocket-Protocol; <tt class="docutils literal"><span class="pre"><span class="Identifier">extensions</span></span></tt>, when non-empty, as Sec-WebSocket-Extensions (e.g. the accepted permessage-deflate terms).
     
   </dd>
 </div>
 
 </div>
 <div id="sendHandshakeRequest-procs-all">
-  <div id="sendHandshakeRequest,WsConnection,string,string,openArray[],openArray[string]">
-  <dt><pre><span class="Keyword">proc</span> <a href="#sendHandshakeRequest%2CWsConnection%2Cstring%2Cstring%2CopenArray%5B%5D%2CopenArray%5Bstring%5D"><span class="Identifier">sendHandshakeRequest</span></a><span class="Other">(</span><span class="Identifier">ws</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">,</span> <span class="Identifier">host</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
+  <div id="sendHandshakeRequest,WsConnection,string,string,openArray[],openArray[string],bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sendHandshakeRequest%2CWsConnection%2Cstring%2Cstring%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cbool"><span class="Identifier">sendHandshakeRequest</span></a><span class="Other">(</span><span class="Identifier">ws</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">,</span> <span class="Identifier">host</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
                           <span class="Identifier">extraHeaders</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Other">(</span><span class="Identifier">string</span><span class="Other">,</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span>
-                          <span class="Identifier">protocols</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">)</span> {.
+                          <span class="Identifier">protocols</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span>
+                          <span class="Identifier">deflate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -759,7 +840,7 @@
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    
+    Sends a text message, deflated with RSV1 when negotiated.
     
   </dd>
 </div>
@@ -789,21 +870,21 @@
 
 </div>
 <div id="upgradeToWs-procs-all">
-  <div id="upgradeToWs,Connection,string,string,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,int,openArray[],openArray[string],int,int">
-  <dt><pre><span class="Keyword">proc</span> <a href="#upgradeToWs%2CConnection%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint"><span class="Identifier">upgradeToWs</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;/&quot;</span><span class="Other">;</span> <span class="Identifier">host</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">;</span>
+  <div id="upgradeToWs,Connection,string,string,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,int,openArray[],openArray[string],int,int,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#upgradeToWs%2CConnection%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint%2Cbool"><span class="Identifier">upgradeToWs</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;/&quot;</span><span class="Other">;</span> <span class="Identifier">host</span><span class="Other">:</span> <span class="Identifier">string</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">;</span>
                  <span class="Identifier">onOpen</span><span class="Other">:</span> <a href="#WsOpenCb"><span class="Identifier">WsOpenCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onMessage</span><span class="Other">:</span> <a href="#WsMessageCb"><span class="Identifier">WsMessageCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                  <span class="Identifier">onClose</span><span class="Other">:</span> <a href="#WsCloseCb"><span class="Identifier">WsCloseCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onError</span><span class="Other">:</span> <a href="#WsErrorCb"><span class="Identifier">WsErrorCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                  <span class="Identifier">maxFrameSize</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultMaxFrameSize</span><span class="Other">;</span>
                  <span class="Identifier">handshakeTimeoutMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultHandshakeTimeoutMs</span><span class="Other">;</span>
                  <span class="Identifier">extraHeaders</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Other">(</span><span class="Identifier">string</span><span class="Other">,</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span>
                  <span class="Identifier">protocols</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">pingIntervalMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">;</span>
-                 <span class="Identifier">idleTimeoutMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.
+                 <span class="Identifier">idleTimeoutMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">;</span> <span class="Identifier">permessageDeflate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     <p>Upgrade an already-connected TCP <tt class="docutils literal"><span class="pre"><span class="Identifier">conn</span></span></tt> to a WebSocket client. Sends the RFC 6455 handshake and takes over the fd for frame handling. <tt class="docutils literal"><span class="pre"><span class="Identifier">onOpen</span></span></tt> fires once the server accepts the upgrade; <tt class="docutils literal"><span class="pre"><span class="Identifier">onError</span></span></tt> fires (and the connection is closed) if the server rejects it or the handshake stalls. Returns the WsConnection so it can be stored for later sends.</p>
-<p><tt class="docutils literal"><span class="pre"><span class="Identifier">extraHeaders</span></span></tt> are sent verbatim in the upgrade request; <tt class="docutils literal"><span class="pre"><span class="Identifier">protocols</span></span></tt> are offered as Sec-WebSocket-Protocol (the server's pick is validated and readable via <tt class="docutils literal"><span class="pre"><span class="Identifier">getProtocol</span></span></tt>). <tt class="docutils literal"><span class="pre"><span class="Identifier">pingIntervalMs</span></span></tt> enables client keepalive pings; <tt class="docutils literal"><span class="pre"><span class="Identifier">idleTimeoutMs</span></span></tt> closes sessions that receive no frames for that long. The connection must NOT already be TLS-wrapped by this proc — pass a wrapped conn only if your transport set it up beforehand.</p>
+<p><tt class="docutils literal"><span class="pre"><span class="Identifier">extraHeaders</span></span></tt> are sent verbatim in the upgrade request; <tt class="docutils literal"><span class="pre"><span class="Identifier">protocols</span></span></tt> are offered as Sec-WebSocket-Protocol (the server's pick is validated and readable via <tt class="docutils literal"><span class="pre"><span class="Identifier">getProtocol</span></span></tt>). <tt class="docutils literal"><span class="pre"><span class="Identifier">pingIntervalMs</span></span></tt> enables client keepalive pings; <tt class="docutils literal"><span class="pre"><span class="Identifier">idleTimeoutMs</span></span></tt> closes sessions that receive no frames for that long. <tt class="docutils literal"><span class="pre"><span class="Identifier">permessageDeflate</span></span></tt> offers RFC 7692 compression (no-context-takeover only). The connection must NOT already be TLS-wrapped by this proc — pass a wrapped conn only if your transport set it up beforehand.</p>
 
     
   </dd>
@@ -811,14 +892,16 @@
 
 </div>
 <div id="websocketUpgrade-procs-all">
-  <div id="websocketUpgrade,HttpResponse,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,openArray[string]">
-  <dt><pre><span class="Keyword">proc</span> <a href="#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2CopenArray%5Bstring%5D"><span class="Identifier">websocketUpgrade</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span>
+  <div id="websocketUpgrade,HttpResponse,HttpRequest,HttpServer,WsOpenCb,WsMessageCb,WsCloseCb,WsErrorCb,int,openArray[string],int,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2CopenArray%5Bstring%5D%2Cint%2Cbool"><span class="Identifier">websocketUpgrade</span></a><span class="Other">(</span><span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span>
                       <span class="Identifier">server</span><span class="Other">:</span> <a href="httpserver.html#HttpServer"><span class="Identifier">HttpServer</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onOpen</span><span class="Other">:</span> <a href="#WsOpenCb"><span class="Identifier">WsOpenCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                       <span class="Identifier">onMessage</span><span class="Other">:</span> <a href="#WsMessageCb"><span class="Identifier">WsMessageCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span> <span class="Identifier">onClose</span><span class="Other">:</span> <a href="#WsCloseCb"><span class="Identifier">WsCloseCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                       <span class="Identifier">onError</span><span class="Other">:</span> <a href="#WsErrorCb"><span class="Identifier">WsErrorCb</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
                       <span class="Identifier">maxFrameSize</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="Identifier">DefaultMaxFrameSize</span><span class="Other">;</span>
-                      <span class="Identifier">protocols</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
-    </span><span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+                      <span class="Identifier">protocols</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span>
+                      <span class="Identifier">pingIntervalMs</span><span class="Other">:</span> <span class="Identifier">int</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">;</span> <span class="Identifier">permessageDeflate</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <a href="#WsConnection"><span class="Identifier">WsConnection</span></a> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> </span><span class="Identifier">discardable</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OpenParserJsonError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">,</span>
+                                  <span class="Identifier">FlateError</span><span class="Other">,</span> <span class="Identifier">IoError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -839,11 +922,12 @@
 </div>
 <div id="writeFrame-procs-all">
   <div id="writeFrame,Connection,int,openArray[byte]">
-  <dt><pre><span class="Keyword">proc</span> <a href="#writeFrame%2CConnection%2Cint%2CopenArray%5Bbyte%5D"><span class="Identifier">writeFrame</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">opcode</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">payload</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#writeFrame%2CConnection%2Cint%2CopenArray%5Bbyte%5D"><span class="Identifier">writeFrame</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">opcode</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">payload</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span>
+                <span class="Identifier">rsv1</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+                                <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Write a single WebSocket frame to the connection. Server frames are never masked (RFC 6455 §5.1).
+    Write a single WebSocket frame to the connection. <tt class="docutils literal"><span class="pre"><span class="Identifier">rsv1</span></span></tt> sets the RSV1 bit (RFC 7692: first frame of a compressed message). Server frames are never masked (RFC 6455 §5.1).
     
   </dd>
 </div>
@@ -852,11 +936,54 @@
 <div id="writeFrameMasked-procs-all">
   <div id="writeFrameMasked,Connection,int,openArray[byte],array[,uint8]">
   <dt><pre><span class="Keyword">proc</span> <a href="#writeFrameMasked%2CConnection%2Cint%2CopenArray%5Bbyte%5D%2Carray%5B%2Cuint8%5D"><span class="Identifier">writeFrameMasked</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="../net/tcp.html#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">opcode</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">;</span> <span class="Identifier">payload</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span>
-                      <span class="Identifier">mask</span><span class="Other">:</span> <span class="Identifier">array</span><span class="Other">[</span><span class="DecNumber">4</span><span class="Other">,</span> <span class="Identifier">uint8</span><span class="Other">]</span><span class="Other">)</span> {.
+                      <span class="Identifier">mask</span><span class="Other">:</span> <span class="Identifier">array</span><span class="Other">[</span><span class="DecNumber">4</span><span class="Other">,</span> <span class="Identifier">uint8</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">rsv1</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Write a masked WebSocket frame (for client-to-server; servers don't mask).
+    Write a masked WebSocket frame (for client-to-server; servers don't mask). <tt class="docutils literal"><span class="pre"><span class="Identifier">rsv1</span></span></tt> sets the RSV1 bit (first frame of a compressed message).
+    
+  </dd>
+</div>
+
+</div>
+<div id="wsDeflate-procs-all">
+  <div id="wsDeflate,openArray[byte]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#wsDeflate%2CopenArray%5Bbyte%5D"><span class="Identifier">wsDeflate</span></a><span class="Other">(</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">FlateError</span><span class="Other">,</span> <span class="Identifier">IoError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Compress one message with the stateful fixed-Huffman stream: a single non-final content block (no 32 KB split — one block can reference the whole window) closed by <tt class="docutils literal"><span class="pre"><span class="Identifier">finishDeflate</span></span></tt>'s empty final block. Byte 0 therefore always carries BFINAL=0, which is exactly the non-final prefix the receiver's <tt class="docutils literal"><span class="pre"><span class="Identifier">WsDeflateTail</span></span></tt> suffix completes — no bit flipping, no tail math, any message size. Thread-local reuse: no steady-state allocations.
+    
+  </dd>
+</div>
+<div id="wsDeflate,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#wsDeflate%2Cstring"><span class="Identifier">wsDeflate</span></a><span class="Other">(</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">FlateError</span><span class="Other">,</span> <span class="Identifier">IoError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                       <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    String convenience overload.
+    
+  </dd>
+</div>
+
+</div>
+<div id="wsInflate-procs-all">
+  <div id="wsInflate,openArray[byte],int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#wsInflate%2CopenArray%5Bbyte%5D%2Cint"><span class="Identifier">wsInflate</span></a><span class="Other">(</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">maxSize</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WsDeflateError</span><span class="Other">,</span> <span class="Identifier">IoError</span><span class="Other">,</span> <span class="Identifier">WsDeflateError</span><span class="Other">,</span> <span class="Identifier">WsDeflateTooLarge</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Decompress one permessage-deflate payload, capped at <tt class="docutils literal"><span class="pre"><span class="Identifier">maxSize</span></span></tt> bytes. Raises WsDeflateError when corrupt or over the cap (caller fails the connection — 1002 for corrupt, 1009 for oversize).
+    
+  </dd>
+</div>
+<div id="wsInflate,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#wsInflate%2Cstring%2Cint"><span class="Identifier">wsInflate</span></a><span class="Other">(</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">maxSize</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WsDeflateError</span><span class="Other">,</span> <span class="Identifier">IoError</span><span class="Other">,</span> <span class="Identifier">WsDeflateTooLarge</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    String convenience overload.
     
   </dd>
 </div>
@@ -872,7 +999,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-06 22:17:52 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:29:51 UTC</small>
       </div>
     </div>
   </div>

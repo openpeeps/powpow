@@ -163,9 +163,9 @@
 </div>
 <div id="check-procs-all">
   <div id="check,RateLimiter,HttpRequest,HttpResponse">
-  <dt><pre><span class="Keyword">proc</span> <a href="#check%2CRateLimiter%2CHttpRequest%2CHttpResponse"><span class="Identifier">check</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span>
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#check%2CRateLimiter%2CHttpRequest%2CHttpResponse"><span class="Identifier">check</span></a><span class="Other">(</span><span class="Identifier">rl</span><span class="Other">:</span> <a href="#RateLimiter"><span class="Identifier">RateLimiter</span></a><span class="Other">;</span> <span class="Identifier">req</span><span class="Other">:</span> <a href="http.html#HttpRequest"><span class="Identifier">HttpRequest</span></a><span class="Other">;</span> <span class="Identifier">res</span><span class="Other">:</span> <a href="httpserver.html#HttpResponse"><span class="Identifier">HttpResponse</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">OpenParserJsonError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">FlateError</span><span class="Other">,</span> <span class="Identifier">IoError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span>
+    <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -221,7 +221,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-06 22:17:52 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:29:51 UTC</small>
       </div>
     </div>
   </div>

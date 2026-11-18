@@ -33,6 +33,10 @@
 <li><a class="reference external"
           data-doc-search-tag="types: proc `==`(a, b: TimerId): bool" href="powpow/types.html#%3D%3D%2CTimerId%2CTimerId">types: proc `==`(a, b: TimerId): bool</a></li>
           </ul></dd>
+<dt><a name="AccessLogEntry" href="#AccessLogEntry"><span>AccessLogEntry:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: object AccessLogEntry" href="powpow/proto/httpserver.html#AccessLogEntry">httpserver: object AccessLogEntry</a></li>
+          </ul></dd>
 <dt><a name="acquireBuf" href="#acquireBuf"><span>acquireBuf:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="loop: proc acquireBuf(loop: Loop): ptr UncheckedArray[byte]" href="powpow/loop.html#acquireBuf%2CLoop">loop: proc acquireBuf(loop: Loop): ptr UncheckedArray[byte]</a></li>
@@ -133,7 +137,7 @@
           </ul></dd>
 <dt><a name="buildHandshakeResponse" href="#buildHandshakeResponse"><span>buildHandshakeResponse:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="ws: proc buildHandshakeResponse(acceptKey: string): string" href="powpow/proto/ws.html#buildHandshakeResponse%2Cstring">ws: proc buildHandshakeResponse(acceptKey: string): string</a></li>
+          data-doc-search-tag="ws: proc buildHandshakeResponse(acceptKey: string; extensions: string = &quot;&quot;): string" href="powpow/proto/ws.html#buildHandshakeResponse%2Cstring%2Cstring">ws: proc buildHandshakeResponse(acceptKey: string; extensions: string = &quot;&quot;): string</a></li>
           </ul></dd>
 <dt><a name="Callback" href="#Callback"><span>Callback:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -184,6 +188,8 @@
           data-doc-search-tag="httpserver: proc close(res: HttpResponse): HttpResponse" href="powpow/proto/httpserver.html#close%2CHttpResponse">httpserver: proc close(res: HttpResponse): HttpResponse</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc close(server: HttpServer)" href="powpow/proto/httpserver.html#close%2CHttpServer">httpserver: proc close(server: HttpServer)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc close(s: SseStream; trailers: openArray[(string, string)] = [])" href="powpow/proto/httpserver.html#close%2CSseStream%2CopenArray%5B%5D">httpserver: proc close(s: SseStream; trailers: openArray[(string, string)] = [])</a></li>
           <li><a class="reference external"
           data-doc-search-tag="multithread: proc close(srv: MultiThreadH2Server)" href="powpow/proto/multithread.html#close%2CMultiThreadH2Server">multithread: proc close(srv: MultiThreadH2Server)</a></li>
           <li><a class="reference external"
@@ -236,6 +242,12 @@
 <dt><a name="Closing" href="#Closing"><span>Closing:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: ConnState.Closing" href="powpow/net/tcp.html#Closing">tcp: ConnState.Closing</a></li>
+          </ul></dd>
+<dt><a name="compress" href="#compress"><span>compress:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc compress(res: HttpResponse; body: seq[byte])" href="powpow/proto/httpserver.html#compress%2CHttpResponse%2Cseq%5Bbyte%5D">httpserver: proc compress(res: HttpResponse; body: seq[byte])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc compress(res: HttpResponse; body: string = &quot;&quot;)" href="powpow/proto/httpserver.html#compress%2CHttpResponse%2Cstring">httpserver: proc compress(res: HttpResponse; body: string = &quot;&quot;)</a></li>
           </ul></dd>
 <dt><a name="computeAcceptKey" href="#computeAcceptKey"><span>computeAcceptKey:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -343,7 +355,7 @@
           tlsCtx: SslContext = nil;
           extraHeaders: openArray[(string, string)] = [];
           protocols: openArray[string] = []; pingIntervalMs: int = 0;
-          idleTimeoutMs: int = 0): WsConnection" href="powpow/proto/ws.html#connectWs%2CLoop%2Cstring%2Cint%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CSslContext%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint">ws: proc connectWs(loop: Loop; address: string; port: int; path: string = &quot;/&quot;;
+          idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection" href="powpow/proto/ws.html#connectWs%2CLoop%2Cstring%2Cint%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CSslContext%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint%2Cbool">ws: proc connectWs(loop: Loop; address: string; port: int; path: string = &quot;/&quot;;
           host: string = &quot;&quot;; onOpen: WsOpenCb = nil;
           onMessage: WsMessageCb = nil; onClose: WsCloseCb = nil;
           onError: WsErrorCb = nil; maxFrameSize: int = DefaultMaxFrameSize;
@@ -351,7 +363,7 @@
           tlsCtx: SslContext = nil;
           extraHeaders: openArray[(string, string)] = [];
           protocols: openArray[string] = []; pingIntervalMs: int = 0;
-          idleTimeoutMs: int = 0): WsConnection</a></li>
+          idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection</a></li>
           </ul></dd>
 <dt><a name="ConnHttp" href="#ConnHttp"><span>ConnHttp:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -364,6 +376,18 @@
 <dt><a name="continueSendFile" href="#continueSendFile"><span>continueSendFile:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: proc continueSendFile(conn: Connection): bool" href="powpow/net/tcp.html#continueSendFile%2CConnection">tcp: proc continueSendFile(conn: Connection): bool</a></li>
+          </ul></dd>
+<dt><a name="Cookie" href="#Cookie"><span>Cookie:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpclient: object Cookie" href="powpow/proto/httpclient.html#Cookie">httpclient: object Cookie</a></li>
+          </ul></dd>
+<dt><a name="cookieHeaderForUrl" href="#cookieHeaderForUrl"><span>cookieHeaderForUrl:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpclient: proc cookieHeaderForUrl(jar: CookieJar; url: string): string" href="powpow/proto/httpclient.html#cookieHeaderForUrl%2CCookieJar%2Cstring">httpclient: proc cookieHeaderForUrl(jar: CookieJar; url: string): string</a></li>
+          </ul></dd>
+<dt><a name="CookieJar" href="#CookieJar"><span>CookieJar:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpclient: type CookieJar" href="powpow/proto/httpclient.html#CookieJar">httpclient: type CookieJar</a></li>
           </ul></dd>
 <dt><a name="CookieMacLen" href="#CookieMacLen"><span>CookieMacLen:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -493,37 +517,37 @@
           </ul></dd>
 <dt><a name="delete" href="#delete"><span>delete:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc delete(client`gensym158: AsyncHttpClient; url`gensym158: string;
-       headers`gensym158: openArray[(string, string)] = [];
-       unixSocket`gensym158: string = &quot;&quot;; timeoutMs`gensym158: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#delete%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym158: AsyncHttpClient; url`gensym158: string;
-       headers`gensym158: openArray[(string, string)] = [];
-       unixSocket`gensym158: string = &quot;&quot;; timeoutMs`gensym158: int = -1): Future[
+          data-doc-search-tag="httpclient: proc delete(client`gensym251: AsyncHttpClient; url`gensym251: string;
+       headers`gensym251: openArray[(string, string)] = [];
+       unixSocket`gensym251: string = &quot;&quot;; timeoutMs`gensym251: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#delete%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym251: AsyncHttpClient; url`gensym251: string;
+       headers`gensym251: openArray[(string, string)] = [];
+       unixSocket`gensym251: string = &quot;&quot;; timeoutMs`gensym251: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc delete(client`gensym158: AsyncHttpClient; url`gensym158: string;
-       body`gensym158: string;
-       headers`gensym158: openArray[(string, string)] = [];
-       unixSocket`gensym158: string = &quot;&quot;; timeoutMs`gensym158: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#delete%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym158: AsyncHttpClient; url`gensym158: string;
-       body`gensym158: string;
-       headers`gensym158: openArray[(string, string)] = [];
-       unixSocket`gensym158: string = &quot;&quot;; timeoutMs`gensym158: int = -1): Future[
+          data-doc-search-tag="httpclient: proc delete(client`gensym251: AsyncHttpClient; url`gensym251: string;
+       body`gensym251: string;
+       headers`gensym251: openArray[(string, string)] = [];
+       unixSocket`gensym251: string = &quot;&quot;; timeoutMs`gensym251: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#delete%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym251: AsyncHttpClient; url`gensym251: string;
+       body`gensym251: string;
+       headers`gensym251: openArray[(string, string)] = [];
+       unixSocket`gensym251: string = &quot;&quot;; timeoutMs`gensym251: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc delete(client`gensym168: HttpClient; url`gensym168: string;
-       headers`gensym168: openArray[(string, string)] = [];
-       unixSocket`gensym168: string = &quot;&quot;; timeoutMs`gensym168: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#delete%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym168: HttpClient; url`gensym168: string;
-       headers`gensym168: openArray[(string, string)] = [];
-       unixSocket`gensym168: string = &quot;&quot;; timeoutMs`gensym168: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc delete(client`gensym261: HttpClient; url`gensym261: string;
+       headers`gensym261: openArray[(string, string)] = [];
+       unixSocket`gensym261: string = &quot;&quot;; timeoutMs`gensym261: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#delete%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym261: HttpClient; url`gensym261: string;
+       headers`gensym261: openArray[(string, string)] = [];
+       unixSocket`gensym261: string = &quot;&quot;; timeoutMs`gensym261: int = -1): HttpClientResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc delete(client`gensym168: HttpClient; url`gensym168: string;
-       body`gensym168: string;
-       headers`gensym168: openArray[(string, string)] = [];
-       unixSocket`gensym168: string = &quot;&quot;; timeoutMs`gensym168: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#delete%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym168: HttpClient; url`gensym168: string;
-       body`gensym168: string;
-       headers`gensym168: openArray[(string, string)] = [];
-       unixSocket`gensym168: string = &quot;&quot;; timeoutMs`gensym168: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc delete(client`gensym261: HttpClient; url`gensym261: string;
+       body`gensym261: string;
+       headers`gensym261: openArray[(string, string)] = [];
+       unixSocket`gensym261: string = &quot;&quot;; timeoutMs`gensym261: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#delete%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc delete(client`gensym261: HttpClient; url`gensym261: string;
+       body`gensym261: string;
+       headers`gensym261: openArray[(string, string)] = [];
+       unixSocket`gensym261: string = &quot;&quot;; timeoutMs`gensym261: int = -1): HttpClientResponse</a></li>
           </ul></dd>
 <dt><a name="disableKtls" href="#disableKtls"><span>disableKtls:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -548,6 +572,16 @@
 <dt><a name="DnsResolver" href="#DnsResolver"><span>DnsResolver:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="dns: type DnsResolver" href="powpow/net/dns.html#DnsResolver">dns: type DnsResolver</a></li>
+          </ul></dd>
+<dt><a name="drain" href="#drain"><span>drain:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc drain(s: H2Server; timeoutMs = 30000; onDrained: H2DrainCallback = nil)" href="powpow/proto/http2conn.html#drain%2CH2Server%2Cint%2CH2DrainCallback">http2conn: proc drain(s: H2Server; timeoutMs = 30000; onDrained: H2DrainCallback = nil)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc drain(server: HttpServer; timeoutMs = 30000; onDrained: DrainCallback = nil)" href="powpow/proto/httpserver.html#drain%2CHttpServer%2Cint%2CDrainCallback">httpserver: proc drain(server: HttpServer; timeoutMs = 30000; onDrained: DrainCallback = nil)</a></li>
+          </ul></dd>
+<dt><a name="DrainCallback" href="#DrainCallback"><span>DrainCallback:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: type DrainCallback" href="powpow/proto/httpserver.html#DrainCallback">httpserver: type DrainCallback</a></li>
           </ul></dd>
 <dt><a name="drainChunk" href="#drainChunk"><span>drainChunk:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -813,6 +847,10 @@
           <li><a class="reference external"
           data-doc-search-tag="http: proc feed(p: HttpParser; data: string): ParsePhase" href="powpow/proto/http.html#feed%2CHttpParser%2Cstring">http: proc feed(p: HttpParser; data: string): ParsePhase</a></li>
           <li><a class="reference external"
+          data-doc-search-tag="http: proc feed(p: SseParser; data: openArray[byte]): seq[SseEvent]" href="powpow/proto/http.html#feed%2CSseParser%2CopenArray%5Bbyte%5D">http: proc feed(p: SseParser; data: openArray[byte]): seq[SseEvent]</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http: proc feed(p: SseParser; data: string): seq[SseEvent]" href="powpow/proto/http.html#feed%2CSseParser%2Cstring">http: proc feed(p: SseParser; data: string): seq[SseEvent]</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="http2: proc feed(p: var H2FrameParser; data: openArray[byte]): seq[H2Frame]" href="powpow/proto/http2.html#feed%2CH2FrameParser%2CopenArray%5Bbyte%5D">http2: proc feed(p: var H2FrameParser; data: openArray[byte]): seq[H2Frame]</a></li>
           </ul></dd>
 <dt><a name="feedH2" href="#feedH2"><span>feedH2:</span></a></dt><dd><ul class="simple">
@@ -851,6 +889,10 @@
 <li><a class="reference external"
           data-doc-search-tag="simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int" href="powpow/proto/simdscan.html#findDoubleCRLFSse2%2Cptr.UncheckedArray%5Bbyte%5D%2Cint%2Cint">simdscan: proc findDoubleCRLFSse2(buf: ptr UncheckedArray[byte]; start, maxLen: int): int</a></li>
           </ul></dd>
+<dt><a name="finish" href="#finish"><span>finish:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc finish(res: H2Response)" href="powpow/proto/http2conn.html#finish%2CH2Response">http2conn: proc finish(res: H2Response)</a></li>
+          </ul></dd>
 <dt><a name="flushSendBuf" href="#flushSendBuf"><span>flushSendBuf:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http2conn: proc flushSendBuf(h2: H2Conn)" href="powpow/proto/http2conn.html#flushSendBuf%2CH2Conn">http2conn: proc flushSendBuf(h2: H2Conn)</a></li>
@@ -867,6 +909,18 @@
 <li><a class="reference external"
           data-doc-search-tag="tcp: proc formatIp(saAddr: Sockaddr_storage): string" href="powpow/net/tcp.html#formatIp%2CSockaddr_storage">tcp: proc formatIp(saAddr: Sockaddr_storage): string</a></li>
           </ul></dd>
+<dt><a name="formatSseComment" href="#formatSseComment"><span>formatSseComment:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc formatSseComment(comment: openArray[char] = []): string" href="powpow/proto/http.html#formatSseComment%2CopenArray%5Bchar%5D">http: proc formatSseComment(comment: openArray[char] = []): string</a></li>
+          </ul></dd>
+<dt><a name="formatSseEvent" href="#formatSseEvent"><span>formatSseEvent:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc formatSseEvent(data: openArray[byte]; event: openArray[char] = [];
+               id: openArray[char] = []; retry = 0): string" href="powpow/proto/http.html#formatSseEvent%2CopenArray%5Bbyte%5D%2CopenArray%5Bchar%5D%2CopenArray%5Bchar%5D%2Cint">http: proc formatSseEvent(data: openArray[byte]; event: openArray[char] = [];
+               id: openArray[char] = []; retry = 0): string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http: proc formatSseEvent(data: string; event = &quot;&quot;; id = &quot;&quot;; retry = 0): string" href="powpow/proto/http.html#formatSseEvent%2Cstring%2Cstring%2Cstring%2Cint">http: proc formatSseEvent(data: string; event = &quot;&quot;; id = &quot;&quot;; retry = 0): string</a></li>
+          </ul></dd>
 <dt><a name="frameTypeFromInt" href="#frameTypeFromInt"><span>frameTypeFromInt:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http2: proc frameTypeFromInt(v: int): tuple[known: bool, typ: H2FrameType]" href="powpow/proto/http2.html#frameTypeFromInt%2Cint">http2: proc frameTypeFromInt(v: int): tuple[known: bool, typ: H2FrameType]</a></li>
@@ -881,41 +935,47 @@
           </ul></dd>
 <dt><a name="get" href="#get"><span>get:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc get(client`gensym155: AsyncHttpClient; url`gensym155: string;
-    headers`gensym155: openArray[(string, string)] = [];
-    unixSocket`gensym155: string = &quot;&quot;; timeoutMs`gensym155: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#get%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym155: AsyncHttpClient; url`gensym155: string;
-    headers`gensym155: openArray[(string, string)] = [];
-    unixSocket`gensym155: string = &quot;&quot;; timeoutMs`gensym155: int = -1): Future[
+          data-doc-search-tag="httpclient: proc get(client`gensym248: AsyncHttpClient; url`gensym248: string;
+    headers`gensym248: openArray[(string, string)] = [];
+    unixSocket`gensym248: string = &quot;&quot;; timeoutMs`gensym248: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#get%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym248: AsyncHttpClient; url`gensym248: string;
+    headers`gensym248: openArray[(string, string)] = [];
+    unixSocket`gensym248: string = &quot;&quot;; timeoutMs`gensym248: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc get(client`gensym155: AsyncHttpClient; url`gensym155: string;
-    body`gensym155: string;
-    headers`gensym155: openArray[(string, string)] = [];
-    unixSocket`gensym155: string = &quot;&quot;; timeoutMs`gensym155: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#get%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym155: AsyncHttpClient; url`gensym155: string;
-    body`gensym155: string;
-    headers`gensym155: openArray[(string, string)] = [];
-    unixSocket`gensym155: string = &quot;&quot;; timeoutMs`gensym155: int = -1): Future[
+          data-doc-search-tag="httpclient: proc get(client`gensym248: AsyncHttpClient; url`gensym248: string;
+    body`gensym248: string;
+    headers`gensym248: openArray[(string, string)] = [];
+    unixSocket`gensym248: string = &quot;&quot;; timeoutMs`gensym248: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#get%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym248: AsyncHttpClient; url`gensym248: string;
+    body`gensym248: string;
+    headers`gensym248: openArray[(string, string)] = [];
+    unixSocket`gensym248: string = &quot;&quot;; timeoutMs`gensym248: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc get(client`gensym165: HttpClient; url`gensym165: string;
-    headers`gensym165: openArray[(string, string)] = [];
-    unixSocket`gensym165: string = &quot;&quot;; timeoutMs`gensym165: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#get%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym165: HttpClient; url`gensym165: string;
-    headers`gensym165: openArray[(string, string)] = [];
-    unixSocket`gensym165: string = &quot;&quot;; timeoutMs`gensym165: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc get(client`gensym258: HttpClient; url`gensym258: string;
+    headers`gensym258: openArray[(string, string)] = [];
+    unixSocket`gensym258: string = &quot;&quot;; timeoutMs`gensym258: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#get%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym258: HttpClient; url`gensym258: string;
+    headers`gensym258: openArray[(string, string)] = [];
+    unixSocket`gensym258: string = &quot;&quot;; timeoutMs`gensym258: int = -1): HttpClientResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc get(client`gensym165: HttpClient; url`gensym165: string; body`gensym165: string;
-    headers`gensym165: openArray[(string, string)] = [];
-    unixSocket`gensym165: string = &quot;&quot;; timeoutMs`gensym165: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#get%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym165: HttpClient; url`gensym165: string; body`gensym165: string;
-    headers`gensym165: openArray[(string, string)] = [];
-    unixSocket`gensym165: string = &quot;&quot;; timeoutMs`gensym165: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc get(client`gensym258: HttpClient; url`gensym258: string; body`gensym258: string;
+    headers`gensym258: openArray[(string, string)] = [];
+    unixSocket`gensym258: string = &quot;&quot;; timeoutMs`gensym258: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#get%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc get(client`gensym258: HttpClient; url`gensym258: string; body`gensym258: string;
+    headers`gensym258: openArray[(string, string)] = [];
+    unixSocket`gensym258: string = &quot;&quot;; timeoutMs`gensym258: int = -1): HttpClientResponse</a></li>
+          </ul></dd>
+<dt><a name="getAuthority" href="#getAuthority"><span>getAuthority:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getAuthority(req: H2Request): string" href="powpow/proto/http2conn.html#getAuthority%2CH2Request">http2conn: proc getAuthority(req: H2Request): string</a></li>
           </ul></dd>
 <dt><a name="getBody" href="#getBody"><span>getBody:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getBody(p: HttpParser): seq[byte]" href="powpow/proto/http.html#getBody%2CHttpParser">http: proc getBody(p: HttpParser): seq[byte]</a></li>
           <li><a class="reference external"
           data-doc-search-tag="http: proc getBody(req: HttpRequest): seq[byte]" href="powpow/proto/http.html#getBody%2CHttpRequest">http: proc getBody(req: HttpRequest): seq[byte]</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getBody(req: H2Request): seq[byte]" href="powpow/proto/http2conn.html#getBody%2CH2Request">http2conn: proc getBody(req: H2Request): seq[byte]</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpclient: proc getBody(res: HttpClientResponse): seq[byte]" href="powpow/proto/httpclient.html#getBody%2CHttpClientResponse">httpclient: proc getBody(res: HttpClientResponse): seq[byte]</a></li>
           </ul></dd>
@@ -926,6 +986,8 @@
 <dt><a name="getBodyString" href="#getBodyString"><span>getBodyString:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getBodyString(req: HttpRequest): string" href="powpow/proto/http.html#getBodyString%2CHttpRequest">http: proc getBodyString(req: HttpRequest): string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getBodyString(req: H2Request): string" href="powpow/proto/http2conn.html#getBodyString%2CH2Request">http2conn: proc getBodyString(req: H2Request): string</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpclient: proc getBodyString(res: HttpClientResponse): string" href="powpow/proto/httpclient.html#getBodyString%2CHttpClientResponse">httpclient: proc getBodyString(res: HttpClientResponse): string</a></li>
           </ul></dd>
@@ -938,6 +1000,8 @@
           data-doc-search-tag="tcp: proc getClientIp(conn: Connection): string" href="powpow/net/tcp.html#getClientIp%2CConnection">tcp: proc getClientIp(conn: Connection): string</a></li>
           <li><a class="reference external"
           data-doc-search-tag="http: proc getClientIp(req: HttpRequest): string" href="powpow/proto/http.html#getClientIp%2CHttpRequest">http: proc getClientIp(req: HttpRequest): string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getClientIp(req: H2Request): string" href="powpow/proto/http2conn.html#getClientIp%2CH2Request">http2conn: proc getClientIp(req: H2Request): string</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc getClientIp(res: HttpResponse): string" href="powpow/proto/httpserver.html#getClientIp%2CHttpResponse">httpserver: proc getClientIp(res: HttpResponse): string</a></li>
           </ul></dd>
@@ -979,6 +1043,8 @@
           <li><a class="reference external"
           data-doc-search-tag="http: proc getHeaders(req: HttpRequest): HttpHeaders" href="powpow/proto/http.html#getHeaders%2CHttpRequest">http: proc getHeaders(req: HttpRequest): HttpHeaders</a></li>
           <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getHeaders(req: H2Request): seq[(string, string)]" href="powpow/proto/http2conn.html#getHeaders%2CH2Request">http2conn: proc getHeaders(req: H2Request): seq[(string, string)]</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="httpclient: proc getHeaders(res: HttpClientResponse): HttpHeaders" href="powpow/proto/httpclient.html#getHeaders%2CHttpClientResponse">httpclient: proc getHeaders(res: HttpClientResponse): HttpHeaders</a></li>
           </ul></dd>
 <dt><a name="getHeaderValue" href="#getHeaderValue"><span>getHeaderValue:</span></a></dt><dd><ul class="simple">
@@ -986,6 +1052,16 @@
           data-doc-search-tag="http: proc getHeaderValue(p: HttpParser; name: string): lent string" href="powpow/proto/http.html#getHeaderValue%2CHttpParser%2Cstring">http: proc getHeaderValue(p: HttpParser; name: string): lent string</a></li>
           <li><a class="reference external"
           data-doc-search-tag="http: proc getHeaderValue(req: HttpRequest; name: string): lent string" href="powpow/proto/http.html#getHeaderValue%2CHttpRequest%2Cstring">http: proc getHeaderValue(req: HttpRequest; name: string): lent string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getHeaderValue(req: H2Request; name: string): string" href="powpow/proto/http2conn.html#getHeaderValue%2CH2Request%2Cstring">http2conn: proc getHeaderValue(req: H2Request; name: string): string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpclient: proc getHeaderValue(res: HttpClientResponse; name: string): string" href="powpow/proto/httpclient.html#getHeaderValue%2CHttpClientResponse%2Cstring">httpclient: proc getHeaderValue(res: HttpClientResponse; name: string): string</a></li>
+          </ul></dd>
+<dt><a name="getHeaderValues" href="#getHeaderValues"><span>getHeaderValues:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc getHeaderValues(p: HttpParser; name: string): seq[string]" href="powpow/proto/http.html#getHeaderValues%2CHttpParser%2Cstring">http: proc getHeaderValues(p: HttpParser; name: string): seq[string]</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpclient: proc getHeaderValues(res: HttpClientResponse; name: string): seq[string]" href="powpow/proto/httpclient.html#getHeaderValues%2CHttpClientResponse%2Cstring">httpclient: proc getHeaderValues(res: HttpClientResponse; name: string): seq[string]</a></li>
           </ul></dd>
 <dt><a name="getHttpMinor" href="#getHttpMinor"><span>getHttpMinor:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1014,6 +1090,8 @@
 <dt><a name="getMethod" href="#getMethod"><span>getMethod:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getMethod(req: HttpRequest): HttpMethod" href="powpow/proto/http.html#getMethod%2CHttpRequest">http: proc getMethod(req: HttpRequest): HttpMethod</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getMethod(req: H2Request): string" href="powpow/proto/http2conn.html#getMethod%2CH2Request">http2conn: proc getMethod(req: H2Request): string</a></li>
           </ul></dd>
 <dt><a name="getMultipart" href="#getMultipart"><span>getMultipart:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1022,6 +1100,8 @@
 <dt><a name="getPath" href="#getPath"><span>getPath:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getPath(req: HttpRequest): lent string" href="powpow/proto/http.html#getPath%2CHttpRequest">http: proc getPath(req: HttpRequest): lent string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getPath(req: H2Request): string" href="powpow/proto/http2conn.html#getPath%2CH2Request">http2conn: proc getPath(req: H2Request): string</a></li>
           </ul></dd>
 <dt><a name="getProtocol" href="#getProtocol"><span>getProtocol:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1030,6 +1110,8 @@
 <dt><a name="getQuery" href="#getQuery"><span>getQuery:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getQuery(req: HttpRequest): lent string" href="powpow/proto/http.html#getQuery%2CHttpRequest">http: proc getQuery(req: HttpRequest): lent string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getQuery(req: H2Request): string" href="powpow/proto/http2conn.html#getQuery%2CH2Request">http2conn: proc getQuery(req: H2Request): string</a></li>
           </ul></dd>
 <dt><a name="getRemainingData" href="#getRemainingData"><span>getRemainingData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1038,6 +1120,10 @@
 <dt><a name="getRequest" href="#getRequest"><span>getRequest:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getRequest(p: HttpParser): HttpRequest" href="powpow/proto/http.html#getRequest%2CHttpParser">http: proc getRequest(p: HttpParser): HttpRequest</a></li>
+          </ul></dd>
+<dt><a name="getScheme" href="#getScheme"><span>getScheme:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc getScheme(req: H2Request): string" href="powpow/proto/http2conn.html#getScheme%2CH2Request">http2conn: proc getScheme(req: H2Request): string</a></li>
           </ul></dd>
 <dt><a name="getSockLen" href="#getSockLen"><span>getSockLen:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1070,6 +1156,10 @@
 <dt><a name="getUrl" href="#getUrl"><span>getUrl:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc getUrl(req: HttpRequest): lent string" href="powpow/proto/http.html#getUrl%2CHttpRequest">http: proc getUrl(req: HttpRequest): lent string</a></li>
+          </ul></dd>
+<dt><a name="H2AutotuneCap" href="#H2AutotuneCap"><span>H2AutotuneCap:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: const H2AutotuneCap" href="powpow/proto/http2conn.html#H2AutotuneCap">http2conn: const H2AutotuneCap</a></li>
           </ul></dd>
 <dt><a name="H2Cancelled" href="#H2Cancelled"><span>H2Cancelled:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1143,9 +1233,17 @@
 <li><a class="reference external"
           data-doc-search-tag="http2conn: const H2DefaultMaxHeaderList" href="powpow/proto/http2conn.html#H2DefaultMaxHeaderList">http2conn: const H2DefaultMaxHeaderList</a></li>
           </ul></dd>
+<dt><a name="H2DefaultStreamThreshold" href="#H2DefaultStreamThreshold"><span>H2DefaultStreamThreshold:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: const H2DefaultStreamThreshold" href="powpow/proto/http2conn.html#H2DefaultStreamThreshold">http2conn: const H2DefaultStreamThreshold</a></li>
+          </ul></dd>
 <dt><a name="H2DefaultWindowSize" href="#H2DefaultWindowSize"><span>H2DefaultWindowSize:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http2: const H2DefaultWindowSize" href="powpow/proto/http2.html#H2DefaultWindowSize">http2: const H2DefaultWindowSize</a></li>
+          </ul></dd>
+<dt><a name="H2DrainCallback" href="#H2DrainCallback"><span>H2DrainCallback:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: type H2DrainCallback" href="powpow/proto/http2conn.html#H2DrainCallback">http2conn: type H2DrainCallback</a></li>
           </ul></dd>
 <dt><a name="h2Draining" href="#h2Draining"><span>h2Draining:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1363,37 +1461,37 @@
           </ul></dd>
 <dt><a name="head" href="#head"><span>head:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc head(client`gensym159: AsyncHttpClient; url`gensym159: string;
-     headers`gensym159: openArray[(string, string)] = [];
-     unixSocket`gensym159: string = &quot;&quot;; timeoutMs`gensym159: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#head%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym159: AsyncHttpClient; url`gensym159: string;
-     headers`gensym159: openArray[(string, string)] = [];
-     unixSocket`gensym159: string = &quot;&quot;; timeoutMs`gensym159: int = -1): Future[
+          data-doc-search-tag="httpclient: proc head(client`gensym252: AsyncHttpClient; url`gensym252: string;
+     headers`gensym252: openArray[(string, string)] = [];
+     unixSocket`gensym252: string = &quot;&quot;; timeoutMs`gensym252: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#head%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym252: AsyncHttpClient; url`gensym252: string;
+     headers`gensym252: openArray[(string, string)] = [];
+     unixSocket`gensym252: string = &quot;&quot;; timeoutMs`gensym252: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc head(client`gensym159: AsyncHttpClient; url`gensym159: string;
-     body`gensym159: string;
-     headers`gensym159: openArray[(string, string)] = [];
-     unixSocket`gensym159: string = &quot;&quot;; timeoutMs`gensym159: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#head%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym159: AsyncHttpClient; url`gensym159: string;
-     body`gensym159: string;
-     headers`gensym159: openArray[(string, string)] = [];
-     unixSocket`gensym159: string = &quot;&quot;; timeoutMs`gensym159: int = -1): Future[
+          data-doc-search-tag="httpclient: proc head(client`gensym252: AsyncHttpClient; url`gensym252: string;
+     body`gensym252: string;
+     headers`gensym252: openArray[(string, string)] = [];
+     unixSocket`gensym252: string = &quot;&quot;; timeoutMs`gensym252: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#head%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym252: AsyncHttpClient; url`gensym252: string;
+     body`gensym252: string;
+     headers`gensym252: openArray[(string, string)] = [];
+     unixSocket`gensym252: string = &quot;&quot;; timeoutMs`gensym252: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc head(client`gensym169: HttpClient; url`gensym169: string;
-     headers`gensym169: openArray[(string, string)] = [];
-     unixSocket`gensym169: string = &quot;&quot;; timeoutMs`gensym169: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#head%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym169: HttpClient; url`gensym169: string;
-     headers`gensym169: openArray[(string, string)] = [];
-     unixSocket`gensym169: string = &quot;&quot;; timeoutMs`gensym169: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc head(client`gensym262: HttpClient; url`gensym262: string;
+     headers`gensym262: openArray[(string, string)] = [];
+     unixSocket`gensym262: string = &quot;&quot;; timeoutMs`gensym262: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#head%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym262: HttpClient; url`gensym262: string;
+     headers`gensym262: openArray[(string, string)] = [];
+     unixSocket`gensym262: string = &quot;&quot;; timeoutMs`gensym262: int = -1): HttpClientResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc head(client`gensym169: HttpClient; url`gensym169: string;
-     body`gensym169: string;
-     headers`gensym169: openArray[(string, string)] = [];
-     unixSocket`gensym169: string = &quot;&quot;; timeoutMs`gensym169: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#head%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym169: HttpClient; url`gensym169: string;
-     body`gensym169: string;
-     headers`gensym169: openArray[(string, string)] = [];
-     unixSocket`gensym169: string = &quot;&quot;; timeoutMs`gensym169: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc head(client`gensym262: HttpClient; url`gensym262: string;
+     body`gensym262: string;
+     headers`gensym262: openArray[(string, string)] = [];
+     unixSocket`gensym262: string = &quot;&quot;; timeoutMs`gensym262: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#head%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc head(client`gensym262: HttpClient; url`gensym262: string;
+     body`gensym262: string;
+     headers`gensym262: openArray[(string, string)] = [];
+     unixSocket`gensym262: string = &quot;&quot;; timeoutMs`gensym262: int = -1): HttpClientResponse</a></li>
           </ul></dd>
 <dt><a name="header" href="#header"><span>header:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1569,6 +1667,10 @@
 <li><a class="reference external"
           data-doc-search-tag="http: proc isChunked(p: HttpParser): bool" href="powpow/proto/http.html#isChunked%2CHttpParser">http: proc isChunked(p: HttpParser): bool</a></li>
           </ul></dd>
+<dt><a name="isClosed" href="#isClosed"><span>isClosed:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc isClosed(s: SseStream): bool" href="powpow/proto/httpserver.html#isClosed%2CSseStream">httpserver: proc isClosed(s: SseStream): bool</a></li>
+          </ul></dd>
 <dt><a name="isComplete" href="#isComplete"><span>isComplete:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: proc isComplete(p: HttpParser): bool" href="powpow/proto/http.html#isComplete%2CHttpParser">http: proc isComplete(p: HttpParser): bool</a></li>
@@ -1721,6 +1823,10 @@
 <li><a class="reference external"
           data-doc-search-tag="stream: const MaxIoStreamWriteBuffer" href="powpow/stream.html#MaxIoStreamWriteBuffer">stream: const MaxIoStreamWriteBuffer</a></li>
           </ul></dd>
+<dt><a name="MaxRedirectHops" href="#MaxRedirectHops"><span>MaxRedirectHops:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpclient: const MaxRedirectHops" href="powpow/proto/httpclient.html#MaxRedirectHops">httpclient: const MaxRedirectHops</a></li>
+          </ul></dd>
 <dt><a name="MaxRequestLine" href="#MaxRequestLine"><span>MaxRequestLine:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http: const MaxRequestLine" href="powpow/proto/http.html#MaxRequestLine">http: const MaxRequestLine</a></li>
@@ -1782,12 +1888,16 @@
                    maxBodySize: int = DefaultMaxResponseBody;
                    maxIdlePerHost: int = DefaultMaxIdlePerHost;
                    maxIdleTotal: int = DefaultMaxIdleTotal;
-                   idleTimeoutMs: int = DefaultIdleTimeoutMs): AsyncHttpClient" href="powpow/proto/httpclient.html#newAsyncHttpClient%2CSslContext%2Cbool%2Cint%2Cint%2Cint%2Cint%2Cint">httpclient: proc newAsyncHttpClient(tlsCtx: SslContext = nil; keepAlive: bool = true;
+                   idleTimeoutMs: int = DefaultIdleTimeoutMs;
+                   maxRedirects: int = 0; proxyUrl: string = &quot;&quot;;
+                   connectTimeoutMs: int = 0; readTimeoutMs: int = 0): AsyncHttpClient" href="powpow/proto/httpclient.html#newAsyncHttpClient%2CSslContext%2Cbool%2Cint%2Cint%2Cint%2Cint%2Cint%2Cint%2Cstring%2Cint%2Cint">httpclient: proc newAsyncHttpClient(tlsCtx: SslContext = nil; keepAlive: bool = true;
                    timeoutMs: int = 0;
                    maxBodySize: int = DefaultMaxResponseBody;
                    maxIdlePerHost: int = DefaultMaxIdlePerHost;
                    maxIdleTotal: int = DefaultMaxIdleTotal;
-                   idleTimeoutMs: int = DefaultIdleTimeoutMs): AsyncHttpClient</a></li>
+                   idleTimeoutMs: int = DefaultIdleTimeoutMs;
+                   maxRedirects: int = 0; proxyUrl: string = &quot;&quot;;
+                   connectTimeoutMs: int = 0; readTimeoutMs: int = 0): AsyncHttpClient</a></li>
           </ul></dd>
 <dt><a name="newClientDtlsContext" href="#newClientDtlsContext"><span>newClientDtlsContext:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1802,6 +1912,10 @@
           data-doc-search-tag="tcp: proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;
               readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection" href="powpow/net/tcp.html#newConnection%2CSocketHandle%2CLoop%2CTcpServer%2Cptr.UncheckedArray%5Bbyte%5D%2Cint">tcp: proc newConnection(fd: SocketHandle; loop: Loop; server: TcpServer;
               readBuf: ptr UncheckedArray[byte]; readBufLen: int): Connection</a></li>
+          </ul></dd>
+<dt><a name="newCookieJar" href="#newCookieJar"><span>newCookieJar:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpclient: proc newCookieJar(): CookieJar" href="powpow/proto/httpclient.html#newCookieJar">httpclient: proc newCookieJar(): CookieJar</a></li>
           </ul></dd>
 <dt><a name="newDtlsServer" href="#newDtlsServer"><span>newDtlsServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1825,9 +1939,11 @@
 <li><a class="reference external"
           data-doc-search-tag="http2conn: proc newH2Conn(conn: Connection; role: H2Role; onRequest: OnH2RequestCallback;
           maxConcurrent = H2DefaultMaxConcurrent;
-          maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody): H2Conn" href="powpow/proto/http2conn.html#newH2Conn%2CConnection%2CH2Role%2COnH2RequestCallback">http2conn: proc newH2Conn(conn: Connection; role: H2Role; onRequest: OnH2RequestCallback;
+          maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
+          streamThreshold = H2DefaultStreamThreshold; connectProtocol = true): H2Conn" href="powpow/proto/http2conn.html#newH2Conn%2CConnection%2CH2Role%2COnH2RequestCallback">http2conn: proc newH2Conn(conn: Connection; role: H2Role; onRequest: OnH2RequestCallback;
           maxConcurrent = H2DefaultMaxConcurrent;
-          maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody): H2Conn</a></li>
+          maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
+          streamThreshold = H2DefaultStreamThreshold; connectProtocol = true): H2Conn</a></li>
           </ul></dd>
 <dt><a name="newH2FrameParser" href="#newH2FrameParser"><span>newH2FrameParser:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1838,18 +1954,26 @@
           data-doc-search-tag="http2conn: proc newH2Server(loop: Loop; handler: OnH2RequestCallback;
             maxConcurrent = H2DefaultMaxConcurrent;
             maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
-            sslCtx: SslContext = nil): H2Server" href="powpow/proto/http2conn.html#newH2Server%2CLoop%2COnH2RequestCallback%2CSslContext">http2conn: proc newH2Server(loop: Loop; handler: OnH2RequestCallback;
+            sslCtx: SslContext = nil; streamTimeoutMs = 0;
+            streamThreshold = H2DefaultStreamThreshold;
+            enableConnectProtocol = true): H2Server" href="powpow/proto/http2conn.html#newH2Server%2CLoop%2COnH2RequestCallback%2CSslContext%2Cint">http2conn: proc newH2Server(loop: Loop; handler: OnH2RequestCallback;
             maxConcurrent = H2DefaultMaxConcurrent;
             maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
-            sslCtx: SslContext = nil): H2Server</a></li>
+            sslCtx: SslContext = nil; streamTimeoutMs = 0;
+            streamThreshold = H2DefaultStreamThreshold;
+            enableConnectProtocol = true): H2Server</a></li>
           <li><a class="reference external"
           data-doc-search-tag="http2conn: proc newH2Server(handler: OnH2RequestCallback;
             maxConcurrent = H2DefaultMaxConcurrent;
             maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
-            sslCtx: SslContext = nil): H2Server" href="powpow/proto/http2conn.html#newH2Server%2COnH2RequestCallback%2CSslContext">http2conn: proc newH2Server(handler: OnH2RequestCallback;
+            sslCtx: SslContext = nil; streamTimeoutMs = 0;
+            streamThreshold = H2DefaultStreamThreshold;
+            enableConnectProtocol = true): H2Server" href="powpow/proto/http2conn.html#newH2Server%2COnH2RequestCallback%2CSslContext%2Cint">http2conn: proc newH2Server(handler: OnH2RequestCallback;
             maxConcurrent = H2DefaultMaxConcurrent;
             maxHeaderList = H2DefaultMaxHeaderList; maxBody = H2DefaultMaxBody;
-            sslCtx: SslContext = nil): H2Server</a></li>
+            sslCtx: SslContext = nil; streamTimeoutMs = 0;
+            streamThreshold = H2DefaultStreamThreshold;
+            enableConnectProtocol = true): H2Server</a></li>
           </ul></dd>
 <dt><a name="newHpackContext" href="#newHpackContext"><span>newHpackContext:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1863,11 +1987,15 @@
               timeoutMs: int = 0; maxBodySize: int = DefaultMaxResponseBody;
               maxIdlePerHost: int = DefaultMaxIdlePerHost;
               maxIdleTotal: int = DefaultMaxIdleTotal;
-              idleTimeoutMs: int = DefaultIdleTimeoutMs): HttpClient" href="powpow/proto/httpclient.html#newHttpClient%2CSslContext%2Cbool%2Cint%2Cint%2Cint%2Cint%2Cint">httpclient: proc newHttpClient(tlsCtx: SslContext = nil; keepAlive: bool = true;
+              idleTimeoutMs: int = DefaultIdleTimeoutMs; maxRedirects: int = 0;
+              proxyUrl: string = &quot;&quot;; connectTimeoutMs: int = 0;
+              readTimeoutMs: int = 0): HttpClient" href="powpow/proto/httpclient.html#newHttpClient%2CSslContext%2Cbool%2Cint%2Cint%2Cint%2Cint%2Cint%2Cint%2Cstring%2Cint%2Cint">httpclient: proc newHttpClient(tlsCtx: SslContext = nil; keepAlive: bool = true;
               timeoutMs: int = 0; maxBodySize: int = DefaultMaxResponseBody;
               maxIdlePerHost: int = DefaultMaxIdlePerHost;
               maxIdleTotal: int = DefaultMaxIdleTotal;
-              idleTimeoutMs: int = DefaultIdleTimeoutMs): HttpClient</a></li>
+              idleTimeoutMs: int = DefaultIdleTimeoutMs; maxRedirects: int = 0;
+              proxyUrl: string = &quot;&quot;; connectTimeoutMs: int = 0;
+              readTimeoutMs: int = 0): HttpClient</a></li>
           </ul></dd>
 <dt><a name="newHttpConnPool" href="#newHttpConnPool"><span>newHttpConnPool:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1923,6 +2051,10 @@
 <li><a class="reference external"
           data-doc-search-tag="tls: proc newServerTlsContext(certFile, keyFile: string): SslContext" href="powpow/net/tls.html#newServerTlsContext%2Cstring%2Cstring">tls: proc newServerTlsContext(certFile, keyFile: string): SslContext</a></li>
           </ul></dd>
+<dt><a name="newSseParser" href="#newSseParser"><span>newSseParser:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc newSseParser(): SseParser" href="powpow/proto/http.html#newSseParser">http: proc newSseParser(): SseParser</a></li>
+          </ul></dd>
 <dt><a name="newStreamPair" href="#newStreamPair"><span>newStreamPair:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="stream: proc newStreamPair(loop: Loop;
@@ -1961,9 +2093,13 @@
           </ul></dd>
 <dt><a name="newWsServer" href="#newWsServer"><span>newWsServer:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="ws: proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer" href="powpow/proto/ws.html#newWsServer%2Cint">ws: proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
+          data-doc-search-tag="ws: proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize; pingIntervalMs: int = 0;
+            permessageDeflate: bool = false): WsServer" href="powpow/proto/ws.html#newWsServer%2Cint%2Cint%2Cbool">ws: proc newWsServer(maxFrameSize: int = DefaultMaxFrameSize; pingIntervalMs: int = 0;
+            permessageDeflate: bool = false): WsServer</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer" href="powpow/proto/ws.html#newWsServer%2CLoop%2Cint">ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize): WsServer</a></li>
+          data-doc-search-tag="ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize;
+            pingIntervalMs: int = 0; permessageDeflate: bool = false): WsServer" href="powpow/proto/ws.html#newWsServer%2CLoop%2Cint%2Cint%2Cbool">ws: proc newWsServer(loop: Loop; maxFrameSize: int = DefaultMaxFrameSize;
+            pingIntervalMs: int = 0; permessageDeflate: bool = false): WsServer</a></li>
           </ul></dd>
 <dt><a name="O_BINARY" href="#O_BINARY"><span>O_BINARY:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -1984,6 +2120,10 @@
 <dt><a name="OnAccept" href="#OnAccept"><span>OnAccept:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="tcp: type OnAccept" href="powpow/net/tcp.html#OnAccept">tcp: type OnAccept</a></li>
+          </ul></dd>
+<dt><a name="OnAccessLog" href="#OnAccessLog"><span>OnAccessLog:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: type OnAccessLog" href="powpow/proto/httpserver.html#OnAccessLog">httpserver: type OnAccessLog</a></li>
           </ul></dd>
 <dt><a name="onClientData" href="#onClientData"><span>onClientData:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2111,41 +2251,49 @@
           </ul></dd>
 <dt><a name="options" href="#options"><span>options:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc options(client`gensym161: AsyncHttpClient; url`gensym161: string;
-        headers`gensym161: openArray[(string, string)] = [];
-        unixSocket`gensym161: string = &quot;&quot;; timeoutMs`gensym161: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#options%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym161: AsyncHttpClient; url`gensym161: string;
-        headers`gensym161: openArray[(string, string)] = [];
-        unixSocket`gensym161: string = &quot;&quot;; timeoutMs`gensym161: int = -1): Future[
+          data-doc-search-tag="httpclient: proc options(client`gensym254: AsyncHttpClient; url`gensym254: string;
+        headers`gensym254: openArray[(string, string)] = [];
+        unixSocket`gensym254: string = &quot;&quot;; timeoutMs`gensym254: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#options%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym254: AsyncHttpClient; url`gensym254: string;
+        headers`gensym254: openArray[(string, string)] = [];
+        unixSocket`gensym254: string = &quot;&quot;; timeoutMs`gensym254: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc options(client`gensym161: AsyncHttpClient; url`gensym161: string;
-        body`gensym161: string;
-        headers`gensym161: openArray[(string, string)] = [];
-        unixSocket`gensym161: string = &quot;&quot;; timeoutMs`gensym161: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#options%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym161: AsyncHttpClient; url`gensym161: string;
-        body`gensym161: string;
-        headers`gensym161: openArray[(string, string)] = [];
-        unixSocket`gensym161: string = &quot;&quot;; timeoutMs`gensym161: int = -1): Future[
+          data-doc-search-tag="httpclient: proc options(client`gensym254: AsyncHttpClient; url`gensym254: string;
+        body`gensym254: string;
+        headers`gensym254: openArray[(string, string)] = [];
+        unixSocket`gensym254: string = &quot;&quot;; timeoutMs`gensym254: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#options%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym254: AsyncHttpClient; url`gensym254: string;
+        body`gensym254: string;
+        headers`gensym254: openArray[(string, string)] = [];
+        unixSocket`gensym254: string = &quot;&quot;; timeoutMs`gensym254: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc options(client`gensym171: HttpClient; url`gensym171: string;
-        headers`gensym171: openArray[(string, string)] = [];
-        unixSocket`gensym171: string = &quot;&quot;; timeoutMs`gensym171: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#options%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym171: HttpClient; url`gensym171: string;
-        headers`gensym171: openArray[(string, string)] = [];
-        unixSocket`gensym171: string = &quot;&quot;; timeoutMs`gensym171: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc options(client`gensym264: HttpClient; url`gensym264: string;
+        headers`gensym264: openArray[(string, string)] = [];
+        unixSocket`gensym264: string = &quot;&quot;; timeoutMs`gensym264: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#options%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym264: HttpClient; url`gensym264: string;
+        headers`gensym264: openArray[(string, string)] = [];
+        unixSocket`gensym264: string = &quot;&quot;; timeoutMs`gensym264: int = -1): HttpClientResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc options(client`gensym171: HttpClient; url`gensym171: string;
-        body`gensym171: string;
-        headers`gensym171: openArray[(string, string)] = [];
-        unixSocket`gensym171: string = &quot;&quot;; timeoutMs`gensym171: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#options%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym171: HttpClient; url`gensym171: string;
-        body`gensym171: string;
-        headers`gensym171: openArray[(string, string)] = [];
-        unixSocket`gensym171: string = &quot;&quot;; timeoutMs`gensym171: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc options(client`gensym264: HttpClient; url`gensym264: string;
+        body`gensym264: string;
+        headers`gensym264: openArray[(string, string)] = [];
+        unixSocket`gensym264: string = &quot;&quot;; timeoutMs`gensym264: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#options%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc options(client`gensym264: HttpClient; url`gensym264: string;
+        body`gensym264: string;
+        headers`gensym264: openArray[(string, string)] = [];
+        unixSocket`gensym264: string = &quot;&quot;; timeoutMs`gensym264: int = -1): HttpClientResponse</a></li>
           </ul></dd>
 <dt><a name="O_RDONLY" href="#O_RDONLY"><span>O_RDONLY:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: const O_RDONLY" href="powpow/net/common.html#O_RDONLY">common: const O_RDONLY</a></li>
+          </ul></dd>
+<dt><a name="parseAcceptsGzip" href="#parseAcceptsGzip"><span>parseAcceptsGzip:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: proc parseAcceptsGzip(v: openArray[char]): bool" href="powpow/proto/http.html#parseAcceptsGzip%2CopenArray%5Bchar%5D">http: proc parseAcceptsGzip(v: openArray[char]): bool</a></li>
+          </ul></dd>
+<dt><a name="parseDeflateOffer" href="#parseDeflateOffer"><span>parseDeflateOffer:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: proc parseDeflateOffer(extHeader: string): bool" href="powpow/proto/ws.html#parseDeflateOffer%2Cstring">ws: proc parseDeflateOffer(extHeader: string): bool</a></li>
           </ul></dd>
 <dt><a name="parseNameserverIp" href="#parseNameserverIp"><span>parseNameserverIp:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2177,37 +2325,37 @@
           </ul></dd>
 <dt><a name="patch" href="#patch"><span>patch:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc patch(client`gensym160: AsyncHttpClient; url`gensym160: string;
-      headers`gensym160: openArray[(string, string)] = [];
-      unixSocket`gensym160: string = &quot;&quot;; timeoutMs`gensym160: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#patch%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym160: AsyncHttpClient; url`gensym160: string;
-      headers`gensym160: openArray[(string, string)] = [];
-      unixSocket`gensym160: string = &quot;&quot;; timeoutMs`gensym160: int = -1): Future[
+          data-doc-search-tag="httpclient: proc patch(client`gensym253: AsyncHttpClient; url`gensym253: string;
+      headers`gensym253: openArray[(string, string)] = [];
+      unixSocket`gensym253: string = &quot;&quot;; timeoutMs`gensym253: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#patch%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym253: AsyncHttpClient; url`gensym253: string;
+      headers`gensym253: openArray[(string, string)] = [];
+      unixSocket`gensym253: string = &quot;&quot;; timeoutMs`gensym253: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc patch(client`gensym160: AsyncHttpClient; url`gensym160: string;
-      body`gensym160: string;
-      headers`gensym160: openArray[(string, string)] = [];
-      unixSocket`gensym160: string = &quot;&quot;; timeoutMs`gensym160: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#patch%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym160: AsyncHttpClient; url`gensym160: string;
-      body`gensym160: string;
-      headers`gensym160: openArray[(string, string)] = [];
-      unixSocket`gensym160: string = &quot;&quot;; timeoutMs`gensym160: int = -1): Future[
+          data-doc-search-tag="httpclient: proc patch(client`gensym253: AsyncHttpClient; url`gensym253: string;
+      body`gensym253: string;
+      headers`gensym253: openArray[(string, string)] = [];
+      unixSocket`gensym253: string = &quot;&quot;; timeoutMs`gensym253: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#patch%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym253: AsyncHttpClient; url`gensym253: string;
+      body`gensym253: string;
+      headers`gensym253: openArray[(string, string)] = [];
+      unixSocket`gensym253: string = &quot;&quot;; timeoutMs`gensym253: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc patch(client`gensym170: HttpClient; url`gensym170: string;
-      headers`gensym170: openArray[(string, string)] = [];
-      unixSocket`gensym170: string = &quot;&quot;; timeoutMs`gensym170: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#patch%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym170: HttpClient; url`gensym170: string;
-      headers`gensym170: openArray[(string, string)] = [];
-      unixSocket`gensym170: string = &quot;&quot;; timeoutMs`gensym170: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc patch(client`gensym263: HttpClient; url`gensym263: string;
+      headers`gensym263: openArray[(string, string)] = [];
+      unixSocket`gensym263: string = &quot;&quot;; timeoutMs`gensym263: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#patch%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym263: HttpClient; url`gensym263: string;
+      headers`gensym263: openArray[(string, string)] = [];
+      unixSocket`gensym263: string = &quot;&quot;; timeoutMs`gensym263: int = -1): HttpClientResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc patch(client`gensym170: HttpClient; url`gensym170: string;
-      body`gensym170: string;
-      headers`gensym170: openArray[(string, string)] = [];
-      unixSocket`gensym170: string = &quot;&quot;; timeoutMs`gensym170: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#patch%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym170: HttpClient; url`gensym170: string;
-      body`gensym170: string;
-      headers`gensym170: openArray[(string, string)] = [];
-      unixSocket`gensym170: string = &quot;&quot;; timeoutMs`gensym170: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc patch(client`gensym263: HttpClient; url`gensym263: string;
+      body`gensym263: string;
+      headers`gensym263: openArray[(string, string)] = [];
+      unixSocket`gensym263: string = &quot;&quot;; timeoutMs`gensym263: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#patch%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc patch(client`gensym263: HttpClient; url`gensym263: string;
+      body`gensym263: string;
+      headers`gensym263: openArray[(string, string)] = [];
+      unixSocket`gensym263: string = &quot;&quot;; timeoutMs`gensym263: int = -1): HttpClientResponse</a></li>
           </ul></dd>
 <dt><a name="patchFrameHeader" href="#patchFrameHeader"><span>patchFrameHeader:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2251,7 +2399,11 @@
           </ul></dd>
 <dt><a name="pendingBytes" href="#pendingBytes"><span>pendingBytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="tcp: proc pendingBytes(conn: Connection): int" href="powpow/net/tcp.html#pendingBytes%2CConnection">tcp: proc pendingBytes(conn: Connection): int</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="http2: proc pendingBytes(p: H2FrameParser): int" href="powpow/proto/http2.html#pendingBytes%2CH2FrameParser">http2: proc pendingBytes(p: H2FrameParser): int</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="ws: proc pendingBytes(ws: WsConnection): int" href="powpow/proto/ws.html#pendingBytes%2CWsConnection">ws: proc pendingBytes(ws: WsConnection): int</a></li>
           </ul></dd>
 <dt><a name="phase" href="#phase"><span>phase:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2317,37 +2469,37 @@
           </ul></dd>
 <dt><a name="post" href="#post"><span>post:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc post(client`gensym156: AsyncHttpClient; url`gensym156: string;
-     headers`gensym156: openArray[(string, string)] = [];
-     unixSocket`gensym156: string = &quot;&quot;; timeoutMs`gensym156: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#post%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym156: AsyncHttpClient; url`gensym156: string;
-     headers`gensym156: openArray[(string, string)] = [];
-     unixSocket`gensym156: string = &quot;&quot;; timeoutMs`gensym156: int = -1): Future[
+          data-doc-search-tag="httpclient: proc post(client`gensym249: AsyncHttpClient; url`gensym249: string;
+     headers`gensym249: openArray[(string, string)] = [];
+     unixSocket`gensym249: string = &quot;&quot;; timeoutMs`gensym249: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#post%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym249: AsyncHttpClient; url`gensym249: string;
+     headers`gensym249: openArray[(string, string)] = [];
+     unixSocket`gensym249: string = &quot;&quot;; timeoutMs`gensym249: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc post(client`gensym156: AsyncHttpClient; url`gensym156: string;
-     body`gensym156: string;
-     headers`gensym156: openArray[(string, string)] = [];
-     unixSocket`gensym156: string = &quot;&quot;; timeoutMs`gensym156: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#post%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym156: AsyncHttpClient; url`gensym156: string;
-     body`gensym156: string;
-     headers`gensym156: openArray[(string, string)] = [];
-     unixSocket`gensym156: string = &quot;&quot;; timeoutMs`gensym156: int = -1): Future[
+          data-doc-search-tag="httpclient: proc post(client`gensym249: AsyncHttpClient; url`gensym249: string;
+     body`gensym249: string;
+     headers`gensym249: openArray[(string, string)] = [];
+     unixSocket`gensym249: string = &quot;&quot;; timeoutMs`gensym249: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#post%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym249: AsyncHttpClient; url`gensym249: string;
+     body`gensym249: string;
+     headers`gensym249: openArray[(string, string)] = [];
+     unixSocket`gensym249: string = &quot;&quot;; timeoutMs`gensym249: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc post(client`gensym166: HttpClient; url`gensym166: string;
-     headers`gensym166: openArray[(string, string)] = [];
-     unixSocket`gensym166: string = &quot;&quot;; timeoutMs`gensym166: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#post%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym166: HttpClient; url`gensym166: string;
-     headers`gensym166: openArray[(string, string)] = [];
-     unixSocket`gensym166: string = &quot;&quot;; timeoutMs`gensym166: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc post(client`gensym259: HttpClient; url`gensym259: string;
+     headers`gensym259: openArray[(string, string)] = [];
+     unixSocket`gensym259: string = &quot;&quot;; timeoutMs`gensym259: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#post%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym259: HttpClient; url`gensym259: string;
+     headers`gensym259: openArray[(string, string)] = [];
+     unixSocket`gensym259: string = &quot;&quot;; timeoutMs`gensym259: int = -1): HttpClientResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc post(client`gensym166: HttpClient; url`gensym166: string;
-     body`gensym166: string;
-     headers`gensym166: openArray[(string, string)] = [];
-     unixSocket`gensym166: string = &quot;&quot;; timeoutMs`gensym166: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#post%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym166: HttpClient; url`gensym166: string;
-     body`gensym166: string;
-     headers`gensym166: openArray[(string, string)] = [];
-     unixSocket`gensym166: string = &quot;&quot;; timeoutMs`gensym166: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc post(client`gensym259: HttpClient; url`gensym259: string;
+     body`gensym259: string;
+     headers`gensym259: openArray[(string, string)] = [];
+     unixSocket`gensym259: string = &quot;&quot;; timeoutMs`gensym259: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#post%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc post(client`gensym259: HttpClient; url`gensym259: string;
+     body`gensym259: string;
+     headers`gensym259: openArray[(string, string)] = [];
+     unixSocket`gensym259: string = &quot;&quot;; timeoutMs`gensym259: int = -1): HttpClientResponse</a></li>
           </ul></dd>
 <dt><a name="postToLoop" href="#postToLoop"><span>postToLoop:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2371,35 +2523,35 @@
           </ul></dd>
 <dt><a name="put" href="#put"><span>put:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc put(client`gensym157: AsyncHttpClient; url`gensym157: string;
-    headers`gensym157: openArray[(string, string)] = [];
-    unixSocket`gensym157: string = &quot;&quot;; timeoutMs`gensym157: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#put%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym157: AsyncHttpClient; url`gensym157: string;
-    headers`gensym157: openArray[(string, string)] = [];
-    unixSocket`gensym157: string = &quot;&quot;; timeoutMs`gensym157: int = -1): Future[
+          data-doc-search-tag="httpclient: proc put(client`gensym250: AsyncHttpClient; url`gensym250: string;
+    headers`gensym250: openArray[(string, string)] = [];
+    unixSocket`gensym250: string = &quot;&quot;; timeoutMs`gensym250: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#put%2CAsyncHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym250: AsyncHttpClient; url`gensym250: string;
+    headers`gensym250: openArray[(string, string)] = [];
+    unixSocket`gensym250: string = &quot;&quot;; timeoutMs`gensym250: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc put(client`gensym157: AsyncHttpClient; url`gensym157: string;
-    body`gensym157: string;
-    headers`gensym157: openArray[(string, string)] = [];
-    unixSocket`gensym157: string = &quot;&quot;; timeoutMs`gensym157: int = -1): Future[
-    HttpClientResponse]" href="powpow/proto/httpclient.html#put%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym157: AsyncHttpClient; url`gensym157: string;
-    body`gensym157: string;
-    headers`gensym157: openArray[(string, string)] = [];
-    unixSocket`gensym157: string = &quot;&quot;; timeoutMs`gensym157: int = -1): Future[
+          data-doc-search-tag="httpclient: proc put(client`gensym250: AsyncHttpClient; url`gensym250: string;
+    body`gensym250: string;
+    headers`gensym250: openArray[(string, string)] = [];
+    unixSocket`gensym250: string = &quot;&quot;; timeoutMs`gensym250: int = -1): Future[
+    HttpClientResponse]" href="powpow/proto/httpclient.html#put%2CAsyncHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym250: AsyncHttpClient; url`gensym250: string;
+    body`gensym250: string;
+    headers`gensym250: openArray[(string, string)] = [];
+    unixSocket`gensym250: string = &quot;&quot;; timeoutMs`gensym250: int = -1): Future[
     HttpClientResponse]</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc put(client`gensym167: HttpClient; url`gensym167: string;
-    headers`gensym167: openArray[(string, string)] = [];
-    unixSocket`gensym167: string = &quot;&quot;; timeoutMs`gensym167: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#put%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym167: HttpClient; url`gensym167: string;
-    headers`gensym167: openArray[(string, string)] = [];
-    unixSocket`gensym167: string = &quot;&quot;; timeoutMs`gensym167: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc put(client`gensym260: HttpClient; url`gensym260: string;
+    headers`gensym260: openArray[(string, string)] = [];
+    unixSocket`gensym260: string = &quot;&quot;; timeoutMs`gensym260: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#put%2CHttpClient%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym260: HttpClient; url`gensym260: string;
+    headers`gensym260: openArray[(string, string)] = [];
+    unixSocket`gensym260: string = &quot;&quot;; timeoutMs`gensym260: int = -1): HttpClientResponse</a></li>
           <li><a class="reference external"
-          data-doc-search-tag="httpclient: proc put(client`gensym167: HttpClient; url`gensym167: string; body`gensym167: string;
-    headers`gensym167: openArray[(string, string)] = [];
-    unixSocket`gensym167: string = &quot;&quot;; timeoutMs`gensym167: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#put%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym167: HttpClient; url`gensym167: string; body`gensym167: string;
-    headers`gensym167: openArray[(string, string)] = [];
-    unixSocket`gensym167: string = &quot;&quot;; timeoutMs`gensym167: int = -1): HttpClientResponse</a></li>
+          data-doc-search-tag="httpclient: proc put(client`gensym260: HttpClient; url`gensym260: string; body`gensym260: string;
+    headers`gensym260: openArray[(string, string)] = [];
+    unixSocket`gensym260: string = &quot;&quot;; timeoutMs`gensym260: int = -1): HttpClientResponse" href="powpow/proto/httpclient.html#put%2CHttpClient%2Cstring%2Cstring%2Cstring%2Cint">httpclient: proc put(client`gensym260: HttpClient; url`gensym260: string; body`gensym260: string;
+    headers`gensym260: openArray[(string, string)] = [];
+    unixSocket`gensym260: string = &quot;&quot;; timeoutMs`gensym260: int = -1): HttpClientResponse</a></li>
           </ul></dd>
 <dt><a name="RAND_bytes" href="#RAND_bytes"><span>RAND_bytes:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2589,6 +2741,10 @@
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc resolveReal(path: string): string" href="powpow/proto/httpserver.html#resolveReal%2Cstring">httpserver: proc resolveReal(path: string): string</a></li>
           </ul></dd>
+<dt><a name="resolveRedirectUrl" href="#resolveRedirectUrl"><span>resolveRedirectUrl:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpclient: proc resolveRedirectUrl(baseUrl, loc: string): string" href="powpow/proto/httpclient.html#resolveRedirectUrl%2Cstring%2Cstring">httpclient: proc resolveRedirectUrl(baseUrl, loc: string): string</a></li>
+          </ul></dd>
 <dt><a name="resolveTxt" href="#resolveTxt"><span>resolveTxt:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="dns: proc resolveTxt(loop: Loop; hostname: string; tcb: TxtCallback)" href="powpow/net/dns.html#resolveTxt%2CLoop%2Cstring%2CTxtCallback">dns: proc resolveTxt(loop: Loop; hostname: string; tcb: TxtCallback)</a></li>
@@ -2671,9 +2827,29 @@
 <li><a class="reference external"
           data-doc-search-tag="ws: proc sendBinary(ws: WsConnection; data: openArray[byte])" href="powpow/proto/ws.html#sendBinary%2CWsConnection%2CopenArray%5Bbyte%5D">ws: proc sendBinary(ws: WsConnection; data: openArray[byte])</a></li>
           </ul></dd>
+<dt><a name="sendChunk" href="#sendChunk"><span>sendChunk:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc sendChunk(res: H2Response; data: openArray[byte])" href="powpow/proto/http2conn.html#sendChunk%2CH2Response%2CopenArray%5Bbyte%5D">http2conn: proc sendChunk(res: H2Response; data: openArray[byte])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc sendChunk(res: H2Response; data: string)" href="powpow/proto/http2conn.html#sendChunk%2CH2Response%2Cstring">http2conn: proc sendChunk(res: H2Response; data: string)</a></li>
+          </ul></dd>
+<dt><a name="sendComment" href="#sendComment"><span>sendComment:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc sendComment(s: SseStream; comment: openArray[char] = [])" href="powpow/proto/httpserver.html#sendComment%2CSseStream%2CopenArray%5Bchar%5D">httpserver: proc sendComment(s: SseStream; comment: openArray[char] = [])</a></li>
+          </ul></dd>
 <dt><a name="sendError" href="#sendError"><span>sendError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc sendError(res: H2Response; code: uint16; msg = &quot;&quot;)" href="powpow/proto/http2conn.html#sendError%2CH2Response%2Cuint16%2Cstring">http2conn: proc sendError(res: H2Response; code: uint16; msg = &quot;&quot;)</a></li>
+          <li><a class="reference external"
           data-doc-search-tag="httpserver: proc sendError(res: HttpResponse; code: HttpCode; msg: string = &quot;&quot;)" href="powpow/proto/httpserver.html#sendError%2CHttpResponse%2CHttpCode%2Cstring">httpserver: proc sendError(res: HttpResponse; code: HttpCode; msg: string = &quot;&quot;)</a></li>
+          </ul></dd>
+<dt><a name="sendEvent" href="#sendEvent"><span>sendEvent:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc sendEvent(s: SseStream; data: openArray[byte]; event: openArray[char] = [];
+          id: openArray[char] = []; retry = 0)" href="powpow/proto/httpserver.html#sendEvent%2CSseStream%2CopenArray%5Bbyte%5D%2CopenArray%5Bchar%5D%2CopenArray%5Bchar%5D%2Cint">httpserver: proc sendEvent(s: SseStream; data: openArray[byte]; event: openArray[char] = [];
+          id: openArray[char] = []; retry = 0)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc sendEvent(s: SseStream; data: string; event = &quot;&quot;; id = &quot;&quot;; retry = 0)" href="powpow/proto/httpserver.html#sendEvent%2CSseStream%2Cstring%2Cstring%2Cstring%2Cint">httpserver: proc sendEvent(s: SseStream; data: string; event = &quot;&quot;; id = &quot;&quot;; retry = 0)</a></li>
           </ul></dd>
 <dt><a name="sendFile" href="#sendFile"><span>sendFile:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2682,6 +2858,8 @@
          onError: proc (msg: string) {.closure, gcsafe.} = nil): bool" href="powpow/net/tcp.html#sendFile%2CConnection%2Ccint%2Cint64%2Cint64%2Cproc%29%2Cproc%28string%29">tcp: proc sendFile(conn: Connection; fd: cint; offset: int64; length: int64;
          keepOpen = false; onComplete: proc () {.closure, gcsafe.} = nil;
          onError: proc (msg: string) {.closure, gcsafe.} = nil): bool</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="http2conn: proc sendFile(res: H2Response; path: string)" href="powpow/proto/http2conn.html#sendFile%2CH2Response%2Cstring">http2conn: proc sendFile(res: H2Response; path: string)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="httpserver: proc sendFile(res: HttpResponse; path: string;
          req: HttpRequest = default(HttpRequest); closeConn = true;
@@ -2705,15 +2883,21 @@
           </ul></dd>
 <dt><a name="sendHandshake" href="#sendHandshake"><span>sendHandshake:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="ws: proc sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;)" href="powpow/proto/ws.html#sendHandshake%2CConnection%2Cstring%2Cstring">ws: proc sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;)</a></li>
+          data-doc-search-tag="ws: proc sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;;
+              extensions: string = &quot;&quot;)" href="powpow/proto/ws.html#sendHandshake%2CConnection%2Cstring%2Cstring%2Cstring">ws: proc sendHandshake(conn: Connection; clientKey: string; protocol: string = &quot;&quot;;
+              extensions: string = &quot;&quot;)</a></li>
           </ul></dd>
 <dt><a name="sendHandshakeRequest" href="#sendHandshakeRequest"><span>sendHandshakeRequest:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ws: proc sendHandshakeRequest(ws: WsConnection; path, host: string;
                      extraHeaders: openArray[(string, string)] = [];
-                     protocols: openArray[string] = [])" href="powpow/proto/ws.html#sendHandshakeRequest%2CWsConnection%2Cstring%2Cstring%2CopenArray%5B%5D%2CopenArray%5Bstring%5D">ws: proc sendHandshakeRequest(ws: WsConnection; path, host: string;
+                     protocols: openArray[string] = []; deflate: bool = false)" href="powpow/proto/ws.html#sendHandshakeRequest%2CWsConnection%2Cstring%2Cstring%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cbool">ws: proc sendHandshakeRequest(ws: WsConnection; path, host: string;
                      extraHeaders: openArray[(string, string)] = [];
-                     protocols: openArray[string] = [])</a></li>
+                     protocols: openArray[string] = []; deflate: bool = false)</a></li>
+          </ul></dd>
+<dt><a name="sendHeaders" href="#sendHeaders"><span>sendHeaders:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http2conn: proc sendHeaders(res: H2Response)" href="powpow/proto/http2conn.html#sendHeaders%2CH2Response">http2conn: proc sendHeaders(res: H2Response)</a></li>
           </ul></dd>
 <dt><a name="sendMessage" href="#sendMessage"><span>sendMessage:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2775,6 +2959,10 @@
 <li><a class="reference external"
           data-doc-search-tag="tls: proc setAlpnProtocols(ctx: SslContext; protos: openArray[string])" href="powpow/net/tls.html#setAlpnProtocols%2CSslContext%2CopenArray%5Bstring%5D">tls: proc setAlpnProtocols(ctx: SslContext; protos: openArray[string])</a></li>
           </ul></dd>
+<dt><a name="setBatching" href="#setBatching"><span>setBatching:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="tcp: proc setBatching(conn: Connection; on: bool)" href="powpow/net/tcp.html#setBatching%2CConnection%2Cbool">tcp: proc setBatching(conn: Connection; on: bool)</a></li>
+          </ul></dd>
 <dt><a name="setDnsServers" href="#setDnsServers"><span>setDnsServers:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="dns: proc setDnsServers(loop: Loop; servers: openArray[(string, int)])" href="powpow/net/dns.html#setDnsServers%2CLoop%2CopenArray%5B%5D">dns: proc setDnsServers(loop: Loop; servers: openArray[(string, int)])</a></li>
@@ -2811,6 +2999,12 @@
 <li><a class="reference external"
           data-doc-search-tag="common: proc setNonBlocking(fd: SocketHandle)" href="powpow/net/common.html#setNonBlocking%2CSocketHandle">common: proc setNonBlocking(fd: SocketHandle)</a></li>
           </ul></dd>
+<dt><a name="setRecvBufferSize" href="#setRecvBufferSize"><span>setRecvBufferSize:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="common: proc setRecvBufferSize(fd: SocketHandle; bytes: int)" href="powpow/net/common.html#setRecvBufferSize%2CSocketHandle%2Cint">common: proc setRecvBufferSize(fd: SocketHandle; bytes: int)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="tcp: proc setRecvBufferSize(conn: Connection; bytes: int)" href="powpow/net/tcp.html#setRecvBufferSize%2CConnection%2Cint">tcp: proc setRecvBufferSize(conn: Connection; bytes: int)</a></li>
+          </ul></dd>
 <dt><a name="setReuseAddr" href="#setReuseAddr"><span>setReuseAddr:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc setReuseAddr(fd: SocketHandle)" href="powpow/net/common.html#setReuseAddr%2CSocketHandle">common: proc setReuseAddr(fd: SocketHandle)</a></li>
@@ -2822,6 +3016,12 @@
 <dt><a name="setSearchDomains" href="#setSearchDomains"><span>setSearchDomains:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="dns: proc setSearchDomains(loop: Loop; domains: openArray[string])" href="powpow/net/dns.html#setSearchDomains%2CLoop%2CopenArray%5Bstring%5D">dns: proc setSearchDomains(loop: Loop; domains: openArray[string])</a></li>
+          </ul></dd>
+<dt><a name="setSendBufferSize" href="#setSendBufferSize"><span>setSendBufferSize:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="common: proc setSendBufferSize(fd: SocketHandle; bytes: int)" href="powpow/net/common.html#setSendBufferSize%2CSocketHandle%2Cint">common: proc setSendBufferSize(fd: SocketHandle; bytes: int)</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="tcp: proc setSendBufferSize(conn: Connection; bytes: int)" href="powpow/net/tcp.html#setSendBufferSize%2CConnection%2Cint">tcp: proc setSendBufferSize(conn: Connection; bytes: int)</a></li>
           </ul></dd>
 <dt><a name="setTcpCork" href="#setTcpCork"><span>setTcpCork:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -2878,6 +3078,18 @@
 <dt><a name="sockWritev" href="#sockWritev"><span>sockWritev:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="common: proc sockWritev(fd: SocketHandle; iov: ptr IOVec; iovcnt: int): int" href="powpow/net/common.html#sockWritev%2CSocketHandle%2Cptr.IOVec%2Cint">common: proc sockWritev(fd: SocketHandle; iov: ptr IOVec; iovcnt: int): int</a></li>
+          </ul></dd>
+<dt><a name="SseEvent" href="#SseEvent"><span>SseEvent:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: object SseEvent" href="powpow/proto/http.html#SseEvent">http: object SseEvent</a></li>
+          </ul></dd>
+<dt><a name="SseParser" href="#SseParser"><span>SseParser:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="http: type SseParser" href="powpow/proto/http.html#SseParser">http: type SseParser</a></li>
+          </ul></dd>
+<dt><a name="SseStream" href="#SseStream"><span>SseStream:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: type SseStream" href="powpow/proto/httpserver.html#SseStream">httpserver: type SseStream</a></li>
           </ul></dd>
 <dt><a name="SslContext" href="#SslContext"><span>SslContext:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -3175,9 +3387,17 @@
           <li><a class="reference external"
           data-doc-search-tag="ws: proc start(wss: WsServer)" href="powpow/proto/ws.html#start%2CWsServer">ws: proc start(wss: WsServer)</a></li>
           </ul></dd>
+<dt><a name="startChunked" href="#startChunked"><span>startChunked:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc startChunked(res: HttpResponse; contentType: string): SseStream" href="powpow/proto/httpserver.html#startChunked%2CHttpResponse%2Cstring">httpserver: proc startChunked(res: HttpResponse; contentType: string): SseStream</a></li>
+          </ul></dd>
 <dt><a name="startClientPreface" href="#startClientPreface"><span>startClientPreface:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="http2conn: proc startClientPreface(h2: H2Conn)" href="powpow/proto/http2conn.html#startClientPreface%2CH2Conn">http2conn: proc startClientPreface(h2: H2Conn)</a></li>
+          </ul></dd>
+<dt><a name="startSse" href="#startSse"><span>startSse:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc startSse(res: HttpResponse): SseStream" href="powpow/proto/httpserver.html#startSse%2CHttpResponse">httpserver: proc startSse(res: HttpResponse): SseStream</a></li>
           </ul></dd>
 <dt><a name="startUnix" href="#startUnix"><span>startUnix:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -3208,6 +3428,10 @@
           data-doc-search-tag="ws: proc stop(wss: WsServer)" href="powpow/proto/ws.html#stop%2CWsServer">ws: proc stop(wss: WsServer)</a></li>
           <li><a class="reference external"
           data-doc-search-tag="stream: proc stop(s: IoStream)" href="powpow/stream.html#stop%2CIoStream">stream: proc stop(s: IoStream)</a></li>
+          </ul></dd>
+<dt><a name="storeResponseCookies" href="#storeResponseCookies"><span>storeResponseCookies:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpclient: proc storeResponseCookies(jar: CookieJar; url: string; res: HttpClientResponse)" href="powpow/proto/httpclient.html#storeResponseCookies%2CCookieJar%2Cstring%2CHttpClientResponse">httpclient: proc storeResponseCookies(jar: CookieJar; url: string; res: HttpClientResponse)</a></li>
           </ul></dd>
 <dt><a name="StreamClosed" href="#StreamClosed"><span>StreamClosed:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -3340,14 +3564,14 @@
             handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs;
             extraHeaders: openArray[(string, string)] = [];
             protocols: openArray[string] = []; pingIntervalMs: int = 0;
-            idleTimeoutMs: int = 0): WsConnection" href="powpow/proto/ws.html#upgradeToWs%2CConnection%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint">ws: proc upgradeToWs(conn: Connection; path: string = &quot;/&quot;; host: string = &quot;&quot;;
+            idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection" href="powpow/proto/ws.html#upgradeToWs%2CConnection%2Cstring%2Cstring%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2Cint%2CopenArray%5B%5D%2CopenArray%5Bstring%5D%2Cint%2Cint%2Cbool">ws: proc upgradeToWs(conn: Connection; path: string = &quot;/&quot;; host: string = &quot;&quot;;
             onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
             onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
             maxFrameSize: int = DefaultMaxFrameSize;
             handshakeTimeoutMs: int = DefaultHandshakeTimeoutMs;
             extraHeaders: openArray[(string, string)] = [];
             protocols: openArray[string] = []; pingIntervalMs: int = 0;
-            idleTimeoutMs: int = 0): WsConnection</a></li>
+            idleTimeoutMs: int = 0; permessageDeflate: bool = false): WsConnection</a></li>
           </ul></dd>
 <dt><a name="wake" href="#wake"><span>wake:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -3359,11 +3583,13 @@
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
                  onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
                  maxFrameSize: int = DefaultMaxFrameSize;
-                 protocols: openArray[string] = []): WsConnection" href="powpow/proto/ws.html#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2CopenArray%5Bstring%5D">ws: proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
+                 protocols: openArray[string] = []; pingIntervalMs: int = 0;
+                 permessageDeflate: bool = false): WsConnection" href="powpow/proto/ws.html#websocketUpgrade%2CHttpResponse%2CHttpRequest%2CHttpServer%2CWsOpenCb%2CWsMessageCb%2CWsCloseCb%2CWsErrorCb%2Cint%2CopenArray%5Bstring%5D%2Cint%2Cbool">ws: proc websocketUpgrade(res: HttpResponse; req: HttpRequest; server: HttpServer = nil;
                  onOpen: WsOpenCb = nil; onMessage: WsMessageCb = nil;
                  onClose: WsCloseCb = nil; onError: WsErrorCb = nil;
                  maxFrameSize: int = DefaultMaxFrameSize;
-                 protocols: openArray[string] = []): WsConnection</a></li>
+                 protocols: openArray[string] = []; pingIntervalMs: int = 0;
+                 permessageDeflate: bool = false): WsConnection</a></li>
           </ul></dd>
 <dt><a name="WindowLimit" href="#WindowLimit"><span>WindowLimit:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -3387,19 +3613,25 @@
 <li><a class="reference external"
           data-doc-search-tag="types: EventType.Write" href="powpow/types.html#Write">types: EventType.Write</a></li>
           </ul></dd>
+<dt><a name="writeChunk" href="#writeChunk"><span>writeChunk:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="httpserver: proc writeChunk(s: SseStream; data: openArray[byte])" href="powpow/proto/httpserver.html#writeChunk%2CSseStream%2CopenArray%5Bbyte%5D">httpserver: proc writeChunk(s: SseStream; data: openArray[byte])</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="httpserver: proc writeChunk(s: SseStream; data: string)" href="powpow/proto/httpserver.html#writeChunk%2CSseStream%2Cstring">httpserver: proc writeChunk(s: SseStream; data: string)</a></li>
+          </ul></dd>
 <dt><a name="writeDisposition" href="#writeDisposition"><span>writeDisposition:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="httpserver: proc writeDisposition(buf: ptr UncheckedArray[byte]; name: string; p: var int)" href="powpow/proto/httpserver.html#writeDisposition%2Cptr.UncheckedArray%5Bbyte%5D%2Cstring%2Cint">httpserver: proc writeDisposition(buf: ptr UncheckedArray[byte]; name: string; p: var int)</a></li>
           </ul></dd>
 <dt><a name="writeFrame" href="#writeFrame"><span>writeFrame:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
-          data-doc-search-tag="ws: proc writeFrame(conn: Connection; opcode: int; payload: openArray[byte])" href="powpow/proto/ws.html#writeFrame%2CConnection%2Cint%2CopenArray%5Bbyte%5D">ws: proc writeFrame(conn: Connection; opcode: int; payload: openArray[byte])</a></li>
+          data-doc-search-tag="ws: proc writeFrame(conn: Connection; opcode: int; payload: openArray[byte]; rsv1 = false)" href="powpow/proto/ws.html#writeFrame%2CConnection%2Cint%2CopenArray%5Bbyte%5D">ws: proc writeFrame(conn: Connection; opcode: int; payload: openArray[byte]; rsv1 = false)</a></li>
           </ul></dd>
 <dt><a name="writeFrameMasked" href="#writeFrameMasked"><span>writeFrameMasked:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ws: proc writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];
-                 mask: array[4, uint8])" href="powpow/proto/ws.html#writeFrameMasked%2CConnection%2Cint%2CopenArray%5Bbyte%5D%2Carray%5B%2Cuint8%5D">ws: proc writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];
-                 mask: array[4, uint8])</a></li>
+                 mask: array[4, uint8]; rsv1 = false)" href="powpow/proto/ws.html#writeFrameMasked%2CConnection%2Cint%2CopenArray%5Bbyte%5D%2Carray%5B%2Cuint8%5D">ws: proc writeFrameMasked(conn: Connection; opcode: int; payload: openArray[byte];
+                 mask: array[4, uint8]; rsv1 = false)</a></li>
           </ul></dd>
 <dt><a name="wsBinary" href="#wsBinary"><span>wsBinary:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -3421,6 +3653,20 @@
 <li><a class="reference external"
           data-doc-search-tag="ws: WsFrameKind.wsContinuation" href="powpow/proto/ws.html#wsContinuation">ws: WsFrameKind.wsContinuation</a></li>
           </ul></dd>
+<dt><a name="wsDeflate" href="#wsDeflate"><span>wsDeflate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: proc wsDeflate(data: openArray[byte]): string" href="powpow/proto/ws.html#wsDeflate%2CopenArray%5Bbyte%5D">ws: proc wsDeflate(data: openArray[byte]): string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="ws: proc wsDeflate(data: string): string" href="powpow/proto/ws.html#wsDeflate%2Cstring">ws: proc wsDeflate(data: string): string</a></li>
+          </ul></dd>
+<dt><a name="WsDeflateError" href="#WsDeflateError"><span>WsDeflateError:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: object WsDeflateError" href="powpow/proto/ws.html#WsDeflateError">ws: object WsDeflateError</a></li>
+          </ul></dd>
+<dt><a name="WsDeflateTooLarge" href="#WsDeflateTooLarge"><span>WsDeflateTooLarge:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: object WsDeflateTooLarge" href="powpow/proto/ws.html#WsDeflateTooLarge">ws: object WsDeflateTooLarge</a></li>
+          </ul></dd>
 <dt><a name="WsError" href="#WsError"><span>WsError:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ws: object WsError" href="powpow/proto/ws.html#WsError">ws: object WsError</a></li>
@@ -3432,6 +3678,12 @@
 <dt><a name="WsFrameKind" href="#WsFrameKind"><span>WsFrameKind:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
           data-doc-search-tag="ws: enum WsFrameKind" href="powpow/proto/ws.html#WsFrameKind">ws: enum WsFrameKind</a></li>
+          </ul></dd>
+<dt><a name="wsInflate" href="#wsInflate"><span>wsInflate:</span></a></dt><dd><ul class="simple">
+<li><a class="reference external"
+          data-doc-search-tag="ws: proc wsInflate(data: openArray[byte]; maxSize: int): string" href="powpow/proto/ws.html#wsInflate%2CopenArray%5Bbyte%5D%2Cint">ws: proc wsInflate(data: openArray[byte]; maxSize: int): string</a></li>
+          <li><a class="reference external"
+          data-doc-search-tag="ws: proc wsInflate(data: string; maxSize: int): string" href="powpow/proto/ws.html#wsInflate%2Cstring%2Cint">ws: proc wsInflate(data: string; maxSize: int): string</a></li>
           </ul></dd>
 <dt><a name="WsMessageCb" href="#WsMessageCb"><span>WsMessageCb:</span></a></dt><dd><ul class="simple">
 <li><a class="reference external"
@@ -3469,7 +3721,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-06 22:17:53 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:29:52 UTC</small>
       </div>
     </div>
   </div>

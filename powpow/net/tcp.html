@@ -74,6 +74,12 @@
   server*: TcpServer
   state*: ConnState
   clientIp*: string
+  batchWrites*: bool ## When true, plaintext `send`/`sendv` coalesce into `writeBuf`
+                     ## instead of issuing one syscall per call; the write watcher drains
+                     ## the backlog in bulk on the next loop pass. Opt-in via
+                     ## `setBatching` — off by default so isolated sends (e.g. REQ/REP
+                     ## lockstep) still hit the wire immediately. No effect on the
+                     ## io_uring backend yet (POSIX only for now).
   sendFileFd*: int
   sendFileOff*: int64
   sendFileRemain*: int64
@@ -270,6 +276,10 @@
 <li><a class="reference" href="#newTcpServer%2COnData%2COnAccept%2COnClose" title="newTcpServer(onData: OnData; onAccept: OnAccept = nil; onClose: OnClose = nil): TcpServer">newTcpServer(onData: OnData; onAccept: OnAccept = nil; onClose: OnClose = nil): TcpServer</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">pendingBytes
+  <li><a class="reference" href="#pendingBytes%2CConnection" title="pendingBytes(conn: Connection): int">pendingBytes(conn: Connection): int</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">refreshKtlsState
   <li><a class="reference" href="#refreshKtlsState%2CConnection" title="refreshKtlsState(conn: Connection)">refreshKtlsState(conn: Connection)</a></li>
 
@@ -300,6 +310,18 @@
   <li><a class="reference" href="#sendv%2CConnection%2CopenArray%5Btuple%5Bptr.UncheckedArray%5Bbyte%5D%2Cint%5D%5D" title="sendv(conn: Connection;
       parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int">sendv(conn: Connection;
       parts: openArray[tuple[data: ptr UncheckedArray[byte], len: int]]): int</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">setBatching
+  <li><a class="reference" href="#setBatching%2CConnection%2Cbool" title="setBatching(conn: Connection; on: bool)">setBatching(conn: Connection; on: bool)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">setRecvBufferSize
+  <li><a class="reference" href="#setRecvBufferSize%2CConnection%2Cint" title="setRecvBufferSize(conn: Connection; bytes: int)">setRecvBufferSize(conn: Connection; bytes: int)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">setSendBufferSize
+  <li><a class="reference" href="#setSendBufferSize%2CConnection%2Cint" title="setSendBufferSize(conn: Connection; bytes: int)">setSendBufferSize(conn: Connection; bytes: int)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">shutdown
@@ -371,6 +393,12 @@
   <span class="Identifier">server</span><span class="Operator">*</span><span class="Other">:</span> <a href="#TcpServer"><span class="Identifier">TcpServer</span></a>
   <span class="Identifier">state</span><span class="Operator">*</span><span class="Other">:</span> <a href="#ConnState"><span class="Identifier">ConnState</span></a>
   <span class="Identifier">clientIp</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
+  <span class="Identifier">batchWrites</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Comment">## When true, plaintext `send`/`sendv` coalesce into `writeBuf`</span>
+                     <span class="Comment">## instead of issuing one syscall per call; the write watcher drains</span>
+                     <span class="Comment">## the backlog in bulk on the next loop pass. Opt-in via</span>
+                     <span class="Comment">## `setBatching` — off by default so isolated sends (e.g. REQ/REP</span>
+                     <span class="Comment">## lockstep) still hit the wire immediately. No effect on the</span>
+                     <span class="Comment">## io_uring backend yet (POSIX only for now).</span>
   <span class="Identifier">sendFileFd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">sendFileOff</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
   <span class="Identifier">sendFileRemain</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int64</span>
@@ -892,6 +920,18 @@
 </div>
 
 </div>
+<div id="pendingBytes-procs-all">
+  <div id="pendingBytes,Connection">
+  <dt><pre><span class="Keyword">proc</span> <a href="#pendingBytes%2CConnection"><span class="Identifier">pendingBytes</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Bytes queued in userspace but not yet written to the socket — a backpressure signal (0 = fully drained). TLS ciphertext still inside the OpenSSL BIO is not visible here; plaintext queued in <tt class="docutils literal"><span class="pre"><span class="Identifier">writeBuf</span></span></tt> is.
+    
+  </dd>
+</div>
+
+</div>
 <div id="refreshKtlsState-procs-all">
   <div id="refreshKtlsState,Connection">
   <dt><pre><span class="Keyword">proc</span> <a href="#refreshKtlsState%2CConnection"><span class="Identifier">refreshKtlsState</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span> <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
@@ -988,6 +1028,42 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="setBatching-procs-all">
+  <div id="setBatching,Connection,bool">
+  <dt><pre><span class="Keyword">proc</span> <a href="#setBatching%2CConnection%2Cbool"><span class="Identifier">setBatching</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">on</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">gcsafe</span><span class="Other">,</span>
+    <span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Opts a connection into (or out of) userspace write batching. While on, plaintext <tt class="docutils literal"><span class="pre"><span class="Identifier">send</span></span></tt>/<tt class="docutils literal"><span class="pre"><span class="Identifier">sendv</span></span></tt> append to the write buffer and the backlog drains in bulk on the next loop pass instead of one syscall per call — a large win for floods, at the cost of up to one loop turn of delay per backlog. Off by default so isolated sends (e.g. REQ/REP lockstep) still hit the wire immediately. TLS and sendfile flows always take the unbatched path. Turning it off flushes eagerly; any remainder still queued finishes via the write watcher.
+    
+  </dd>
+</div>
+
+</div>
+<div id="setRecvBufferSize-procs-all">
+  <div id="setRecvBufferSize,Connection,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#setRecvBufferSize%2CConnection%2Cint"><span class="Identifier">setRecvBufferSize</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Hint the kernel receive-buffer size for this connection.
+    
+  </dd>
+</div>
+
+</div>
+<div id="setSendBufferSize-procs-all">
+  <div id="setSendBufferSize,Connection,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#setSendBufferSize%2CConnection%2Cint"><span class="Identifier">setSendBufferSize</span></a><span class="Other">(</span><span class="Identifier">conn</span><span class="Other">:</span> <a href="#Connection"><span class="Identifier">Connection</span></a><span class="Other">;</span> <span class="Identifier">bytes</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Hint the kernel send-buffer size for this connection (see <tt class="docutils literal"><span class="pre"><span class="Identifier">setSendBufferSize</span></span></tt> in net/common). Prefer modest values; an explicit size can cap autotuning. No-op when not connected.
     
   </dd>
 </div>
@@ -1103,7 +1179,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-06 22:17:52 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:29:50 UTC</small>
       </div>
     </div>
   </div>

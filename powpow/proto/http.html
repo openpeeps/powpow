@@ -116,6 +116,12 @@
   PhaseBody,                ## Reading body (if Content-Length &gt; 0)
   PhaseComplete,            ## Request fully parsed
   PhaseError                 ## Parse error occurred">ParsePhase</a></li>
+<li><a class="reference" href="#SseEvent" title="SseEvent = object
+  event*: string             ## event type (&quot;message&quot; when the `event:` field absent)
+  data*: string              ## payload lines joined with &quot;\n&quot; (no trailing newline)
+  id*: string                ## last event ID in scope (&quot;&quot; when never set)
+  retry*: int                ## reconnection time ms from `retry:` (0 when absent)">SseEvent</a></li>
+<li><a class="reference" href="#SseParser" title="SseParser = ref object">SseParser</a></li>
 
     </ul>
   </details>
@@ -153,10 +159,23 @@
 <ul class="simple nested-toc-section">feed
   <li><a class="reference" href="#feed%2CHttpParser%2CopenArray%5Bbyte%5D" title="feed(p: HttpParser; data: openArray[byte]): ParsePhase">feed(p: HttpParser; data: openArray[byte]): ParsePhase</a></li>
 <li><a class="reference" href="#feed%2CHttpParser%2Cstring" title="feed(p: HttpParser; data: string): ParsePhase">feed(p: HttpParser; data: string): ParsePhase</a></li>
+<li><a class="reference" href="#feed%2CSseParser%2CopenArray%5Bbyte%5D" title="feed(p: SseParser; data: openArray[byte]): seq[SseEvent]">feed(p: SseParser; data: openArray[byte]): seq[SseEvent]</a></li>
+<li><a class="reference" href="#feed%2CSseParser%2Cstring" title="feed(p: SseParser; data: string): seq[SseEvent]">feed(p: SseParser; data: string): seq[SseEvent]</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">finalizeCloseDelimited
   <li><a class="reference" href="#finalizeCloseDelimited%2CHttpParser" title="finalizeCloseDelimited(p: HttpParser)">finalizeCloseDelimited(p: HttpParser)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">formatSseComment
+  <li><a class="reference" href="#formatSseComment%2CopenArray%5Bchar%5D" title="formatSseComment(comment: openArray[char] = []): string">formatSseComment(comment: openArray[char] = []): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">formatSseEvent
+  <li><a class="reference" href="#formatSseEvent%2CopenArray%5Bbyte%5D%2CopenArray%5Bchar%5D%2CopenArray%5Bchar%5D%2Cint" title="formatSseEvent(data: openArray[byte]; event: openArray[char] = [];
+               id: openArray[char] = []; retry = 0): string">formatSseEvent(data: openArray[byte]; event: openArray[char] = [];
+               id: openArray[char] = []; retry = 0): string</a></li>
+<li><a class="reference" href="#formatSseEvent%2Cstring%2Cstring%2Cstring%2Cint" title="formatSseEvent(data: string; event = &quot;&quot;; id = &quot;&quot;; retry = 0): string">formatSseEvent(data: string; event = &quot;&quot;; id = &quot;&quot;; retry = 0): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getBody
@@ -198,6 +217,10 @@
 <ul class="simple nested-toc-section">getHeaderValue
   <li><a class="reference" href="#getHeaderValue%2CHttpParser%2Cstring" title="getHeaderValue(p: HttpParser; name: string): lent string">getHeaderValue(p: HttpParser; name: string): lent string</a></li>
 <li><a class="reference" href="#getHeaderValue%2CHttpRequest%2Cstring" title="getHeaderValue(req: HttpRequest; name: string): lent string">getHeaderValue(req: HttpRequest; name: string): lent string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">getHeaderValues
+  <li><a class="reference" href="#getHeaderValues%2CHttpParser%2Cstring" title="getHeaderValues(p: HttpParser; name: string): seq[string]">getHeaderValues(p: HttpParser; name: string): seq[string]</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">getHttpMinor
@@ -277,6 +300,14 @@
 </ul>
 <ul class="simple nested-toc-section">newHttpParser
   <li><a class="reference" href="#newHttpParser%2Cint" title="newHttpParser(initialBufSize = 4096): HttpParser">newHttpParser(initialBufSize = 4096): HttpParser</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">newSseParser
+  <li><a class="reference" href="#newSseParser" title="newSseParser(): SseParser">newSseParser(): SseParser</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">parseAcceptsGzip
+  <li><a class="reference" href="#parseAcceptsGzip%2CopenArray%5Bchar%5D" title="parseAcceptsGzip(v: openArray[char]): bool">parseAcceptsGzip(v: openArray[char]): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">peekAll
@@ -451,6 +482,26 @@
     
   </dd>
 </div>
+<div id="SseEvent">
+  <dt><pre><a href="#SseEvent"><span class="Identifier">SseEvent</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
+  <span class="Identifier">event</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>             <span class="Comment">## event type (&quot;message&quot; when the `event:` field absent)</span>
+  <span class="Identifier">data</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>              <span class="Comment">## payload lines joined with &quot;\n&quot; (no trailing newline)</span>
+  <span class="Identifier">id</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>                <span class="Comment">## last event ID in scope (&quot;&quot; when never set)</span>
+  <span class="Identifier">retry</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>                <span class="Comment">## reconnection time ms from `retry:` (0 when absent)</span></pre></dt>
+  <dd>
+    
+    One dispatched Server-Sent Events message (WHATWG HTML §9.2.6).
+    
+  </dd>
+</div>
+<div id="SseParser">
+  <dt><pre><a href="#SseParser"><span class="Identifier">SseParser</span></a> <span class="Other">=</span> <span class="Keyword">ref</span> <span class="Keyword">object</span></pre></dt>
+  <dd>
+    
+    Incremental SSE stream parser for the client side. Feed decoded chunk/body bytes as they arrive; complete events are returned. The last event ID persists across <tt class="docutils literal"><span class="pre"><span class="Identifier">feed</span></span></tt> calls per spec.
+    
+  </dd>
+</div>
 
   </dl>
 </div>
@@ -568,6 +619,24 @@
     
   </dd>
 </div>
+<div id="feed,SseParser,openArray[byte]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#feed%2CSseParser%2CopenArray%5Bbyte%5D"><span class="Identifier">feed</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#SseParser"><span class="Identifier">SseParser</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><a href="#SseEvent"><span class="Identifier">SseEvent</span></a><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Feed decoded stream bytes; return newly completed events. A trailing partial block stays buffered for the next <tt class="docutils literal"><span class="pre"><span class="Identifier">feed</span></span></tt>. openArray core: callers pass views, no <tt class="docutils literal"><span class="pre"><span class="Keyword">cast</span><span class="Punctuation">[</span><span class="Identifier">string</span><span class="Punctuation">]</span></span></tt> copy.
+    
+  </dd>
+</div>
+<div id="feed,SseParser,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#feed%2CSseParser%2Cstring"><span class="Identifier">feed</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#SseParser"><span class="Identifier">SseParser</span></a><span class="Other">;</span> <span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><a href="#SseEvent"><span class="Identifier">SseEvent</span></a><span class="Other">]</span> {.<span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    String wrapper: views the input, no copy before buffering.
+    
+  </dd>
+</div>
 
 </div>
 <div id="finalizeCloseDelimited-procs-all">
@@ -576,6 +645,40 @@
   <dd>
     
     For a response without Content-Length / Transfer-Encoding whose body is delimited by connection close, promote every buffered byte after the header section to the body. Call when the peer closes the connection and the response was otherwise complete.
+    
+  </dd>
+</div>
+
+</div>
+<div id="formatSseComment-procs-all">
+  <div id="formatSseComment,openArray[char]">
+  <dt><pre><span class="Keyword">proc</span> <a href="#formatSseComment%2CopenArray%5Bchar%5D"><span class="Identifier">formatSseComment</span></a><span class="Other">(</span><span class="Identifier">comment</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">char</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Format an SSE heartbeat (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span> <span class="Identifier">comment</span></span></tt>) — keeps the stream alive without dispatching an event. Multi-line comments emit one <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span></span></tt> line each. openArray core: input is viewed, never sliced — no per-line temps.
+    
+  </dd>
+</div>
+
+</div>
+<div id="formatSseEvent-procs-all">
+  <div id="formatSseEvent,openArray[byte],openArray[char],openArray[char],int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#formatSseEvent%2CopenArray%5Bbyte%5D%2CopenArray%5Bchar%5D%2CopenArray%5Bchar%5D%2Cint"><span class="Identifier">formatSseEvent</span></a><span class="Other">(</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">event</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">char</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span>
+                    <span class="Identifier">id</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">char</span><span class="Other">]</span> <span class="Other">=</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">;</span> <span class="Identifier">retry</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Format one SSE message for <tt class="docutils literal"><span class="pre"><span class="Identifier">SseStream</span><span class="Operator">.</span><span class="Identifier">sendEvent</span></span></tt> / <tt class="docutils literal"><span class="pre"><span class="Identifier">writeChunk</span></span></tt>. Multi-line <tt class="docutils literal"><span class="pre"><span class="Identifier">data</span></span></tt> emits one <tt class="docutils literal"><span class="pre"><span class="Identifier">data</span><span class="Punctuation">:</span></span></tt> line per line; the block ends with a blank line. <tt class="docutils literal"><span class="pre"><span class="Identifier">retry</span></span></tt> &lt;= 0 omits the <tt class="docutils literal"><span class="pre"><span class="Identifier">retry</span><span class="Punctuation">:</span></span></tt> field. openArray core: input is viewed, never sliced — no per-line temps.
+    
+  </dd>
+</div>
+<div id="formatSseEvent,string,string,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#formatSseEvent%2Cstring%2Cstring%2Cstring%2Cint"><span class="Identifier">formatSseEvent</span></a><span class="Other">(</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">event</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">;</span> <span class="Identifier">id</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">;</span> <span class="Identifier">retry</span> <span class="Other">=</span> <span class="DecNumber">0</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
+    <span class="Identifier">inline</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    String wrapper: views the input, no copy before formatting.
     
   </dd>
 </div>
@@ -728,6 +831,18 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="getHeaderValues-procs-all">
+  <div id="getHeaderValues,HttpParser,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#getHeaderValues%2CHttpParser%2Cstring"><span class="Identifier">getHeaderValues</span></a><span class="Other">(</span><span class="Identifier">p</span><span class="Other">:</span> <a href="#HttpParser"><span class="Identifier">HttpParser</span></a><span class="Other">;</span> <span class="Identifier">name</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    All values of header <tt class="docutils literal"><span class="pre"><span class="Identifier">name</span></span></tt> (case-insensitive ASCII), in wire order. Unlike <tt class="docutils literal"><span class="pre"><span class="Identifier">getHeaderValue</span></span></tt> (last-wins), this preserves repeats such as multiple <tt class="docutils literal"><span class="pre"><span class="Identifier">Set</span><span class="Operator">-</span><span class="Identifier">Cookie</span></span></tt> lines (which <tt class="docutils literal"><span class="pre"><span class="Identifier">getHeaders</span></span></tt> also collapses — it materializes into a Table). Empty when absent. Each value is a fresh string, safe to retain.
     
   </dd>
 </div>
@@ -987,6 +1102,29 @@
 </div>
 
 </div>
+<div id="newSseParser-procs-all">
+  <div id="newSseParser">
+  <dt><pre><span class="Keyword">proc</span> <a href="#newSseParser"><span class="Identifier">newSseParser</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <a href="#SseParser"><span class="Identifier">SseParser</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Create an empty incremental SSE parser.
+    
+  </dd>
+</div>
+
+</div>
+<div id="parseAcceptsGzip-procs-all">
+  <div id="parseAcceptsGzip,openArray[char]">
+  <dt><pre><span class="Keyword">func</span> <a href="#parseAcceptsGzip%2CopenArray%5Bchar%5D"><span class="Identifier">parseAcceptsGzip</span></a><span class="Other">(</span><span class="Identifier">v</span><span class="Other">:</span> <span class="Identifier">openArray</span><span class="Other">[</span><span class="Identifier">char</span><span class="Other">]</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    True when an <tt class="docutils literal"><span class="pre"><span class="Identifier">Accept</span><span class="Operator">-</span><span class="Identifier">Encoding</span></span></tt> header value allows gzip. Token scan with q-values: <tt class="docutils literal"><span class="pre"><span class="Identifier">gzip</span></span></tt> (or <tt class="docutils literal"><span class="pre"><span class="Operator">*</span></span></tt>) with q &gt; 0 accepts; an explicit <tt class="docutils literal"><span class="pre"><span class="Identifier">gzip</span><span class="Punctuation">;</span><span class="Identifier">q</span><span class="Operator">=</span><span class="DecNumber">0</span></span></tt> refuses even when <tt class="docutils literal"><span class="pre"><span class="Operator">*</span></span></tt> is present. Case-insensitive, whitespace-tolerant. Unparsable qvalues are treated as q=1 (lenient).
+    
+  </dd>
+</div>
+
+</div>
 <div id="peekAll-procs-all">
   <div id="peekAll,BodyStream">
   <dt><pre><span class="Keyword">proc</span> <a href="#peekAll%2CBodyStream"><span class="Identifier">peekAll</span></a><span class="Other">(</span><span class="Identifier">stream</span><span class="Other">:</span> <a href="#BodyStream"><span class="Identifier">BodyStream</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Keyword">tuple</span><span class="Other">[</span><span class="Identifier">data</span><span class="Other">:</span> <span class="Keyword">ptr</span> <span class="Identifier">UncheckedArray</span><span class="Other">[</span><span class="Identifier">byte</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">len</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">]</span> {.
@@ -1171,7 +1309,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-06 22:17:52 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-11-18 14:29:50 UTC</small>
       </div>
     </div>
   </div>
