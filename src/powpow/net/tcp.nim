@@ -165,6 +165,13 @@ type
     writePos:         int
     tlsCoalesce:      seq[byte]   ## Reused TLS sendv coalesce buffer
     corked:           bool
+    batchWrites*:     bool
+      ## When true, plaintext `send`/`sendv` coalesce into `writeBuf`
+      ## instead of issuing one syscall per call; the write watcher drains
+      ## the backlog in bulk on the next loop pass. Opt-in via
+      ## `setBatching` — off by default so isolated sends (e.g. REQ/REP
+      ## lockstep) still hit the wire immediately. No effect on the
+      ## io_uring backend yet (POSIX only for now).
     closeAfterFlush:  bool
     sendFileFd*:      int
     sendFileOff*:     int64
@@ -1297,6 +1304,14 @@ when iouEnabled:
     if conn == nil or conn.state != Connected: return 0
     conn.writeBuf.len + conn.pendingBuf.len + conn.tlsOutBuf.len +
       conn.tlsPending.len
+
+  proc setBatching*(conn: Connection, on: bool) =
+    ## Opts a connection into (or out of) userspace write batching.
+    ## On the io_uring backend sends already flow through the op pump;
+    ## this records the flag for API parity (POSIX honors it, see below).
+    conn.batchWrites = on
+    if not on:
+      discard conn.flushWriteBuffer()
 
   # ── Connection API ───────────────────────────────────────────────────────────
 
@@ -2695,6 +2710,20 @@ else:
       conn.corked = true
     conn.loop.modify(conn.fd.int, {Read, Write})
 
+  proc setBatching*(conn: Connection, on: bool) =
+    ## Opts a connection into (or out of) userspace write batching. While
+    ## on, plaintext `send`/`sendv` append to the write buffer and the
+    ## backlog drains in bulk on the next loop pass instead of one syscall
+    ## per call — a large win for floods, at the cost of up to one loop
+    ## turn of delay per backlog. Off by default so isolated sends (e.g.
+    ## REQ/REP lockstep) still hit the wire immediately. TLS and sendfile
+    ## flows always take the unbatched path. Turning it off flushes
+    ## eagerly; any remainder still queued finishes via the write watcher.
+    conn.batchWrites = on
+    if not on and conn.writeBuf.len > conn.writePos:
+      conn.corkAndWatch()
+      discard conn.flushWriteBuffer()
+
   proc send*(conn: Connection, data: openArray[byte]): int =
     if conn.state != Connected: return 0
 
@@ -2742,6 +2771,17 @@ else:
     if conn.writeBuf.len > 0:
       if not conn.queueWrite(data):
         return 0
+      return data.len
+
+    if conn.batchWrites and conn.sendFileFd < 0:
+      # Batched mode (see setBatching): coalesce instead of issuing one
+      # syscall per call. The write watcher (armed below on the
+      # empty→non-empty transition) drains the backlog in bulk.
+      let wasEmpty = conn.writeBuf.len == 0
+      if not conn.queueWrite(data):
+        return 0
+      if wasEmpty:
+        conn.corkAndWatch()
       return data.len
 
     # Direct write, draining until EAGAIN. Edge-triggered Write events only fire
@@ -2811,6 +2851,23 @@ else:
             pos = 0
       if pos > 0:
         discard conn.send(conn.tlsCoalesce.toOpenArray(0, pos - 1))
+      return totalLen
+
+    if conn.batchWrites and conn.sendFileFd < 0 and
+        conn.writeBuf.len == 0:
+      # Batched mode (see setBatching): queue instead of issuing one
+      # syscall per call. The armed watcher drains the backlog in bulk
+      # on the next loop pass.
+      conn.corkAndWatch()
+      if totalLen > MaxWriteBufferSize:
+        conn.close()
+        return 0
+      conn.writeBuf.setLen(totalLen)
+      var pos = 0
+      for part in parts:
+        if part.len > 0:
+          copyMem(addr conn.writeBuf[pos], part.data, part.len)
+          pos += part.len
       return totalLen
 
     if conn.writeBuf.len > 0:
