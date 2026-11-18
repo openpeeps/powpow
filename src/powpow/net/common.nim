@@ -742,5 +742,13 @@ proc sendFileChunk*(sockFd: SocketHandle; fileFd: int;
 
 # ── Buffer ───────────────────────────────────────────────────────────────────
 
-const DefaultBufSize* = 4096
-  ## Default read buffer size per connection.
+const powpowReadBufSize {.intdefine.} = 4096
+  ## Per-connection read buffer size (bytes), overridable with
+  ## `-d:powpowReadBufSize=N`. One recv() fills up to this much per Read
+  ## event, so the 4KB default costs one syscall per ~7 x 512B frames on
+  ## floods. `-d:powpowReadBufSize=65536` takes ~127 x 512B frames per recv
+  ## with no added latency (recv returns what is available). Only raises
+  ## memory per connection.
+
+const DefaultBufSize* = powpowReadBufSize
+  ## Default read buffer size per connection (see powpowReadBufSize).

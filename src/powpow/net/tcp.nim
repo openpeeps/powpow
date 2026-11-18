@@ -566,14 +566,14 @@ when iouEnabled:
         conn.close()
         return false
       let oldLen = conn.pendingBuf.len
-      conn.pendingBuf.setLen(oldLen + data.len)
+      conn.pendingBuf.setLenUninit(oldLen + data.len)
       copyMem(addr conn.pendingBuf[oldLen], unsafeAddr data[0], data.len)
     else:
       if conn.writeBuf.len + data.len > MaxWriteBufferSize:
         conn.close()
         return false
       let oldLen = conn.writeBuf.len
-      conn.writeBuf.setLen(oldLen + data.len)
+      conn.writeBuf.setLenUninit(oldLen + data.len)
       copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
     true
 
@@ -2500,7 +2500,7 @@ else:
       conn.close()
       return false
     let oldLen = conn.writeBuf.len
-    conn.writeBuf.setLen(oldLen + data.len)
+    conn.writeBuf.setLenUninit(oldLen + data.len)
     copyMem(addr conn.writeBuf[oldLen], unsafeAddr data[0], data.len)
     true
 
@@ -2774,7 +2774,7 @@ else:
           pos += m
         if pos < data.len:
           let remaining = data.len - pos
-          conn.writeBuf.setLen(remaining)
+          conn.writeBuf.setLenUninit(remaining)
           copyMem(addr conn.writeBuf[0], unsafeAddr data[pos], remaining)
           conn.writePos = 0
           conn.watchWritable()
@@ -2814,7 +2814,7 @@ else:
 
     if pos < data.len:
       let remaining = data.len - pos
-      conn.writeBuf.setLen(remaining)
+      conn.writeBuf.setLenUninit(remaining)
       copyMem(addr conn.writeBuf[0], unsafeAddr data[pos], remaining)
       conn.writePos = 0
       conn.corkAndWatch()
@@ -2874,7 +2874,7 @@ else:
       if totalLen > MaxWriteBufferSize:
         conn.close()
         return 0
-      conn.writeBuf.setLen(totalLen)
+      conn.writeBuf.setLenUninit(totalLen)
       var pos = 0
       for part in parts:
         if part.len > 0:
@@ -2891,7 +2891,7 @@ else:
         conn.close()
         return 0
       var pos = conn.writeBuf.len
-      conn.writeBuf.setLen(pos + totalLen)
+      conn.writeBuf.setLenUninit(pos + totalLen)
       for part in parts:
         if part.len > 0:
           copyMem(addr conn.writeBuf[pos], part.data, part.len)
