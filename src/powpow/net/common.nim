@@ -168,6 +168,8 @@ when defined(windows):
     SOL_SOCKET* = cint(0xFFFF)
     SO_REUSEADDR* = cint(0x0004)
     SO_LINGER* = cint(0x0080)
+    SO_SNDBUF* = cint(0x1001)
+    SO_RCVBUF* = cint(0x1002)
     SO_ERROR* = cint(0x1007)
     IPPROTO_TCP* = cint(6)
     TCP_NODELAY* = cint(0x0001)
