@@ -17,6 +17,7 @@
 
 import std/httpcore except HttpMethod
 import std/[strutils, oids, os]
+from std/net import IpAddress, IpAddressFamily, `$`
 import pkg/multipart
 
 import ../types
@@ -2279,6 +2280,239 @@ func parseAcceptsGzip*(v: openArray[char]): bool =
   if gzipQ >= 0.0:
     return gzipQ > 0.0
   starQ > 0.0
+
+# ── PROXY protocol ingress (haproxy) ──────────────────────────────────────────
+
+type ProxyParseResult* = enum
+  proxyNeedMore  ## prefix of a valid header; feed more bytes
+  proxyOk        ## complete header with usable addresses (consumed + srcIp)
+  proxyIgnored   ## complete header, no usable addresses (v1 UNKNOWN, v2 LOCAL
+    ## or non-TCP): consume it, keep the socket peer
+  proxyBad       ## malformed: fail closed, never feed to the HTTP parser
+
+const ProxyV1MaxLen = 107
+  ## v1 header cap including CRLF (spec). Anything longer without a newline
+  ## is garbage.
+const ProxyHoldCap* = 544
+  ## Max buffered preface (16-byte v2 header + 512 length): bounds slow-read
+  ## memory. Every valid TCP/Unix mapping fits in 16 + 216.
+
+const proxyV2Sig: array[12, byte] = [0x0D'u8, 0x0A, 0x0D, 0x0A, 0x00, 0x0D,
+  0x0A, 0x51'u8, 0x55, 0x49, 0x54, 0x0A] # \r\n\r\n\0\r\nQUIT\n
+const proxyV1Magic = "PROXY "
+
+func eqToken(data: openArray[byte]; a, b: int; s: string): bool {.inline.} =
+  ## Half-open [a, b) equals `s`.
+  if b - a != s.len:
+    return false
+  for k in 0 ..< s.len:
+    if data[a + k] != byte(s[k]):
+      return false
+  true
+
+func validV4Token(data: openArray[byte]; a, b: int): bool =
+  ## Dotted quad in [a, b), 4x 0..255.
+  var parts = 0
+  var val = 0
+  var digits = 0
+  for i in a ..< b:
+    let c = data[i]
+    if c == byte('.'):
+      if digits == 0 or val > 255:
+        return false
+      inc parts
+      val = 0
+      digits = 0
+    elif c >= byte('0') and c <= byte('9'):
+      val = val * 10 + (c.int - ord('0'))
+      inc digits
+      if digits > 3:
+        return false
+    else:
+      return false
+  parts == 3 and digits > 0 and val <= 255
+
+func validV6Token(data: openArray[byte]; a, b: int): bool =
+  ## Charset + colon check in [a, b). The preface comes from a trusted load
+  ## balancer; a full RFC 3986 parse is overkill — this rejects
+  ## log-injection shapes.
+  if b - a == 0 or b - a > 45:
+    return false
+  var colon = false
+  for i in a ..< b:
+    let c = data[i]
+    if c == byte(':'):
+      colon = true
+    elif c >= byte('0') and c <= byte('9'):
+      discard
+    elif c >= byte('a') and c <= byte('f'):
+      discard
+    elif c >= byte('A') and c <= byte('F'):
+      discard
+    elif c == byte('.'):
+      discard # v4-mapped / v4-embedded
+    else:
+      return false
+  colon
+
+func validPort(data: openArray[byte]; a, b: int): bool =
+  if b - a == 0 or b - a > 5:
+    return false
+  var v = 0
+  for i in a ..< b:
+    let c = data[i]
+    if c < byte('0') or c > byte('9'):
+      return false
+    v = v * 10 + (c.int - ord('0'))
+  v <= 65535
+
+func copyToken(data: openArray[byte]; a, b: int): string =
+  result = newString(b - a)
+  for k in 0 ..< b - a:
+    result[k] = char(data[a + k])
+
+func formatV4At(data: openArray[byte]; off: int): string =
+  ## Dotted decimal from 4 raw bytes at `off`.
+  $data[off].int & "." & $data[off + 1].int & "." &
+    $data[off + 2].int & "." & $data[off + 3].int
+
+func formatV6At(data: openArray[byte]; off: int): string =
+  ## Canonical text form from 16 raw bytes at `off` (std `$` compresses the
+  ## longest zero run; v4-mapped presents as a plain dotted quad, like
+  ## `formatIp`).
+  var raw: array[16, uint8]
+  for i in 0 ..< 16:
+    raw[i] = data[off + i].uint8
+  var mapped = true
+  for i in 0 ..< 10:
+    if raw[i] != 0:
+      mapped = false
+  if mapped and raw[10] == 0xFF'u8 and raw[11] == 0xFF'u8:
+    var a4: array[4, uint8]
+    for i in 0 ..< 4:
+      a4[i] = raw[i + 12]
+    return $IpAddress(family: IpAddressFamily.IPv4, address_v4: a4)
+  $IpAddress(family: IpAddressFamily.IPv6, address_v6: raw)
+
+func parseProxyV1(data: openArray[byte]): tuple[status: ProxyParseResult;
+    consumed: int; srcIp: string] =
+  ## `data` starts with "PROXY " (caller-checked). Finds the CRLF line,
+  ## validates the tokens, copies out the source address on success.
+  var eol = -1
+  let scanEnd = min(data.len, ProxyV1MaxLen + 1)
+  for i in 6 ..< scanEnd:
+    if data[i] == byte('\n'):
+      eol = i
+      break
+  if eol < 0:
+    if data.len > ProxyV1MaxLen:
+      return (proxyBad, 0, "")
+    return (proxyNeedMore, 0, "")
+  if eol + 1 > ProxyV1MaxLen or eol == 6 or data[eol - 1] != byte('\r'):
+    return (proxyBad, 0, "")
+  # Tokenize [6, eol-1) on single spaces (strict: no empty tokens).
+  # First token decides: UNKNOWN ignores the rest of the line per spec.
+  var i = 6
+  let bodyEnd = eol - 2 # tokenize [6, eol-1): eol-1 is the CR itself
+  var j = i
+  while j <= bodyEnd and data[j] != byte(' '):
+    inc j
+  if eqToken(data, i, j, "UNKNOWN"):
+    # Ignore everything up to the CRLF, keep the socket peer.
+    return (proxyIgnored, eol + 1, "")
+  var bounds: array[5, tuple[a, b: int]]
+  var ntok = 0
+  while i <= bodyEnd:
+    if ntok >= 5:
+      return (proxyBad, 0, "") # more than 5 tokens
+    j = i
+    while j <= bodyEnd and data[j] != byte(' '):
+      inc j
+    if j == i:
+      return (proxyBad, 0, "") # empty token (double space / leading space)
+    bounds[ntok] = (i, j)
+    inc ntok
+    i = j + 1
+  if ntok != 5:
+    return (proxyBad, 0, "")
+  let (pa, pb) = bounds[0]
+  let isV4 = eqToken(data, pa, pb, "TCP4")
+  let isV6 = eqToken(data, pa, pb, "TCP6")
+  if not isV4 and not isV6:
+    return (proxyBad, 0, "")
+  let (sa, sb) = bounds[1]
+  let (da, db) = bounds[2]
+  let (spa, spb) = bounds[3]
+  let (dpa, dpb) = bounds[4]
+  if isV4:
+    if not validV4Token(data, sa, sb) or not validV4Token(data, da, db):
+      return (proxyBad, 0, "")
+  else:
+    if not validV6Token(data, sa, sb) or not validV6Token(data, da, db):
+      return (proxyBad, 0, "")
+  if not validPort(data, spa, spb) or not validPort(data, dpa, dpb):
+    return (proxyBad, 0, "")
+  (proxyOk, eol + 1, copyToken(data, sa, sb))
+
+func parseProxyV2(data: openArray[byte]): tuple[status: ProxyParseResult;
+    consumed: int; srcIp: string] =
+  ## Binary header. `data[0]` is 0x0D (caller-checked); the signature match
+  ## is prefix-tolerant so split reads report needMore instead of bad.
+  let sigLen = min(data.len, 12)
+  for i in 0 ..< sigLen:
+    if data[i] != proxyV2Sig[i]:
+      return (proxyBad, 0, "")
+  if data.len < 12:
+    return (proxyNeedMore, 0, "")
+  if data.len < 16:
+    return (proxyNeedMore, 0, "")
+  let verCmd = data[12]
+  let famProto = data[13]
+  let alen = (data[14].int shl 8) or data[15].int
+  if (verCmd shr 4) != 0x2:
+    return (proxyBad, 0, "")
+  if alen > ProxyHoldCap - 16:
+    return (proxyBad, 0, "")
+  if data.len < 16 + alen:
+    return (proxyNeedMore, 0, "")
+  let total = 16 + alen
+  let cmd = verCmd and 0x0F
+  if cmd == 0x00:
+    return (proxyIgnored, total, "") # LOCAL: accept, ignore addresses
+  if cmd != 0x01:
+    return (proxyBad, 0, "")
+  case famProto
+  of 0x11: # TCP over IPv4: src(4) dst(4) sport(2) dport(2)
+    if alen < 12:
+      return (proxyBad, 0, "")
+    (proxyOk, total, formatV4At(data, 16))
+  of 0x21: # TCP over IPv6: src(16) dst(16) sport(2) dport(2)
+    if alen < 36:
+      return (proxyBad, 0, "")
+    (proxyOk, total, formatV6At(data, 16))
+  of 0x31, 0x32: # AF_UNIX: no IP to report
+    (proxyIgnored, total, "")
+  else:
+    (proxyBad, 0, "")
+
+func parseProxyHeader*(data: openArray[byte]): tuple[status: ProxyParseResult;
+    consumed: int; srcIp: string] =
+  ## Parse one haproxy PROXY header at the start of `data` (v1 text or v2
+  ## binary). `consumed` is the header length; `srcIp` the source address on
+  ## `proxyOk` ("" otherwise — no allocation on non-ok paths). `proxyBad`
+  ## means fail closed: never feed the bytes to the HTTP parser.
+  if data.len == 0:
+    return (proxyNeedMore, 0, "")
+  if data[0] == byte('P'):
+    if data.len < 6:
+      return (proxyNeedMore, 0, "")
+    for i in 0 ..< 6:
+      if data[i] != byte(proxyV1Magic[i]):
+        return (proxyBad, 0, "")
+    return parseProxyV1(data)
+  if data[0] == 0x0D'u8:
+    return parseProxyV2(data)
+  (proxyBad, 0, "")
 
 proc feed*(p: SseParser, data: string): seq[SseEvent] {.inline.} =
   ## String wrapper: views the input, no copy before buffering.

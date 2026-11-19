@@ -95,6 +95,10 @@ type
       ## (touched per write), and `markIdle` is deferred to stream close
     acceptsGzip: bool           ## client allows gzip (parsed once at dispatch
       ## when compression is enabled; HEAD never sets it)
+    proxyPending: bool          ## PROXY header not yet consumed (first reads
+      ## only; set when server.proxyProtocol is on)
+    proxyBuf: seq[byte]         ## held preface bytes until the header completes
+      ## (bounded by ProxyHoldCap; cleared after consumption)
 
   HttpServer* = ref object
     tcpServers*: seq[TcpServer]
@@ -149,6 +153,14 @@ type
     compressLevel*: int
       ## Gzip level 0..9 (default 6); only affects the header hint byte,
       ## the fixed-Huffman encoder ignores it.
+    proxyProtocol*: bool
+      ## Accept haproxy PROXY v1/v2 ingress (default off). When on, each new
+      ## connection must start with a PROXY header; its source address
+      ## replaces the socket peer as the client IP (logs, req.getClientIp).
+      ## Malformed prefaces get 400 + close (fail closed, never fed to the
+      ## HTTP parser). Plaintext listeners only for now: with TLS the
+      ## handshake would consume the plaintext header, so enabling both
+      ## fails the handshake.
     wsIdleTimeoutMs*: int
       ## Post-upgrade WebSocket idle timeout (ms, 0 = disabled). Applied when a
       ## route upgrades a connection via `websocketUpgrade`; closes upgraded
@@ -1694,6 +1706,7 @@ proc newHttpServer*(loop: Loop; populate: bool = true): HttpServer =
     compressEnabled: false,
     compressMinLen: 1024,
     compressLevel: 6,
+    proxyProtocol: false,
     wsIdleTimeoutMs: 0,
     timeoutSweepMs: 200,
     sweepTimer: TimerId(0)
@@ -1865,11 +1878,14 @@ proc acquireConnHttp(server: HttpServer, conn: Connection): ConnHttp =
     result.fd = conn.fd.int
     result.lastActive = monoMs()
     result.idleAfter = 0
+    result.proxyPending = server.proxyProtocol
+    result.proxyBuf.setLen(0)
   else:
     result = ConnHttp(parser: acquireParser(server))
     result.conn = conn
     result.fd = conn.fd.int
     result.lastActive = monoMs()
+    result.proxyPending = server.proxyProtocol
   # Pre-arm body streaming: when this connection's parser finishes a request's
   # headers, decide the body strategy before the first body byte is consumed
   # (see maybeArmBodyStream). Set once per connection — pooled parsers arrive
@@ -1916,6 +1932,8 @@ proc releaseConnHttp(server: HttpServer, ctx: ConnHttp) {.inline.} =
   ctx.idleAfter = 0
   ctx.streamingResponse = false
   ctx.acceptsGzip = false
+  ctx.proxyPending = false
+  ctx.proxyBuf.setLen(0)
   ctx.sessionStreamPath = ""
   ctx.streamer = nil
   # NOTE: parser released by the caller (removeSession) before this runs;
@@ -2166,6 +2184,66 @@ proc maybeArmBodyStream(server: HttpServer, ctx: ConnHttp, p: HttpParser) =
     p.onBodyThreshold = proc(pp: HttpParser) {.closure.} =
       discard server.openStreamFile(ctx, pp)
 
+# ── PROXY protocol ingress ──────────────────────────────────────────────────
+
+proc rejectBadProxy(server: HttpServer, conn: Connection) =
+  ## Fail closed on a malformed PROXY preface: 400 + close, never fed to
+  ## the HTTP parser. Session cleanup runs on the close path as usual.
+  let res = server.acquireHttpResponse(conn)
+  res.sendError(Http400)
+  server.releaseHttpResponse(res)
+
+proc consumeProxyHeader(server: HttpServer, conn: Connection, ctx: ConnHttp,
+                        data: openArray[byte]): tuple[done, inStash: bool;
+                                                     consumed: int] =
+  ## Consume the PROXY preface ahead of the HTTP parser. On `done` the caller
+  ## feeds `[consumed..]` from the stash (`inStash`) or from `data`, then
+  ## clears the stash. `done == false` = wait for more bytes, header-only
+  ## read, or the 400 was already sent (return without feeding).
+  if data.len == 0:
+    return (false, false, 0)
+  if ctx.proxyBuf.len == 0:
+    # Fast path: the preface (≤232 valid bytes) almost always arrives with
+    # the request head — parse in place, zero copy.
+    let pr = parseProxyHeader(data)
+    if pr.status == proxyNeedMore:
+      if data.len > ProxyHoldCap:
+        server.rejectBadProxy(conn)
+        return (false, false, 0)
+      for b in data:
+        ctx.proxyBuf.add(b)
+      return (false, false, 0) # possibly split: wait for the next read
+    if pr.status == proxyBad:
+      server.rejectBadProxy(conn)
+      return (false, false, 0)
+    if pr.status == proxyOk:
+      conn.clientIp = pr.srcIp
+    ctx.proxyPending = false
+    if pr.consumed >= data.len:
+      return (false, false, 0) # header only so far; the request follows
+    return (true, false, pr.consumed)
+  # Slow path: the preface was split across reads — accumulate (capped).
+  if ctx.proxyBuf.len + data.len > ProxyHoldCap:
+    ctx.proxyBuf.setLen(0)
+    server.rejectBadProxy(conn)
+    return (false, false, 0)
+  for b in data:
+    ctx.proxyBuf.add(b)
+  let pr = parseProxyHeader(ctx.proxyBuf.toOpenArray(0, ctx.proxyBuf.high))
+  if pr.status == proxyNeedMore:
+    return (false, false, 0)
+  if pr.status == proxyBad:
+    ctx.proxyBuf.setLen(0)
+    server.rejectBadProxy(conn)
+    return (false, false, 0)
+  if pr.status == proxyOk:
+    conn.clientIp = pr.srcIp
+  ctx.proxyPending = false
+  if pr.consumed >= ctx.proxyBuf.len:
+    ctx.proxyBuf.setLen(0)
+    return (false, false, 0)
+  (true, true, pr.consumed)
+
 proc handleConnectionData(server: HttpServer, conn: Connection,
                           data: openArray[byte]) =
   ## Feed incoming bytes into the per-connection parser.
@@ -2183,8 +2261,21 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
               conn.data = cast[pointer](c)
               c
   let p = ctx.parser
+  var proxyInStash = false
+  var proxyConsumed = 0
+  if ctx.proxyPending:
+    let pc = server.consumeProxyHeader(conn, ctx, data)
+    if not pc.done:
+      return # need more bytes, header-only read, or 400 already sent
+    proxyInStash = pc.inStash
+    proxyConsumed = pc.consumed
   try:
-    p.feed(data)
+    if proxyInStash:
+      p.feed(ctx.proxyBuf.toOpenArray(proxyConsumed, ctx.proxyBuf.high))
+    elif proxyConsumed > 0:
+      p.feed(data.toOpenArray(proxyConsumed, data.high))
+    else:
+      p.feed(data)
   except MultipartSizeLimitError:
     # A multipart upload exceeded a configured size limit — the shared error
     # handling below cleans up streaming state and replies 413 instead of
@@ -2200,6 +2291,11 @@ proc handleConnectionData(server: HttpServer, conn: Connection,
     # Temp-file write failed mid-stream (disk full/unlinked tmp) — reply 500;
     # the shared error handling below closes and removes the partial file.
     p.setError(Http500)
+
+  # Split-header PROXY remainder borrowed the stash: the synchronous feed is
+  # done, release it (the fast path aliases the caller's buffer instead).
+  if not ctx.proxyPending and ctx.proxyBuf.len > 0:
+    ctx.proxyBuf.setLen(0)
 
   if p.expectContinue and p.phase == PhaseBody:
     let continueResp = "HTTP/1.1 100 Continue\r\n\r\n"
